@@ -1,0 +1,32 @@
+{
+  "name": "bizzy-track-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Bizzy Track Pro Backend - Complete Business Management with RBAC/ABAC",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "business",
+    "management",
+    "rbac",
+    "abac",
+    "multi-tenant"
+  ],
+  "author": "Bizzy Track Team",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "joi": "^18.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "pg": "^8.11.3"
+  }
+}
