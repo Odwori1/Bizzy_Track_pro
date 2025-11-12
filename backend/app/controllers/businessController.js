@@ -11,7 +11,6 @@ export const businessController = {
         userAgent: req.get('User-Agent')
       });
 
-      // ⚠️ REMOVED: Don't create clientContext object
       // Validate input - USE req.body DIRECTLY
       const { error, value } = businessRegistrationSchema.validate(req.body);
       if (error) {
@@ -67,6 +66,45 @@ export const businessController = {
     }
   },
 
+  // ADD LOGIN METHOD
+  async login(req, res) {
+    try {
+      const { email, password } = req.body;
+
+      log.info('User login attempt', { email });
+
+      if (!email || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email and password are required'
+        });
+      }
+
+      const result = await businessService.loginUser(email, password);
+
+      res.json({
+        success: true,
+        message: 'Login successful',
+        data: result
+      });
+
+    } catch (error) {
+      log.error('Login controller error', error);
+      
+      if (error.message.includes('Invalid email or password')) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid email or password'
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: 'Login failed'
+      });
+    }
+  },
+
   async getProfile(req, res) {
     try {
       const businessId = req.user.businessId;
@@ -103,15 +141,10 @@ export const businessController = {
   // Get system configuration
   async getConfig(req, res) {
     try {
+      const config = await businessService.getSystemConfig();
       res.json({
         success: true,
-        data: {
-          timezones: ['Africa/Lagos', 'Africa/Accra', 'Africa/Nairobi', 'Africa/Johannesburg'],
-          currencies: ['GHS', 'NGN', 'KES', 'UGX', 'USD'],
-          features: {
-            clientTimezoneDetection: true
-          }
-        }
+        data: config
       });
     } catch (error) {
       log.error('Get config error', error);

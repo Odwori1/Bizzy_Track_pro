@@ -9,7 +9,7 @@ const router = express.Router();
 router.post('/register', businessController.register);
 router.get('/config', businessController.getConfig);
 router.post('/validate-timezone', businessController.validateTimezone);
-
+router.post('/login', businessController.login);
 // Protected route for testing security
 router.get('/profile', authenticate, setRLSContext, async (req, res) => {
   try {

@@ -9,6 +9,7 @@ import customerCategoryRoutes from './routes/customerCategoryRoutes.js';
 import customerRoutes from './routes/customerRoutes.js'; // ✅ ADD THIS IMPORT
 import serviceRoutes from './routes/serviceRoutes.js';
 import discountRuleRoutes from './routes/discountRuleRoutes.js';
+import jobRoutes from './routes/jobRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -63,7 +64,7 @@ app.use('/api/customer-categories', authenticate, setRLSContext, customerCategor
 app.use('/api/customers', authenticate, setRLSContext, customerRoutes); // ✅ ADD THIS LINE
 app.use('/api/services', authenticate, setRLSContext, serviceRoutes);
 app.use('/api/discount-rules', authenticate, setRLSContext, discountRuleRoutes);
-
+app.use('/api/jobs', authenticate, setRLSContext, jobRoutes);
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
 
