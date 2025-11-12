@@ -7,6 +7,8 @@ import logger from './middleware/logger.js';
 import businessRoutes from './routes/businessRoutes.js';
 import customerCategoryRoutes from './routes/customerCategoryRoutes.js';
 import customerRoutes from './routes/customerRoutes.js'; // ✅ ADD THIS IMPORT
+import serviceRoutes from './routes/serviceRoutes.js';
+import discountRuleRoutes from './routes/discountRuleRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -59,6 +61,8 @@ app.use('/api/businesses', businessRoutes);
 // 🔐 PROTECTED ROUTES - Add authentication and RLS context
 app.use('/api/customer-categories', authenticate, setRLSContext, customerCategoryRoutes);
 app.use('/api/customers', authenticate, setRLSContext, customerRoutes); // ✅ ADD THIS LINE
+app.use('/api/services', authenticate, setRLSContext, serviceRoutes);
+app.use('/api/discount-rules', authenticate, setRLSContext, discountRuleRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
@@ -81,6 +85,7 @@ app.use('*', (req, res) => {
       'DELETE /api/customer-categories/:id',
       'GET /api/customers', // ✅ ADD THESE
       'POST /api/customers',
+      'GET /api/services',	    
       'GET /api/customers/search',
       'GET /api/customers/:id',
       'PUT /api/customers/:id',
