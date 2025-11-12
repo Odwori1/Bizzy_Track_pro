@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import { healthCheck } from './utils/database.js';
 import logger from './middleware/logger.js';
 import businessRoutes from './routes/businessRoutes.js';
+import customerCategoryRoutes from './routes/customerCategoryRoutes.js';
+import customerRoutes from './routes/customerRoutes.js'; // ✅ ADD THIS IMPORT
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -55,9 +57,8 @@ app.get('/api/health', async (req, res) => {
 app.use('/api/businesses', businessRoutes);
 
 // 🔐 PROTECTED ROUTES - Add authentication and RLS context
-// Example protected routes (uncomment and customize as needed)
-// app.use('/api/customers', authenticate, setRLSContext, customerRoutes);
-// app.use('/api/services', authenticate, setRLSContext, serviceRoutes);
+app.use('/api/customer-categories', authenticate, setRLSContext, customerCategoryRoutes);
+app.use('/api/customers', authenticate, setRLSContext, customerRoutes); // ✅ ADD THIS LINE
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
@@ -71,8 +72,19 @@ app.use('*', (req, res) => {
     availableEndpoints: [
       'GET /api/health',
       'GET /api/businesses/config',
-      'POST /api/businesses/validate-timezone', 
-      'POST /api/businesses/register'
+      'POST /api/businesses/validate-timezone',
+      'POST /api/businesses/register',
+      'GET /api/customer-categories',
+      'POST /api/customer-categories',
+      'GET /api/customer-categories/:id',
+      'PUT /api/customer-categories/:id',
+      'DELETE /api/customer-categories/:id',
+      'GET /api/customers', // ✅ ADD THESE
+      'POST /api/customers',
+      'GET /api/customers/search',
+      'GET /api/customers/:id',
+      'PUT /api/customers/:id',
+      'DELETE /api/customers/:id'
     ]
   });
 });
