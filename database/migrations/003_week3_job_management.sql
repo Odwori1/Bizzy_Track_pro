@@ -90,3 +90,12 @@ CREATE INDEX idx_jobs_customer_id ON jobs(customer_id);
 CREATE INDEX idx_jobs_assigned_to ON jobs(assigned_to);
 CREATE INDEX idx_jobs_scheduled_date ON jobs(scheduled_date);
 CREATE INDEX idx_job_history_job_id ON job_status_history(job_id);
+
+-- ============================================================================
+-- ADD PERMISSION MANAGEMENT PERMISSION
+-- ============================================================================
+
+-- Add permission management permission to system permissions
+INSERT INTO permissions (business_id, name, category, description, resource_type, action, is_system_permission)
+VALUES
+(NULL, 'permission:manage', 'security', 'Manage user permissions and feature toggles', 'permission', 'manage', true);

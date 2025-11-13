@@ -6,10 +6,13 @@ import { healthCheck } from './utils/database.js';
 import logger from './middleware/logger.js';
 import businessRoutes from './routes/businessRoutes.js';
 import customerCategoryRoutes from './routes/customerCategoryRoutes.js';
-import customerRoutes from './routes/customerRoutes.js'; // ✅ ADD THIS IMPORT
+import customerRoutes from './routes/customerRoutes.js';
 import serviceRoutes from './routes/serviceRoutes.js';
 import discountRuleRoutes from './routes/discountRuleRoutes.js';
 import jobRoutes from './routes/jobRoutes.js';
+import userFeatureToggleRoutes from './routes/userFeatureToggleRoutes.js';
+import invoiceRoutes from './routes/invoiceRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -61,10 +64,14 @@ app.use('/api/businesses', businessRoutes);
 
 // 🔐 PROTECTED ROUTES - Add authentication and RLS context
 app.use('/api/customer-categories', authenticate, setRLSContext, customerCategoryRoutes);
-app.use('/api/customers', authenticate, setRLSContext, customerRoutes); // ✅ ADD THIS LINE
+app.use('/api/customers', authenticate, setRLSContext, customerRoutes);
 app.use('/api/services', authenticate, setRLSContext, serviceRoutes);
 app.use('/api/discount-rules', authenticate, setRLSContext, discountRuleRoutes);
 app.use('/api/jobs', authenticate, setRLSContext, jobRoutes);
+app.use('/api/user-feature-toggles', authenticate, setRLSContext, userFeatureToggleRoutes);
+app.use('/api/invoices', authenticate, setRLSContext, invoiceRoutes);
+app.use('/api/dashboard', authenticate, setRLSContext, dashboardRoutes);
+
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
 
@@ -84,13 +91,17 @@ app.use('*', (req, res) => {
       'GET /api/customer-categories/:id',
       'PUT /api/customer-categories/:id',
       'DELETE /api/customer-categories/:id',
-      'GET /api/customers', // ✅ ADD THESE
+      'GET /api/customers',
       'POST /api/customers',
-      'GET /api/services',	    
+      'GET /api/services',
       'GET /api/customers/search',
       'GET /api/customers/:id',
       'PUT /api/customers/:id',
-      'DELETE /api/customers/:id'
+      'DELETE /api/customers/:id',
+      'GET /api/dashboard/overview',
+      'GET /api/dashboard/financial-summary',
+      'GET /api/dashboard/activity-timeline',
+      'GET /api/dashboard/quick-stats'
     ]
   });
 });
