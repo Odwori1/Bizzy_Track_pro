@@ -13,6 +13,8 @@ import jobRoutes from './routes/jobRoutes.js';
 import userFeatureToggleRoutes from './routes/userFeatureToggleRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
+import demoDataRoutes from './routes/demoDataRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -84,7 +86,8 @@ app.use('/api/user-feature-toggles', userFeatureToggleRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/timezone-test', timezoneTestRoutes);
-
+app.use('/api/audit', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, auditRoutes);
+app.use('/api/demo-data', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, demoDataRoutes);
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
 
@@ -115,7 +118,14 @@ app.use('*', (req, res) => {
       'GET /api/dashboard/financial-summary',
       'GET /api/dashboard/activity-timeline',
       'GET /api/dashboard/quick-stats',
-      'GET /api/timezone-test/test'
+      'GET /api/timezone-test/test',
+      'GET /api/audit/search',
+      'GET /api/audit/summary', 
+      'GET /api/audit/recent',
+      'GET /api/audit/:id',
+      'POST /api/demo-data/generate',
+      'POST /api/demo-data/cleanup', 
+      'GET /api/demo-data/options'	    
     ]
   });
 });
