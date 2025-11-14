@@ -15,6 +15,9 @@ import invoiceRoutes from './routes/invoiceRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import demoDataRoutes from './routes/demoDataRoutes.js';
+import packageRoutes from './routes/packageRoutes.js';
+import pricingRuleRoutes from './routes/pricingRuleRoutes.js';
+import discountApprovalRoutes from './routes/discountApprovalRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -88,6 +91,10 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/timezone-test', timezoneTestRoutes);
 app.use('/api/audit', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, auditRoutes);
 app.use('/api/demo-data', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, demoDataRoutes);
+app.use('/api/packages', packageRoutes);
+app.use('/api/pricing-rules', pricingRuleRoutes);
+app.use('/api/discount-approvals', discountApprovalRoutes);
+
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
 
