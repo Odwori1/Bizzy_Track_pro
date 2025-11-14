@@ -1,0 +1,16 @@
+// Basic test to verify Jest setup works
+describe('Basic Jest Setup Test', () => {
+  test('should run basic tests', () => {
+    expect(1 + 1).toBe(2);
+  });
+
+  test('should handle async operations', async () => {
+    const result = await Promise.resolve('test');
+    expect(result).toBe('test');
+  });
+
+  test('should handle object equality', () => {
+    const obj = { name: 'test' };
+    expect(obj).toEqual({ name: 'test' });
+  });
+});
