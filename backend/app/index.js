@@ -18,6 +18,12 @@ import dashboardRoutes from './routes/dashboardRoutes.js';
 import { authenticate } from './middleware/auth.js';
 import { setRLSContext, releaseRLSContext } from './middleware/rlsContext.js';
 
+// Import timezone middleware
+import { timezoneMiddleware } from './middleware/timezone.js';
+
+// Import timezone test routes
+import timezoneTestRoutes from './routes/timezoneTestRoutes.js';
+
 // Load environment variables
 dotenv.config();
 
@@ -62,15 +68,22 @@ app.get('/api/health', async (req, res) => {
 // Public routes (no authentication required)
 app.use('/api/businesses', businessRoutes);
 
-// 🔐 PROTECTED ROUTES - Add authentication and RLS context
-app.use('/api/customer-categories', authenticate, setRLSContext, customerCategoryRoutes);
-app.use('/api/customers', authenticate, setRLSContext, customerRoutes);
-app.use('/api/services', authenticate, setRLSContext, serviceRoutes);
-app.use('/api/discount-rules', authenticate, setRLSContext, discountRuleRoutes);
-app.use('/api/jobs', authenticate, setRLSContext, jobRoutes);
-app.use('/api/user-feature-toggles', authenticate, setRLSContext, userFeatureToggleRoutes);
-app.use('/api/invoices', authenticate, setRLSContext, invoiceRoutes);
-app.use('/api/dashboard', authenticate, setRLSContext, dashboardRoutes);
+// Apply global middleware to ALL protected routes
+app.use(authenticate);
+app.use(setRLSContext);
+app.use(timezoneMiddleware.setTimezoneContext);
+app.use(timezoneMiddleware.formatResponseDates); // CRITICAL: This must be BEFORE routes
+
+// Protected routes (all get timezone context and date formatting)
+app.use('/api/customer-categories', customerCategoryRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/services', serviceRoutes);
+app.use('/api/discount-rules', discountRuleRoutes);
+app.use('/api/jobs', jobRoutes);
+app.use('/api/user-feature-toggles', userFeatureToggleRoutes);
+app.use('/api/invoices', invoiceRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/timezone-test', timezoneTestRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
@@ -101,7 +114,8 @@ app.use('*', (req, res) => {
       'GET /api/dashboard/overview',
       'GET /api/dashboard/financial-summary',
       'GET /api/dashboard/activity-timeline',
-      'GET /api/dashboard/quick-stats'
+      'GET /api/dashboard/quick-stats',
+      'GET /api/timezone-test/test'
     ]
   });
 });
