@@ -18,6 +18,9 @@ import demoDataRoutes from './routes/demoDataRoutes.js';
 import packageRoutes from './routes/packageRoutes.js';
 import pricingRuleRoutes from './routes/pricingRuleRoutes.js';
 import discountApprovalRoutes from './routes/discountApprovalRoutes.js';
+import assetRoutes from './routes/assetRoutes.js';
+import equipmentHireRoutes from './routes/equipmentHireRoutes.js';
+import businessValuationRoutes from './routes/businessValuationRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -94,6 +97,9 @@ app.use('/api/demo-data', authenticate, setRLSContext, timezoneMiddleware.setTim
 app.use('/api/packages', packageRoutes);
 app.use('/api/pricing-rules', pricingRuleRoutes);
 app.use('/api/discount-approvals', discountApprovalRoutes);
+app.use('/api/assets', assetRoutes);
+app.use('/api/equipment-hire', equipmentHireRoutes);
+app.use('/api/business-valuation', businessValuationRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);

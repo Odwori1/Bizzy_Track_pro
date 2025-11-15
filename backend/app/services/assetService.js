@@ -1,0 +1,280 @@
+import { query, getClient } from '../utils/database.js';
+import { auditLogger } from '../utils/auditLogger.js';
+import { log } from '../utils/logger.js';
+
+export class AssetService {
+  /**
+   * Create a new fixed asset
+   */
+  static async createFixedAsset(businessId, assetData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Generate asset code if not provided
+      if (!assetData.asset_code) {
+        const nextCode = await this.generateNextAssetCode(client, businessId);
+        assetData.asset_code = nextCode;
+      }
+
+      const result = await client.query(
+        `INSERT INTO fixed_assets (
+          business_id, asset_code, asset_name, category, description,
+          purchase_date, purchase_price, supplier, invoice_reference,
+          current_value, depreciation_method, depreciation_rate, useful_life_years, salvage_value,
+          location, condition_status, serial_number, model,
+          insurance_details, maintenance_schedule, last_maintenance_date, next_maintenance_date,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        RETURNING *`,
+        [
+          businessId,
+          assetData.asset_code,
+          assetData.asset_name,
+          assetData.category,
+          assetData.description || '',
+          assetData.purchase_date,
+          assetData.purchase_price,
+          assetData.supplier || '',
+          assetData.invoice_reference || '',
+          assetData.current_value || assetData.purchase_price,
+          assetData.depreciation_method || 'straight_line',
+          assetData.depreciation_rate || 0,
+          assetData.useful_life_years || 5,
+          assetData.salvage_value || 0,
+          assetData.location || '',
+          assetData.condition_status || 'excellent',
+          assetData.serial_number || '',
+          assetData.model || '',
+          assetData.insurance_details ? JSON.stringify(assetData.insurance_details) : null,
+          assetData.maintenance_schedule || 'none',
+          assetData.last_maintenance_date,
+          assetData.next_maintenance_date,
+          userId
+        ]
+      );
+
+      const asset = result.rows[0];
+
+      // Log the asset creation
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'asset.created',
+        resourceType: 'asset',
+        resourceId: asset.id,
+        newValues: {
+          asset_code: asset.asset_code,
+          asset_name: asset.asset_name,
+          category: asset.category,
+          purchase_price: asset.purchase_price
+        }
+      });
+
+      log.info('Fixed asset created', {
+        businessId,
+        userId,
+        assetId: asset.id,
+        assetCode: asset.asset_code,
+        assetName: asset.asset_name
+      });
+
+      await client.query('COMMIT');
+      return asset;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Generate next asset code (ASSET-001, ASSET-002, etc.)
+   */
+  static async generateNextAssetCode(client, businessId) {
+    const result = await client.query(
+      `SELECT asset_code FROM fixed_assets 
+       WHERE business_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [businessId]
+    );
+
+    if (result.rows.length === 0) {
+      return 'ASSET-001';
+    }
+
+    const lastCode = result.rows[0].asset_code;
+    const match = lastCode.match(/ASSET-(\d+)/);
+    
+    if (match) {
+      const nextNumber = parseInt(match[1]) + 1;
+      return `ASSET-${nextNumber.toString().padStart(3, '0')}`;
+    }
+
+    // If format doesn't match, start from 001
+    return 'ASSET-001';
+  }
+
+  /**
+   * Get all fixed assets for a business
+   */
+  static async getFixedAssets(businessId, filters = {}) {
+    try {
+      let queryStr = `
+        SELECT * FROM fixed_assets 
+        WHERE business_id = $1
+      `;
+      const params = [businessId];
+      let paramCount = 1;
+
+      if (filters.category) {
+        paramCount++;
+        queryStr += ` AND category = $${paramCount}`;
+        params.push(filters.category);
+      }
+
+      if (filters.condition_status) {
+        paramCount++;
+        queryStr += ` AND condition_status = $${paramCount}`;
+        params.push(filters.condition_status);
+      }
+
+      if (filters.is_active !== undefined) {
+        paramCount++;
+        queryStr += ` AND is_active = $${paramCount}`;
+        params.push(filters.is_active);
+      }
+
+      queryStr += ' ORDER BY created_at DESC';
+
+      const result = await query(queryStr, params);
+      return result.rows;
+    } catch (error) {
+      log.error('Error fetching fixed assets:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get asset by ID
+   */
+  static async getAssetById(businessId, assetId) {
+    try {
+      const result = await query(
+        `SELECT * FROM fixed_assets 
+         WHERE id = $1 AND business_id = $2`,
+        [assetId, businessId]
+      );
+      return result.rows[0];
+    } catch (error) {
+      log.error('Error fetching asset by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update asset details
+   */
+  static async updateAsset(businessId, assetId, updateData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      const existingAsset = await client.query(
+        'SELECT * FROM fixed_assets WHERE id = $1 AND business_id = $2',
+        [assetId, businessId]
+      );
+
+      if (!existingAsset.rows[0]) {
+        throw new Error('Asset not found');
+      }
+
+      const result = await client.query(
+        `UPDATE fixed_assets 
+         SET asset_name = COALESCE($1, asset_name),
+             category = COALESCE($2, category),
+             description = COALESCE($3, description),
+             current_value = COALESCE($4, current_value),
+             location = COALESCE($5, location),
+             condition_status = COALESCE($6, condition_status),
+             insurance_details = COALESCE($7, insurance_details),
+             maintenance_schedule = COALESCE($8, maintenance_schedule),
+             next_maintenance_date = COALESCE($9, next_maintenance_date),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $10 AND business_id = $11
+         RETURNING *`,
+        [
+          updateData.asset_name,
+          updateData.category,
+          updateData.description,
+          updateData.current_value,
+          updateData.location,
+          updateData.condition_status,
+          updateData.insurance_details ? JSON.stringify(updateData.insurance_details) : undefined,
+          updateData.maintenance_schedule,
+          updateData.next_maintenance_date,
+          assetId,
+          businessId
+        ]
+      );
+
+      const updatedAsset = result.rows[0];
+
+      // Log the asset update
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'asset.updated',
+        resourceType: 'asset',
+        resourceId: assetId,
+        newValues: updateData
+      });
+
+      log.info('Asset updated', {
+        businessId,
+        userId,
+        assetId,
+        assetName: updatedAsset.asset_name
+      });
+
+      await client.query('COMMIT');
+      return updatedAsset;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get asset statistics
+   */
+  static async getAssetStatistics(businessId) {
+    try {
+      const result = await query(
+        `SELECT 
+           COUNT(*) as total_assets,
+           COUNT(*) FILTER (WHERE is_active = true) as active_assets,
+           COUNT(*) FILTER (WHERE is_active = false) as inactive_assets,
+           SUM(current_value) as total_current_value,
+           SUM(purchase_price) as total_purchase_value,
+           AVG(current_value) as avg_asset_value,
+           COUNT(*) FILTER (WHERE next_maintenance_date <= CURRENT_DATE) as overdue_maintenance,
+           COUNT(*) FILTER (WHERE condition_status = 'poor' OR condition_status = 'broken') as poor_condition_assets
+         FROM fixed_assets 
+         WHERE business_id = $1`,
+        [businessId]
+      );
+
+      return result.rows[0];
+    } catch (error) {
+      log.error('Error fetching asset statistics:', error);
+      throw error;
+    }
+  }
+}
