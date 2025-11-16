@@ -31,6 +31,13 @@ import posRoutes from './routes/posRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import departmentRoutes from './routes/departmentRoutes.js';
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
+import workforceRoutes from './routes/workforceRoutes.js';
+import jobRoutingRoutes from './routes/jobRoutingRoutes.js';
+import fieldOperationsRoutes from './routes/fieldOperationsRoutes.js';
+import slaMonitoringRoutes from './routes/slaMonitoringRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
+import reportingRoutes from './routes/reportingRoutes.js';
+import behavioralAnalyticsRoutes from './routes/behavioralAnalyticsRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -120,6 +127,13 @@ app.use('/api/pos', posRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/job-assignments', jobAssignmentRoutes);
+app.use('/api/workforce', workforceRoutes);
+app.use('/api/job-routing', jobRoutingRoutes);
+app.use('/api/field-operations', fieldOperationsRoutes);
+app.use('/api/sla-monitoring', slaMonitoringRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/reporting', reportingRoutes);
+app.use('/api/behavioral-analytics', behavioralAnalyticsRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
