@@ -21,6 +21,16 @@ import discountApprovalRoutes from './routes/discountApprovalRoutes.js';
 import assetRoutes from './routes/assetRoutes.js';
 import equipmentHireRoutes from './routes/equipmentHireRoutes.js';
 import businessValuationRoutes from './routes/businessValuationRoutes.js';
+import inventoryRoutes from './routes/inventoryRoutes.js';
+import walletRoutes from './routes/walletRoutes.js';
+import expenseRoutes from './routes/expenseRoutes.js';
+import financialReportRoutes from './routes/financialReportRoutes.js';
+import productRoutes from './routes/productRoutes.js';
+import supplierRoutes from './routes/supplierRoutes.js';
+import posRoutes from './routes/posRoutes.js';
+import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
+import departmentRoutes from './routes/departmentRoutes.js';
+import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -100,6 +110,16 @@ app.use('/api/discount-approvals', discountApprovalRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/equipment-hire', equipmentHireRoutes);
 app.use('/api/business-valuation', businessValuationRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/wallets', walletRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/financial-reports', financialReportRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/pos', posRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/departments', departmentRoutes);
+app.use('/api/job-assignments', jobAssignmentRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
