@@ -38,6 +38,9 @@ import slaMonitoringRoutes from './routes/slaMonitoringRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import reportingRoutes from './routes/reportingRoutes.js';
 import behavioralAnalyticsRoutes from './routes/behavioralAnalyticsRoutes.js';
+import mobileRoutes from './routes/mobileRoutes.js';
+import cameraRoutes from './routes/cameraRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -134,6 +137,9 @@ app.use('/api/sla-monitoring', slaMonitoringRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reporting', reportingRoutes);
 app.use('/api/behavioral-analytics', behavioralAnalyticsRoutes);
+app.use('/api/mobile', mobileRoutes);
+app.use('/api/camera', cameraRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
