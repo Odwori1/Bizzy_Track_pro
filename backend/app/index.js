@@ -41,6 +41,15 @@ import behavioralAnalyticsRoutes from './routes/behavioralAnalyticsRoutes.js';
 import mobileRoutes from './routes/mobileRoutes.js';
 import cameraRoutes from './routes/cameraRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import branchRoutes from './routes/branchRoutes.js';
+
+// ✅ WEEK 14: API SECURITY & INTEGRATION ROUTES
+import apiKeyRoutes from './routes/apiKeyRoutes.js';
+import webhookSecurityRoutes from './routes/webhookSecurityRoutes.js';
+import externalIntegrationRoutes from './routes/externalIntegrationRoutes.js';
+import apiSecurityRoutes from './routes/apiSecurityRoutes.js';
+import externalApiRoutes from './routes/externalApiRoutes.js';
+import securityAuditRoutes from './routes/securityAuditRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
@@ -71,6 +80,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// =============================================================================
+// 🟢 PUBLIC ROUTES (No authentication required)
+// =============================================================================
+
 // Health check endpoint (public)
 app.get('/api/health', async (req, res) => {
   try {
@@ -96,7 +109,18 @@ app.get('/api/health', async (req, res) => {
 // Public routes (no authentication required)
 app.use('/api/businesses', businessRoutes);
 
-// Apply global middleware to ALL protected routes
+// =============================================================================
+// 🔵 EXTERNAL API ROUTES (API Key authentication only - NO JWT)
+// =============================================================================
+
+// External API routes use API key auth, NOT JWT - MUST be before global auth
+app.use('/api/external', externalApiRoutes);
+
+// =============================================================================
+// 🔒 PROTECTED ROUTES (JWT Authentication required)
+// =============================================================================
+
+// Apply global middleware to ALL protected routes (after external API)
 app.use(authenticate);
 app.use(setRLSContext);
 app.use(timezoneMiddleware.setTimezoneContext);
@@ -112,8 +136,8 @@ app.use('/api/user-feature-toggles', userFeatureToggleRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/timezone-test', timezoneTestRoutes);
-app.use('/api/audit', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, auditRoutes);
-app.use('/api/demo-data', authenticate, setRLSContext, timezoneMiddleware.setTimezoneContext, demoDataRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/demo-data', demoDataRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/pricing-rules', pricingRuleRoutes);
 app.use('/api/discount-approvals', discountApprovalRoutes);
@@ -140,6 +164,15 @@ app.use('/api/behavioral-analytics', behavioralAnalyticsRoutes);
 app.use('/api/mobile', mobileRoutes);
 app.use('/api/camera', cameraRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+// ✅ WEEK 14: API SECURITY & INTEGRATION PROTECTED ROUTES
+app.use('/api/api-keys', apiKeyRoutes);
+app.use('/api/webhooks', webhookSecurityRoutes);
+app.use('/api/integrations', externalIntegrationRoutes);
+app.use('/api/security', apiSecurityRoutes);
+
+app.use('/api', branchRoutes);
+app.use('/api', securityAuditRoutes);
 
 // RLS context cleanup middleware (should be after all routes)
 app.use(releaseRLSContext);
@@ -173,12 +206,31 @@ app.use('*', (req, res) => {
       'GET /api/dashboard/quick-stats',
       'GET /api/timezone-test/test',
       'GET /api/audit/search',
-      'GET /api/audit/summary', 
+      'GET /api/audit/summary',
       'GET /api/audit/recent',
       'GET /api/audit/:id',
       'POST /api/demo-data/generate',
-      'POST /api/demo-data/cleanup', 
-      'GET /api/demo-data/options'	    
+      'POST /api/demo-data/cleanup',
+      'GET /api/demo-data/options',
+      // ✅ WEEK 14: API SECURITY ENDPOINTS
+      'GET /api/external/business/profile',
+      'GET /api/external/customers',
+      'POST /api/api-keys',
+      'GET /api/api-keys',
+      'POST /api/api-keys/:apiKeyId/rotate',
+      'DELETE /api/api-keys/:apiKeyId',
+      'GET /api/api-keys/:apiKeyId/usage',
+      'POST /api/webhooks/endpoints',
+      'GET /api/webhooks/endpoints',
+      'POST /api/webhooks/verify-signature',
+      'GET /api/webhooks/endpoints/:webhookEndpointId/delivery-logs',
+      'POST /api/integrations',
+      'GET /api/integrations',
+      'PUT /api/integrations/:integrationId',
+      'POST /api/integrations/:integrationId/test',
+      'GET /api/integrations/:integrationId/activity-logs',
+      'GET /api/security/overview',
+      'GET /api/security/analytics/usage'
     ]
   });
 });
