@@ -4,13 +4,14 @@ import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { validateRequest } from '../middleware/validation.js';
-import { 
-  createSecurityScanSchema, 
-  createComplianceFrameworkSchema 
+import {
+  createSecurityScanSchema,
+  createComplianceFrameworkSchema
 } from '../schemas/securityAuditSchemas.js';
 
 const router = Router();
 
+// Apply authentication and RLS context to all routes
 router.use(authenticate, setRLSContext);
 
 // Security scans
@@ -24,6 +25,31 @@ router.get(
   '/audits/scans',
   requirePermission('security_audit:view'),
   SecurityAuditController.getSecurityScans
+);
+
+// NEW ROUTES FOR WEEK 16 COMPLETION
+router.get(
+  '/audits/metrics',
+  requirePermission('security_audit:view'),
+  SecurityAuditController.getSecurityMetrics
+);
+
+router.post(
+  '/audits/verify-audit-trail',
+  requirePermission('security_audit:run'),
+  SecurityAuditController.verifyAuditTrail
+);
+
+router.get(
+  '/audits/analytics',
+  requirePermission('security_analytics:view'),
+  SecurityAuditController.getSecurityAnalytics
+);
+
+router.post(
+  '/audits/compliance-event',
+  requirePermission('compliance:audit'),
+  SecurityAuditController.logComplianceEvent
 );
 
 // Compliance frameworks
