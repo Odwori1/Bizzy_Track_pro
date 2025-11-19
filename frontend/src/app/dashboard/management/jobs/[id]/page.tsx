@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { useJob, useJobActions } from '@/hooks/useJobs';
 import { Job } from '@/types/jobs';
+import { apiClient } from '@/lib/api';
 
 interface JobDetailPageProps {
   params: Promise<{
@@ -14,10 +16,12 @@ interface JobDetailPageProps {
 }
 
 export default function JobDetailPage({ params }: JobDetailPageProps) {
+  const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
   const { job, loading, error, refetch } = useJob(jobId || undefined);
   const { updateJobStatus } = useJobActions();
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [invoiceCreating, setInvoiceCreating] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
 
   // Unwrap the params promise
@@ -26,7 +30,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
       const unwrappedParams = await params;
       setJobId(unwrappedParams.id);
     };
-    
+
     unwrapParams();
   }, [params]);
 
@@ -41,12 +45,11 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   // Handle status update
   const handleStatusUpdate = async (newStatus: Job['status']) => {
     if (!job) return;
-    
+
     setStatusUpdating(true);
     try {
       const result = await updateJobStatus(job.id, newStatus);
       if (result.success) {
-        // Set flag to refresh data instead of calling refetch directly
         setNeedsRefresh(true);
       } else {
         alert(result.error || 'Failed to update status');
@@ -58,6 +61,46 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
     }
   };
 
+  // Handle create invoice from job
+  const handleCreateInvoice = async () => {
+    if (!job) return;
+
+    console.log('Creating invoice from job:', job);
+    
+    setInvoiceCreating(true);
+    try {
+      const invoiceData = {
+        job_id: job.id,
+        customer_id: job.customer_id,
+        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        notes: `Invoice for job: ${job.title}`,
+        terms: 'Payment due in 30 days',
+        line_items: [
+          {
+            service_id: job.service_id,
+            description: job.service_name || `Service for ${job.title}`,
+            quantity: 1,
+            unit_price: parseFloat(job.service_base_price || '0'),
+            tax_rate: 0
+          }
+        ]
+      };
+
+      console.log('Invoice data:', invoiceData);
+      const result = await apiClient.post('/invoices', invoiceData);
+      console.log('Invoice created:', result);
+      
+      if (result) {
+        router.push(`/dashboard/management/invoices/${result.id}`);
+      }
+    } catch (err: any) {
+      console.error('Invoice creation error:', err);
+      alert(err.message || 'Failed to create invoice');
+    } finally {
+      setInvoiceCreating(false);
+    }
+  };
+
   // Format date for display
   const formatDate = (dateData: any) => {
     if (!dateData) return 'Not scheduled';
@@ -65,19 +108,11 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   };
 
   if (!jobId) {
-    return (
-      <div className="flex justify-center items-center min-h-64">
-        <div className="text-gray-500">Loading job details...</div>
-      </div>
-    );
+    return <div className="flex justify-center items-center min-h-64"><div className="text-gray-500">Loading job details...</div></div>;
   }
 
   if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-64">
-        <div className="text-gray-500">Loading job details...</div>
-      </div>
-    );
+    return <div className="flex justify-center items-center min-h-64"><div className="text-gray-500">Loading job details...</div></div>;
   }
 
   if (error || !job) {
@@ -89,17 +124,13 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             <p className="text-gray-600">Unable to load job details</p>
           </div>
           <Link href="/dashboard/management/jobs">
-            <Button variant="secondary">
-              Back to Jobs
-            </Button>
+            <Button variant="secondary">Back to Jobs</Button>
           </Link>
         </div>
         <Card>
           <div className="p-6 text-center">
             <div className="text-red-600 mb-4">Error loading job: {error}</div>
-            <Button variant="primary" onClick={() => refetch()}>
-              Retry
-            </Button>
+            <Button variant="primary" onClick={() => refetch()}>Retry</Button>
           </div>
         </Card>
       </div>
@@ -115,20 +146,22 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
         </div>
         <div className="flex space-x-4">
           <Link href="/dashboard/management/jobs">
-            <Button variant="secondary">
-              Back to Jobs
-            </Button>
+            <Button variant="secondary">Back to Jobs</Button>
           </Link>
+          <Button 
+            variant="primary"
+            onClick={handleCreateInvoice}
+            disabled={invoiceCreating || job.status !== 'completed'}
+          >
+            {invoiceCreating ? 'Creating Invoice...' : 'Create Invoice'}
+          </Button>
           <Link href={`/dashboard/management/jobs/${job.id}/edit`}>
-            <Button variant="primary">
-              Edit Job
-            </Button>
+            <Button variant="primary">Edit Job</Button>
           </Link>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Job Info */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <div className="p-6">
@@ -168,7 +201,6 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
                     <div className="text-sm mt-1">{job.location || 'Not specified'}</div>
                   </div>
                 </div>
-
                 {job.description && (
                   <div>
                     <label className="text-sm font-medium text-gray-600">Description</label>
@@ -179,7 +211,6 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             </div>
           </Card>
 
-          {/* Timeline */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Job Timeline</h2>
@@ -222,9 +253,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
           </Card>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-6">
-          {/* Customer Info */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer</h2>
@@ -236,7 +265,6 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             </div>
           </Card>
 
-          {/* Service Info */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Service</h2>
@@ -247,74 +275,46 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             </div>
           </Card>
 
-          {/* Status Actions */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Update Status</h2>
               <div className="space-y-2">
                 {job.status !== 'pending' && (
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="w-full justify-start"
-                    onClick={() => handleStatusUpdate('pending')}
-                    disabled={statusUpdating}
-                  >
+                  <Button variant="secondary" size="sm" className="w-full justify-start" onClick={() => handleStatusUpdate('pending')} disabled={statusUpdating}>
                     Mark as Pending
                   </Button>
                 )}
                 {job.status !== 'in-progress' && (
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="w-full justify-start"
-                    onClick={() => handleStatusUpdate('in-progress')}
-                    disabled={statusUpdating}
-                  >
+                  <Button variant="secondary" size="sm" className="w-full justify-start" onClick={() => handleStatusUpdate('in-progress')} disabled={statusUpdating}>
                     Mark as In Progress
                   </Button>
                 )}
                 {job.status !== 'completed' && (
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="w-full justify-start"
-                    onClick={() => handleStatusUpdate('completed')}
-                    disabled={statusUpdating}
-                  >
+                  <Button variant="secondary" size="sm" className="w-full justify-start" onClick={() => handleStatusUpdate('completed')} disabled={statusUpdating}>
                     Mark as Completed
                   </Button>
                 )}
                 {job.status !== 'cancelled' && (
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="w-full justify-start"
-                    onClick={() => handleStatusUpdate('cancelled')}
-                    disabled={statusUpdating}
-                  >
+                  <Button variant="secondary" size="sm" className="w-full justify-start" onClick={() => handleStatusUpdate('cancelled')} disabled={statusUpdating}>
                     Cancel Job
                   </Button>
                 )}
               </div>
-              {statusUpdating && (
-                <div className="text-xs text-gray-500 mt-2">Updating status...</div>
-              )}
+              {statusUpdating && <div className="text-xs text-gray-500 mt-2">Updating status...</div>}
             </div>
           </Card>
 
-          {/* Quick Actions */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
               <div className="space-y-2">
-                <Button variant="secondary" size="sm" className="w-full justify-start">
-                  Assign Staff
+                <Button variant="secondary" size="sm" className="w-full justify-start">Assign Staff</Button>
+                <Button variant="secondary" size="sm" className="w-full justify-start" onClick={handleCreateInvoice} disabled={invoiceCreating || job.status !== 'completed'}>
+                  {invoiceCreating ? 'Creating Invoice...' : 'Create Invoice'}
                 </Button>
-                <Button variant="secondary" size="sm" className="w-full justify-start">
-                  Create Invoice
-                </Button>
+                {job.status !== 'completed' && <div className="text-xs text-gray-500 mt-1 text-center">Complete this job to create an invoice</div>}
               </div>
+              {invoiceCreating && <div className="text-xs text-gray-500 mt-2">Creating invoice...</div>}
             </div>
           </Card>
         </div>

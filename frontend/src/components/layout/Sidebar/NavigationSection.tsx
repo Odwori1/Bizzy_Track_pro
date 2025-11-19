@@ -26,7 +26,7 @@ export const NavigationSection: React.FC<NavigationSectionProps> = ({ title, ite
       <ul className="space-y-1">
         {items.map((item) => {
           const isActive = pathname === item.href;
-          
+
           return (
             <li key={item.name}>
               <Link

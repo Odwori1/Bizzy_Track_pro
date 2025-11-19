@@ -14,16 +14,22 @@ const navigationItems = {
   ],
   management: [
     {
-      name: 'Job Management',
-      href: '/dashboard/management/jobs',
-      icon: '🔧',
-      permission: 'job:view',
-    },
-    {
       name: 'Customer Management',
       href: '/dashboard/management/customers',
       icon: '👥',
       permission: 'customer:view',
+    },
+    {
+      name: 'Invoice Management',
+      href: '/dashboard/management/invoices',
+      icon: '🧾',
+      permission: 'invoice:view',
+    },
+    {
+      name: 'Job Management',
+      href: '/dashboard/management/jobs',
+      icon: '🔧',
+      permission: 'job:view',
     },
     {
       name: 'Service Management',

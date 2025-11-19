@@ -1,15 +1,3 @@
-export interface InvoiceLineItem {
-  id?: string;
-  service_id?: string;
-  description: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  tax_rate: number;
-  tax_amount: number;
-  service_name?: string;
-}
-
 export interface Invoice {
   id: string;
   business_id: string;
@@ -30,19 +18,17 @@ export interface Invoice {
   };
   job_id?: string;
   customer_id: string;
-  subtotal: string;
-  tax_amount: string;
-  tax_rate: string;
-  discount_amount: string;
+  customer_first_name: string;
+  customer_last_name: string;
+  customer_email: string;
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
   total_amount: string;
   amount_paid: string;
   balance_due: string;
-  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
-  payment_method?: string;
-  payment_date?: string;
+  currency: string;
+  currency_symbol: string;
   notes?: string;
   terms?: string;
-  created_by: string;
   created_at: {
     utc: string;
     local: string;
@@ -57,24 +43,20 @@ export interface Invoice {
     formatted: string;
     timestamp: number;
   };
-  customer_first_name: string;
-  customer_last_name: string;
-  customer_email: string;
-  customer_phone: string;
-  customer_company?: string;
-  job_number?: string;
-  job_title?: string;
   line_items: InvoiceLineItem[];
-  display_amounts: {
-    subtotal: string;
-    tax_amount: string;
-    discount_amount: string;
-    total_amount: string;
-    amount_paid: string;
-    balance_due: string;
-  };
-  currency: string;
-  currency_symbol: string;
+}
+
+export interface InvoiceLineItem {
+  id: string;
+  invoice_id: string;
+  service_id?: string;
+  service_name?: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  tax_rate: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateInvoiceData {
@@ -83,22 +65,23 @@ export interface CreateInvoiceData {
   due_date: string;
   notes?: string;
   terms?: string;
-  line_items: Omit<InvoiceLineItem, 'id' | 'total_price' | 'tax_amount' | 'service_name'>[];
+  line_items: Omit<InvoiceLineItem, 'id' | 'invoice_id' | 'created_at' | 'updated_at'>[];
 }
 
 export interface UpdateInvoiceStatusData {
-  status: Invoice['status'];
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
 }
 
+// FIXED: Changed from amount_paid to amount to match backend validation
 export interface RecordPaymentData {
-  amount_paid: number;
+  amount: number;
   payment_method: string;
 }
 
 export interface InvoiceFilters {
   status?: string;
+  search?: string;
   customer_id?: string;
   date_from?: string;
   date_to?: string;
-  search?: string;
 }

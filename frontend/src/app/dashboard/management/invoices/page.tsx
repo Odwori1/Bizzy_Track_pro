@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useInvoices } from '@/hooks/useInvoices';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
 
@@ -26,11 +26,16 @@ export default function InvoicesPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setFilters({ search: searchTerm });
+    setFilters({ ...filters, search: searchTerm });
   };
 
   const handleStatusFilter = (status: string) => {
     setFilters({ ...filters, status: status || undefined });
+  };
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setFilters({ ...filters, search: '' });
   };
 
   const formatCurrency = (amount: string, currencySymbol: string) => {
@@ -61,14 +66,23 @@ export default function InvoicesPage() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-4">
-            <form onSubmit={handleSearch} className="flex-1">
+            <form onSubmit={handleSearch} className="flex-1 flex gap-2">
               <Input
-                placeholder="Search invoices..."
+                placeholder="Search by invoice number, customer name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1"
               />
+              <Button type="submit" variant="primary">
+                Search
+              </Button>
+              {filters.search && (
+                <Button type="button" onClick={handleClearSearch} variant="outline">
+                  Clear
+                </Button>
+              )}
             </form>
-            
+
             <div className="flex gap-2 flex-wrap">
               <Button
                 variant={!filters.status ? 'primary' : 'outline'}
@@ -95,7 +109,7 @@ export default function InvoicesPage() {
       {/* Invoices List */}
       <Card>
         <CardHeader>
-          <CardTitle>All Invoices ({invoices.length})</CardTitle>
+          <h2 className="text-lg font-semibold text-gray-900">All Invoices ({invoices.length})</h2>
         </CardHeader>
         <CardContent>
           {invoices.length === 0 ? (
@@ -127,7 +141,7 @@ export default function InvoicesPage() {
                       Due: {invoice.due_date.formatted}
                     </p>
                   </div>
-                  
+
                   <div className="text-right">
                     <p className="font-semibold text-gray-900">
                       {formatCurrency(invoice.total_amount, invoice.currency_symbol)}

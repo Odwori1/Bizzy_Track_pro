@@ -8,7 +8,7 @@ interface InvoiceState {
   loading: boolean;
   error: string | null;
   filters: InvoiceFilters;
-  
+
   // Actions
   setFilters: (filters: InvoiceFilters) => void;
   clearFilters: () => void;
@@ -45,7 +45,7 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
         if (value) queryParams.append(key, value.toString());
       });
 
-      const endpoint = queryParams.toString() 
+      const endpoint = queryParams.toString()
         ? `/invoices?${queryParams.toString()}`
         : '/invoices';
 
@@ -72,9 +72,9 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const result = await apiClient.post<Invoice>('/invoices', data);
-      set(state => ({ 
+      set(state => ({
         invoices: [result, ...state.invoices],
-        loading: false 
+        loading: false
       }));
       return result;
     } catch (error: any) {
@@ -88,7 +88,7 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
     try {
       const result = await apiClient.patch<Invoice>(`/invoices/${id}/status`, data);
       set(state => ({
-        invoices: state.invoices.map(inv => 
+        invoices: state.invoices.map(inv =>
           inv.id === id ? result : inv
         ),
         currentInvoice: state.currentInvoice?.id === id ? result : state.currentInvoice,
@@ -103,9 +103,10 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
   recordPayment: async (id: string, data: RecordPaymentData) => {
     set({ loading: true, error: null });
     try {
-      const result = await apiClient.patch<Invoice>(`/invoices/${id}/payment`, data);
+      // FIXED: Changed from PATCH to POST and using correct field name 'amount'
+      const result = await apiClient.post<Invoice>(`/invoices/${id}/payment`, data);
       set(state => ({
-        invoices: state.invoices.map(inv => 
+        invoices: state.invoices.map(inv =>
           inv.id === id ? result : inv
         ),
         currentInvoice: state.currentInvoice?.id === id ? result : state.currentInvoice,
