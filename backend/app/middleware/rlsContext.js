@@ -1,4 +1,3 @@
-import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export const setRLSContext = async (req, res, next) => {
@@ -14,37 +13,16 @@ export const setRLSContext = async (req, res, next) => {
     });
   }
 
-  const client = await getClient();
+  // NO CLIENT CREATION HERE - services will handle this
+  // Just set the business ID on the request for services to use
   
-  try {
-    // Set the current business ID for RLS policies
-    // Use template literal since SET doesn't support parameterized queries
-    await client.query(`SET app.current_business_id = '${req.user.businessId}'`);
-    
-    // Store client in request for proper cleanup
-    req.dbClient = client;
-    
-    log.debug('RLS context set', { 
-      businessId: req.user.businessId,
-      userId: req.user.userId 
-    });
-    
-    next();
-  } catch (error) {
-    client.release();
-    log.error('RLS context setup failed', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Database security context setup failed'
-    });
-  }
-};
+  req.businessId = req.user.businessId;
+  req.userId = req.user.userId;
 
-export const releaseRLSContext = (req, res, next) => {
-  // Release database client after request
-  if (req.dbClient) {
-    req.dbClient.release();
-    delete req.dbClient;
-  }
+  log.debug('RLS context prepared', {
+    businessId: req.user.businessId,
+    userId: req.user.userId
+  });
+
   next();
 };

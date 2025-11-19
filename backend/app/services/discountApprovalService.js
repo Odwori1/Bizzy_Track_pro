@@ -71,8 +71,9 @@ export class DiscountApprovalService {
   }
 
   static async getPendingApprovals(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT da.*,
                 u.full_name as requested_by_name,
                 j.job_number,
@@ -89,12 +90,15 @@ export class DiscountApprovalService {
     } catch (error) {
       log.error('Error fetching pending approvals:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   static async getApprovalById(businessId, approvalId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT da.*,
                 u.full_name as requested_by_name,
                 j.job_number,
@@ -112,6 +116,8 @@ export class DiscountApprovalService {
     } catch (error) {
       log.error('Error fetching approval by ID:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -181,6 +187,7 @@ export class DiscountApprovalService {
   }
 
   static async getApprovalHistory(businessId, filters = {}) {
+    const client = await getClient();
     try {
       let queryStr = `
         SELECT da.*,
@@ -215,13 +222,13 @@ export class DiscountApprovalService {
 
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
-      const result = await query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+      const result = await client.query(queryStr, params);
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getApprovalHistory:', {
@@ -230,6 +237,8 @@ export class DiscountApprovalService {
         filters
       });
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -244,8 +253,9 @@ export class DiscountApprovalService {
   }
 
   static async getApprovalStats(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT
            status,
            COUNT(*) as count,
@@ -260,6 +270,8 @@ export class DiscountApprovalService {
     } catch (error) {
       log.error('Error fetching approval stats:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 }

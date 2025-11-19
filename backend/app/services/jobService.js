@@ -1,32 +1,51 @@
 import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 import { auditLogger } from '../utils/auditLogger.js';
+import { withPerformanceLogging } from '../utils/performance.js';
+
+// Helper function to set RLS context on a client
+const setRLSContext = async (client, businessId, userId) => {
+  // SET command doesn't support parameterized queries, so we use template literals
+  // But we MUST validate the input to prevent SQL injection
+  if (!businessId || typeof businessId !== 'string') {
+    throw new Error('Invalid businessId for RLS context');
+  }
+  
+  // Use template literal for SET command (parameterized queries not supported)
+  await client.query(`SET app.current_business_id = '${businessId}'`);
+  
+  if (userId && typeof userId === 'string') {
+    await client.query(`SET app.current_user_id = '${userId}'`);
+  }
+};
 
 export const jobService = {
   async createJob(jobData, userId, businessId) {
     const client = await getClient();
-
     try {
+      // SET RLS CONTEXT FIRST
+      await setRLSContext(client, businessId, userId);
+      
       await client.query('BEGIN');
 
       // Get service details for pricing
       const serviceQuery = `
-        SELECT base_price, name 
-        FROM services 
+        SELECT base_price, name
+        FROM services
         WHERE id = $1 AND business_id = $2
       `;
       const serviceResult = await client.query(serviceQuery, [jobData.service_id, businessId]);
-      
+
       if (serviceResult.rows.length === 0) {
         throw new Error('Service not found');
       }
 
       const service = serviceResult.rows[0];
-      
+
       // Generate job number (BUS-001, etc.)
       const jobNumberQuery = `
-        SELECT COUNT(*) as job_count 
-        FROM jobs 
+        SELECT COUNT(*) as job_count
+        FROM jobs
         WHERE business_id = $1
       `;
       const countResult = await client.query(jobNumberQuery, [businessId]);
@@ -103,7 +122,11 @@ export const jobService = {
   },
 
   async getAllJobs(businessId, options = {}) {
+    const client = await getClient();
     try {
+      // SET RLS CONTEXT FIRST
+      await setRLSContext(client, businessId);
+      
       let selectQuery = `
         SELECT
           j.*,
@@ -140,7 +163,7 @@ export const jobService = {
 
       selectQuery += ` ORDER BY j.created_at DESC`;
 
-      const result = await query(selectQuery, values);
+      const result = await client.query(selectQuery, values);
 
       log.debug('Fetched jobs', {
         businessId,
@@ -152,11 +175,17 @@ export const jobService = {
     } catch (error) {
       log.error('Failed to fetch jobs', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
   async getJobById(id, businessId) {
+    const client = await getClient();
     try {
+      // SET RLS CONTEXT FIRST
+      await setRLSContext(client, businessId);
+      
       const selectQuery = `
         SELECT
           j.*,
@@ -166,27 +195,15 @@ export const jobService = {
           c.phone as customer_phone,
           s.name as service_name,
           s.base_price as service_base_price,
-          u.full_name as assigned_to_name,
-          json_agg(
-            json_build_object(
-              'from_status', jsh.from_status,
-              'to_status', jsh.to_status,
-              'changed_by', uc.full_name,
-              'created_at', jsh.created_at,
-              'notes', jsh.notes
-            ) ORDER BY jsh.created_at
-          ) as status_history
+          u.full_name as assigned_to_name
         FROM jobs j
         LEFT JOIN customers c ON j.customer_id = c.id
         LEFT JOIN services s ON j.service_id = s.id
         LEFT JOIN users u ON j.assigned_to = u.id
-        LEFT JOIN job_status_history jsh ON j.id = jsh.job_id
-        LEFT JOIN users uc ON jsh.changed_by = uc.id
         WHERE j.id = $1 AND j.business_id = $2
-        GROUP BY j.id, c.first_name, c.last_name, c.email, c.phone, s.name, s.base_price, u.full_name
       `;
 
-      const result = await query(selectQuery, [id, businessId]);
+      const result = await client.query(selectQuery, [id, businessId]);
       const job = result.rows[0] || null;
 
       if (job) {
@@ -199,13 +216,15 @@ export const jobService = {
     } catch (error) {
       log.error('Failed to fetch job by ID', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
   async updateJobStatus(id, statusData, userId, businessId) {
     const client = await getClient();
-
     try {
+      await setRLSContext(client, businessId, userId);
       await client.query('BEGIN');
 
       // Get current job status
@@ -215,7 +234,7 @@ export const jobService = {
       }
 
       const updateQuery = `
-        UPDATE jobs 
+        UPDATE jobs
         SET status = $1, updated_at = CURRENT_TIMESTAMP
         WHERE id = $2 AND business_id = $3
         RETURNING *
@@ -230,10 +249,10 @@ export const jobService = {
         VALUES ($1, $2, $3, $4, $5)
       `;
       await client.query(statusHistoryQuery, [
-        id, 
-        currentJob.status, 
-        statusData.status, 
-        userId, 
+        id,
+        currentJob.status,
+        statusData.status,
+        userId,
         statusData.notes || ''
       ]);
 
@@ -278,8 +297,9 @@ export const jobService = {
 
   async updateJob(id, jobData, userId, businessId) {
     const client = await getClient();
-
     try {
+      await setRLSContext(client, businessId, userId);
+      
       // First get the current values for audit logging
       const currentJob = await this.getJobById(id, businessId);
       if (!currentJob) {
@@ -369,8 +389,9 @@ export const jobService = {
 
   async deleteJob(id, userId, businessId) {
     const client = await getClient();
-
     try {
+      await setRLSContext(client, businessId, userId);
+      
       // First get the current values for audit logging
       const currentJob = await this.getJobById(id, businessId);
       if (!currentJob) {
@@ -380,7 +401,7 @@ export const jobService = {
       await client.query('BEGIN');
 
       const deleteQuery = `
-        DELETE FROM jobs 
+        DELETE FROM jobs
         WHERE id = $1 AND business_id = $2
         RETURNING *
       `;

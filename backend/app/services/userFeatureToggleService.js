@@ -11,22 +11,22 @@ export const userFeatureToggleService = {
 
       // Verify user belongs to the same business
       const userCheckQuery = `
-        SELECT id FROM users 
+        SELECT id FROM users
         WHERE id = $1 AND business_id = $2
       `;
       const userCheckResult = await client.query(userCheckQuery, [toggleData.user_id, businessId]);
-      
+
       if (userCheckResult.rows.length === 0) {
         throw new Error('User not found in business');
       }
 
       // Verify permission belongs to the same business
       const permissionCheckQuery = `
-        SELECT id FROM permissions 
+        SELECT id FROM permissions
         WHERE id = $1 AND business_id = $2
       `;
       const permissionCheckResult = await client.query(permissionCheckQuery, [toggleData.permission_id, businessId]);
-      
+
       if (permissionCheckResult.rows.length === 0) {
         throw new Error('Permission not found in business');
       }
@@ -83,9 +83,10 @@ export const userFeatureToggleService = {
   },
 
   async getUserFeatureToggles(userId, businessId) {
+    const client = await getClient();
     try {
       const selectQuery = `
-        SELECT 
+        SELECT
           uft.*,
           p.name as permission_name,
           p.category as permission_category,
@@ -101,7 +102,7 @@ export const userFeatureToggleService = {
         ORDER BY uft.granted_at DESC
       `;
 
-      const result = await query(selectQuery, [userId, businessId]);
+      const result = await client.query(selectQuery, [userId, businessId]);
 
       log.debug('Fetched user feature toggles', {
         userId,
@@ -113,6 +114,8 @@ export const userFeatureToggleService = {
     } catch (error) {
       log.error('Failed to fetch user feature toggles', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
@@ -128,7 +131,7 @@ export const userFeatureToggleService = {
         WHERE uft.id = $1 AND u.business_id = $2
       `;
       const currentResult = await client.query(currentToggleQuery, [toggleId, businessId]);
-      
+
       if (currentResult.rows.length === 0) {
         throw new Error('User feature toggle not found');
       }
@@ -218,7 +221,7 @@ export const userFeatureToggleService = {
         WHERE uft.id = $1 AND u.business_id = $2
       `;
       const currentResult = await client.query(currentToggleQuery, [toggleId, businessId]);
-      
+
       if (currentResult.rows.length === 0) {
         throw new Error('User feature toggle not found');
       }
@@ -228,7 +231,7 @@ export const userFeatureToggleService = {
       await client.query('BEGIN');
 
       const deleteQuery = `
-        DELETE FROM user_feature_toggles 
+        DELETE FROM user_feature_toggles
         WHERE id = $1
         RETURNING *
       `;
@@ -266,38 +269,39 @@ export const userFeatureToggleService = {
   },
 
   async checkUserPermissionWithConditions(userId, permissionName, context = {}) {
+    const client = await getClient();
     try {
       const permissionCheckQuery = `
-        SELECT 
+        SELECT
           uft.is_allowed,
           uft.conditions,
           uft.expires_at,
           p.name as permission_name
         FROM user_feature_toggles uft
         JOIN permissions p ON uft.permission_id = p.id
-        WHERE uft.user_id = $1 
+        WHERE uft.user_id = $1
           AND p.name = $2
           AND (uft.expires_at IS NULL OR uft.expires_at > NOW())
         LIMIT 1
       `;
 
-      const result = await query(permissionCheckQuery, [userId, permissionName]);
-      
+      const result = await client.query(permissionCheckQuery, [userId, permissionName]);
+
       if (result.rows.length === 0) {
         return null; // No specific toggle for this permission
       }
 
       const toggle = result.rows[0];
-      
+
       // Apply ABAC conditions if they exist
       if (toggle.conditions) {
         const conditions = toggle.conditions;
-        
+
         // Time restriction check (e.g., "9-17" for business hours)
         if (conditions.time_restriction && context.currentTime) {
           const [startHour, endHour] = conditions.time_restriction.split('-').map(Number);
           const currentHour = new Date(context.currentTime).getHours();
-          
+
           if (currentHour < startHour || currentHour >= endHour) {
             return { is_allowed: false, reason: 'outside_business_hours' };
           }
@@ -323,6 +327,8 @@ export const userFeatureToggleService = {
     } catch (error) {
       log.error('User permission condition check failed', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 };

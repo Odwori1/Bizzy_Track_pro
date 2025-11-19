@@ -1,0 +1,266 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import Link from 'next/link';
+import { useJobs } from '@/hooks/useJobs';
+import { useJobActions } from '@/hooks/useJobs';
+import { Job, JobFilters } from '@/types/jobs';
+import { getJobStats, JobStats } from '@/lib/jobStats';
+
+export default function JobsPage() {
+  const [stats, setStats] = useState<JobStats>({
+    total: 0,
+    pending: 0,
+    scheduled: 0,
+    inProgress: 0,
+    completed: 0,
+    cancelled: 0
+  });
+  const [filters, setFilters] = useState<JobFilters>({});
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { jobs, loading, error, refetch } = useJobs(filters);
+  const { deleteJob } = useJobActions();
+
+  // Load job statistics
+  useEffect(() => {
+    const loadStats = async () => {
+      const jobStats = await getJobStats();
+      setStats(jobStats);
+    };
+    loadStats();
+  }, [jobs]); // Re-fetch stats when jobs change
+
+  // Handle filter changes
+  const handleStatusFilter = (status: string) => {
+    if (status === 'all') {
+      setFilters({});
+    } else {
+      setFilters({ ...filters, status: status as Job['status'] });
+    }
+  };
+
+  // Handle search
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Note: Backend doesn't support search yet, so we'll filter client-side for now
+  };
+
+  // Handle job deletion
+  const handleDeleteJob = async (jobId: string) => {
+    if (confirm('Are you sure you want to delete this job?')) {
+      const result = await deleteJob(jobId);
+      if (result.success) {
+        refetch();
+      } else {
+        alert(result.error);
+      }
+    }
+  };
+
+  // Filter jobs client-side for search (until backend supports search)
+  // FIXED: Added safe property access to prevent undefined errors
+  const filteredJobs = jobs.filter(job => {
+    const searchLower = searchTerm.toLowerCase();
+    
+    return (
+      (job.title?.toLowerCase() || '').includes(searchLower) ||
+      (job.customerFirstName?.toLowerCase() || '').includes(searchLower) ||
+      (job.customerLastName?.toLowerCase() || '').includes(searchLower) ||
+      (job.jobNumber?.toLowerCase() || '').includes(searchLower)
+    );
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Job Management</h1>
+          <p className="text-gray-600">Manage and track all jobs</p>
+        </div>
+        <Link href="/dashboard/management/jobs/new">
+          <Button variant="primary" size="lg">
+            Create New Job
+          </Button>
+        </Link>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card>
+          <div className="p-6">
+            <h3 className="text-sm font-medium text-gray-600">Total Jobs</h3>
+            <div className="text-2xl font-bold mt-2">{stats.total}</div>
+            <p className="text-sm text-gray-600">All time</p>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-6">
+            <h3 className="text-sm font-medium text-gray-600">In Progress</h3>
+            <div className="text-2xl font-bold text-blue-600 mt-2">{stats.inProgress}</div>
+            <p className="text-sm text-gray-600">Active jobs</p>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-6">
+            <h3 className="text-sm font-medium text-gray-600">Pending</h3>
+            <div className="text-2xl font-bold text-yellow-600 mt-2">{stats.pending}</div>
+            <p className="text-sm text-gray-600">Awaiting action</p>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-6">
+            <h3 className="text-sm font-medium text-gray-600">Completed</h3>
+            <div className="text-2xl font-bold text-green-600 mt-2">{stats.completed}</div>
+            <p className="text-sm text-gray-600">Finished jobs</p>
+          </div>
+        </Card>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex flex-wrap gap-4">
+        <Link href="/dashboard/management/jobs/board">
+          <Button variant="secondary">
+            📊 View Kanban Board
+          </Button>
+        </Link>
+        <Link href="/dashboard/management/jobs/calendar">
+          <Button variant="secondary">
+            🗓️ View Calendar
+          </Button>
+        </Link>
+      </div>
+
+      {/* Jobs List */}
+      <Card>
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">
+              {filters.status ? `${filters.status} Jobs` : 'All Jobs'}
+              {loading && <span className="text-sm text-gray-500 ml-2">Loading...</span>}
+            </h2>
+            <div className="flex space-x-2">
+              <select
+                className="text-sm border border-gray-300 rounded-md px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={filters.status || 'all'}
+                onChange={(e) => handleStatusFilter(e.target.value)}
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="in-progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <form onSubmit={handleSearch} className="flex">
+                <Input
+                  type="text"
+                  placeholder="Search jobs..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="text-sm w-48"
+                />
+              </form>
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+              <div className="text-red-800 text-sm">{error}</div>
+              <Button variant="secondary" size="sm" onClick={refetch} className="mt-2">
+                Retry
+              </Button>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {filteredJobs.map((job) => (
+              <div key={job.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                <div className="flex items-center space-x-4 flex-1">
+                  <div className={`w-3 h-3 rounded-full ${
+                    job.status === 'completed' ? 'bg-green-500' :
+                    job.status === 'in-progress' ? 'bg-blue-500' :
+                    job.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
+                  }`} />
+                  <div className="flex-1">
+                    <Link href={`/dashboard/management/jobs/${job.id}`}>
+                      <div className="font-medium hover:text-blue-600 cursor-pointer">
+                        {job.title}
+                      </div>
+                    </Link>
+                    <div className="text-sm text-gray-600">
+                      {job.customerFirstName} {job.customerLastName} • {job.serviceName}
+                    </div>
+                    <div className="flex space-x-2 mt-1">
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        job.priority === 'high' ? 'bg-red-100 text-red-800' :
+                        job.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {job.priority}
+                      </span>
+                      <span className="text-xs text-gray-500">#{job.jobNumber}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-medium">
+                    {job.scheduledDate ? job.scheduledDate.formatted : 'Not scheduled'}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {job.estimatedDurationMinutes || 'Unknown'} min
+                  </div>
+                  <div className="flex space-x-2 mt-2">
+                    <Link href={`/dashboard/management/jobs/${job.id}`}>
+                      <Button variant="secondary" size="sm">
+                        View
+                      </Button>
+                    </Link>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handleDeleteJob(job.id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Show message if no jobs */}
+            {!loading && filteredJobs.length === 0 && (
+              <div className="text-center py-8">
+                <div className="text-gray-500 text-lg mb-2">
+                  {searchTerm ? 'No jobs match your search' : 'No jobs found'}
+                </div>
+                <p className="text-gray-600 mb-4">
+                  {searchTerm ? 'Try adjusting your search terms' : 'Get started by creating your first job'}
+                </p>
+                {!searchTerm && (
+                  <Link href="/dashboard/management/jobs/new">
+                    <Button variant="primary">
+                      Create Your First Job
+                    </Button>
+                  </Link>
+                )}
+              </div>
+            )}
+
+            {/* Loading state */}
+            {loading && (
+              <div className="text-center py-8">
+                <div className="text-gray-500 text-lg">Loading jobs...</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}

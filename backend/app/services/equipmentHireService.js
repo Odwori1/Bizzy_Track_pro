@@ -159,9 +159,9 @@ export class EquipmentHireService {
    */
   static async generateNextBookingNumber(client, businessId) {
     const result = await client.query(
-      `SELECT booking_number FROM equipment_hire_bookings 
-       WHERE business_id = $1 
-       ORDER BY created_at DESC 
+      `SELECT booking_number FROM equipment_hire_bookings
+       WHERE business_id = $1
+       ORDER BY created_at DESC
        LIMIT 1`,
       [businessId]
     );
@@ -172,7 +172,7 @@ export class EquipmentHireService {
 
     const lastNumber = result.rows[0].booking_number;
     const match = lastNumber.match(/HIRE-(\d+)/);
-    
+
     if (match) {
       const nextNumber = parseInt(match[1]) + 1;
       return `HIRE-${nextNumber.toString().padStart(3, '0')}`;
@@ -185,36 +185,42 @@ export class EquipmentHireService {
    * Calculate hire amount based on period and rate
    */
   static async calculateHireAmount(equipmentAssetId, startDate, endDate, customRate = null) {
-    const equipment = await query(
-      'SELECT hire_rate_per_day FROM equipment_assets WHERE id = $1',
-      [equipmentAssetId]
-    );
+    const client = await getClient();
+    try {
+      const equipment = await client.query(
+        'SELECT hire_rate_per_day FROM equipment_assets WHERE id = $1',
+        [equipmentAssetId]
+      );
 
-    if (!equipment.rows[0]) {
-      throw new Error('Equipment asset not found');
+      if (!equipment.rows[0]) {
+        throw new Error('Equipment asset not found');
+      }
+
+      const dailyRate = customRate || equipment.rows[0].hire_rate_per_day;
+
+      // Calculate days between dates
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+
+      return dailyRate * days;
+    } finally {
+      client.release();
     }
-
-    const dailyRate = customRate || equipment.rows[0].hire_rate_per_day;
-
-    // Calculate days between dates
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-
-    return dailyRate * days;
   }
 
   /**
    * Get available equipment for hire
    */
   static async getAvailableEquipment(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT ea.*, fa.asset_name, fa.asset_code, fa.condition_status
          FROM equipment_assets ea
          JOIN fixed_assets fa ON ea.asset_id = fa.id
-         WHERE ea.business_id = $1 
-           AND ea.is_available = true 
+         WHERE ea.business_id = $1
+           AND ea.is_available = true
            AND ea.is_hireable = true
            AND fa.is_active = true
          ORDER BY fa.asset_name`,
@@ -224,6 +230,8 @@ export class EquipmentHireService {
     } catch (error) {
       log.error('Error fetching available equipment:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -231,8 +239,9 @@ export class EquipmentHireService {
    * Get all equipment assets
    */
   static async getAllEquipment(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT ea.*, fa.asset_name, fa.asset_code, fa.condition_status, fa.current_value
          FROM equipment_assets ea
          JOIN fixed_assets fa ON ea.asset_id = fa.id
@@ -244,6 +253,8 @@ export class EquipmentHireService {
     } catch (error) {
       log.error('Error fetching equipment:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -251,9 +262,10 @@ export class EquipmentHireService {
    * Get hire bookings
    */
   static async getHireBookings(businessId, status = null) {
+    const client = await getClient();
     try {
       let queryStr = `
-        SELECT ehb.*, 
+        SELECT ehb.*,
                ea.asset_id,
                fa.asset_name,
                fa.asset_code,
@@ -266,21 +278,23 @@ export class EquipmentHireService {
         LEFT JOIN jobs j ON ehb.job_id = j.id
         WHERE ehb.business_id = $1
       `;
-      
+
       const params = [businessId];
-      
+
       if (status) {
         queryStr += ` AND ehb.status = $2`;
         params.push(status);
       }
-      
+
       queryStr += ` ORDER BY ehb.created_at DESC`;
 
-      const result = await query(queryStr, params);
+      const result = await client.query(queryStr, params);
       return result.rows;
     } catch (error) {
       log.error('Error fetching hire bookings:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -288,9 +302,10 @@ export class EquipmentHireService {
    * Get hire statistics
    */
   static async getHireStatistics(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            COUNT(*) as total_bookings,
            COUNT(*) FILTER (WHERE status = 'active') as active_bookings,
            COUNT(*) FILTER (WHERE status = 'completed') as completed_bookings,
@@ -298,7 +313,7 @@ export class EquipmentHireService {
            SUM(total_amount) as total_revenue,
            AVG(total_amount) as avg_booking_value,
            COUNT(*) FILTER (WHERE actual_return_date IS NULL AND hire_end_date < CURRENT_DATE) as overdue_bookings
-         FROM equipment_hire_bookings 
+         FROM equipment_hire_bookings
          WHERE business_id = $1`,
         [businessId]
       );
@@ -307,6 +322,8 @@ export class EquipmentHireService {
     } catch (error) {
       log.error('Error fetching hire statistics:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 }

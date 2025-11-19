@@ -9,13 +9,9 @@ export interface User {
 }
 
 export interface AuthResponse {
-  success: boolean;
-  message: string;
-  data: {
-    user: User;
-    token: string;
-    refreshToken: string;
-  };
+  user: User;
+  token: string;
+  refreshToken: string;
 }
 
 export interface LoginData {

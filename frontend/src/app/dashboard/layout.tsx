@@ -1,56 +1,50 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-import { Loading } from '@/components/ui/Loading';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { Header } from '@/components/layout/Header';
 
-export default function DashboardLayout({
-  children,
-}: {
+interface DashboardLayoutProps {
   children: React.ReactNode;
-}) {
-  const { isAuthenticated, checkAuth, isLoading } = useAuth();
-  const [authChecked, setAuthChecked] = useState(false);
+}
+
+export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    const verifyAuth = async () => {
-      await checkAuth();
-      setAuthChecked(true);
-    };
-    
-    verifyAuth();
-  }, [checkAuth]);
-
-  useEffect(() => {
-    if (authChecked && !isAuthenticated && !isLoading) {
+    // Check authentication status
+    if (!isLoading && !isAuthenticated) {
       router.push('/auth/login');
     }
-  }, [isAuthenticated, isLoading, authChecked, router]);
+  }, [isAuthenticated, isLoading, router]);
 
-  if (isLoading || !authChecked) {
+  // Show loading state while checking authentication
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loading size="lg" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="text-lg text-gray-600">Loading...</div>
+        </div>
       </div>
     );
   }
 
+  // Don't render dashboard if not authenticated
   if (!isAuthenticated) {
     return null;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="flex">
-        {/* Sidebar will be added in Week 2 */}
-        <div className="flex-1">
-          {/* Header will be added in Week 2 */}
-          <main className="p-6">
-            {children}
-          </main>
-        </div>
+    <div className="flex h-screen bg-gray-50">
+      <Sidebar />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

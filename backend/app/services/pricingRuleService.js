@@ -65,22 +65,38 @@ export class PricingRuleService {
   }
 
   static async getPricingRules(businessId) {
-    const result = await query(
-      `SELECT * FROM pricing_rules
-       WHERE business_id = $1
-       ORDER BY priority DESC, created_at DESC`,
-      [businessId]
-    );
-    return result.rows;
+    const client = await getClient();
+    try {
+      const result = await client.query(
+        `SELECT * FROM pricing_rules
+         WHERE business_id = $1
+         ORDER BY priority DESC, created_at DESC`,
+        [businessId]
+      );
+      return result.rows;
+    } catch (error) {
+      log.error('Error getting pricing rules:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async getPricingRuleById(businessId, ruleId) {
-    const result = await query(
-      `SELECT * FROM pricing_rules
-       WHERE id = $1 AND business_id = $2`,
-      [ruleId, businessId]
-    );
-    return result.rows[0];
+    const client = await getClient();
+    try {
+      const result = await client.query(
+        `SELECT * FROM pricing_rules
+         WHERE id = $1 AND business_id = $2`,
+        [ruleId, businessId]
+      );
+      return result.rows[0];
+    } catch (error) {
+      log.error('Error getting pricing rule by ID:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async updatePricingRule(businessId, ruleId, updateData, userId) {
@@ -201,54 +217,62 @@ export class PricingRuleService {
   }
 
   static async evaluatePricingRules(businessId, context) {
-    const {
-      customer_category_id,
-      service_id,
-      package_id,
-      customer_id,
-      quantity = 1,
-      base_price,
-      current_time = new Date()
-    } = context;
+    const client = await getClient();
+    try {
+      const {
+        customer_category_id,
+        service_id,
+        package_id,
+        customer_id,
+        quantity = 1,
+        base_price,
+        current_time = new Date()
+      } = context;
 
-    const rules = await query(
-      `SELECT * FROM pricing_rules
-       WHERE business_id = $1
-         AND is_active = true
-         AND (valid_from IS NULL OR valid_from <= $2)
-         AND (valid_until IS NULL OR valid_until >= $2)
-       ORDER BY priority DESC`,
-      [businessId, current_time]
-    );
+      const rules = await client.query(
+        `SELECT * FROM pricing_rules
+         WHERE business_id = $1
+           AND is_active = true
+           AND (valid_from IS NULL OR valid_from <= $2)
+           AND (valid_until IS NULL OR valid_until >= $2)
+         ORDER BY priority DESC`,
+        [businessId, current_time]
+      );
 
-    let finalPrice = base_price;
-    let appliedRules = [];
+      let finalPrice = base_price;
+      let appliedRules = [];
 
-    for (const rule of rules.rows) {
-      if (this.doesRuleApply(rule, context)) {
-        finalPrice = this.applyRule(rule, finalPrice);
-        appliedRules.push({
-          rule_id: rule.id,
-          rule_name: rule.name,
-          rule_type: rule.rule_type,
-          adjustment_type: rule.adjustment_type,
-          adjustment_value: rule.adjustment_value,
-          new_price: finalPrice
-        });
+      for (const rule of rules.rows) {
+        if (this.doesRuleApply(rule, context)) {
+          finalPrice = this.applyRule(rule, finalPrice);
+          appliedRules.push({
+            rule_id: rule.id,
+            rule_name: rule.name,
+            rule_type: rule.rule_type,
+            adjustment_type: rule.adjustment_type,
+            adjustment_value: rule.adjustment_value,
+            new_price: finalPrice
+          });
+        }
       }
-    }
 
-    return {
-      original_price: base_price,
-      final_price: finalPrice,
-      applied_rules: appliedRules
-    };
+      return {
+        original_price: base_price,
+        final_price: finalPrice,
+        applied_rules: appliedRules
+      };
+    } catch (error) {
+      log.error('Error evaluating pricing rules:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async evaluatePricingWithABAC(businessId, pricingData, userId) {
     try {
       const { customer_category_id, service_id, base_price, quantity = 1 } = pricingData;
-      
+
       log.info('Evaluating pricing with ABAC', {
         businessId,
         userId,
@@ -262,10 +286,10 @@ export class PricingRuleService {
       try {
         // Apply ABAC rules first
         abacContext = await PricingABACService.applyPricingRules(
-          userId, 
-          businessId, 
-          base_price, 
-          customer_category_id, 
+          userId,
+          businessId,
+          base_price,
+          customer_category_id,
           service_id
         );
       } catch (abacError) {
@@ -314,8 +338,8 @@ export class PricingRuleService {
       let approvalCheck;
       try {
         approvalCheck = await PricingABACService.checkDiscountApprovalRequired(
-          userId, 
-          businessId, 
+          userId,
+          businessId,
           totalDiscountPercentage
         );
       } catch (approvalError) {
@@ -378,7 +402,7 @@ export class PricingRuleService {
       return result;
     } catch (error) {
       log.error('Critical error in evaluatePricingWithABAC:', error);
-      
+
       // Ultimate fallback - return basic pricing without ABAC
       return {
         success: true,
@@ -465,8 +489,9 @@ export class PricingRuleService {
   }
 
   static async getPricingStats(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT
            COUNT(*) as total_rules,
            COUNT(*) FILTER (WHERE is_active = true) as active_rules,
@@ -483,6 +508,8 @@ export class PricingRuleService {
     } catch (error) {
       log.error('Error getting pricing stats:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 }

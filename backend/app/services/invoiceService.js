@@ -120,8 +120,9 @@ export const invoiceService = {
   },
 
   async getInvoiceById(id, businessId, client = null) {
-    const dbQuery = client ? client.query.bind(client) : query;
-
+    const useExternalClient = client !== null;
+    const dbClient = client || await getClient();
+    
     try {
       const invoiceQuery = `
         SELECT
@@ -157,7 +158,7 @@ export const invoiceService = {
         GROUP BY i.id, c.first_name, c.last_name, c.email, c.phone, c.company_name, j.job_number, j.title
       `;
 
-      const result = await dbQuery(invoiceQuery, [id, businessId]);
+      const result = await dbClient.query(invoiceQuery, [id, businessId]);
 
       if (result.rows.length === 0) {
         log.debug('Invoice not found in getInvoiceById', { invoiceId: id, businessId });
@@ -175,10 +176,16 @@ export const invoiceService = {
     } catch (error) {
       log.error('Failed to fetch invoice by ID', { invoiceId: id, businessId, error: error.message });
       throw error;
+    } finally {
+      // Only release the client if we created it internally
+      if (!useExternalClient) {
+        dbClient.release();
+      }
     }
   },
 
   async getAllInvoices(businessId, options = {}) {
+    const client = await getClient();
     try {
       let selectQuery = `
         SELECT
@@ -230,7 +237,7 @@ export const invoiceService = {
       selectQuery += ` GROUP BY i.id, c.first_name, c.last_name, c.company_name, j.job_number`;
       selectQuery += ` ORDER BY i.created_at DESC`;
 
-      const result = await query(selectQuery, values);
+      const result = await client.query(selectQuery, values);
 
       log.debug('Fetched invoices', {
         businessId,
@@ -242,6 +249,8 @@ export const invoiceService = {
     } catch (error) {
       log.error('Failed to fetch invoices', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 

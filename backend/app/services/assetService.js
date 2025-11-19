@@ -95,9 +95,9 @@ export class AssetService {
    */
   static async generateNextAssetCode(client, businessId) {
     const result = await client.query(
-      `SELECT asset_code FROM fixed_assets 
-       WHERE business_id = $1 
-       ORDER BY created_at DESC 
+      `SELECT asset_code FROM fixed_assets
+       WHERE business_id = $1
+       ORDER BY created_at DESC
        LIMIT 1`,
       [businessId]
     );
@@ -108,7 +108,7 @@ export class AssetService {
 
     const lastCode = result.rows[0].asset_code;
     const match = lastCode.match(/ASSET-(\d+)/);
-    
+
     if (match) {
       const nextNumber = parseInt(match[1]) + 1;
       return `ASSET-${nextNumber.toString().padStart(3, '0')}`;
@@ -122,9 +122,10 @@ export class AssetService {
    * Get all fixed assets for a business
    */
   static async getFixedAssets(businessId, filters = {}) {
+    const client = await getClient();
     try {
       let queryStr = `
-        SELECT * FROM fixed_assets 
+        SELECT * FROM fixed_assets
         WHERE business_id = $1
       `;
       const params = [businessId];
@@ -150,11 +151,13 @@ export class AssetService {
 
       queryStr += ' ORDER BY created_at DESC';
 
-      const result = await query(queryStr, params);
+      const result = await client.query(queryStr, params);
       return result.rows;
     } catch (error) {
       log.error('Error fetching fixed assets:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -162,9 +165,10 @@ export class AssetService {
    * Get asset by ID
    */
   static async getAssetById(businessId, assetId) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT * FROM fixed_assets 
+      const result = await client.query(
+        `SELECT * FROM fixed_assets
          WHERE id = $1 AND business_id = $2`,
         [assetId, businessId]
       );
@@ -172,6 +176,8 @@ export class AssetService {
     } catch (error) {
       log.error('Error fetching asset by ID:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -194,7 +200,7 @@ export class AssetService {
       }
 
       const result = await client.query(
-        `UPDATE fixed_assets 
+        `UPDATE fixed_assets
          SET asset_name = COALESCE($1, asset_name),
              category = COALESCE($2, category),
              description = COALESCE($3, description),
@@ -255,9 +261,10 @@ export class AssetService {
    * Get asset statistics
    */
   static async getAssetStatistics(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            COUNT(*) as total_assets,
            COUNT(*) FILTER (WHERE is_active = true) as active_assets,
            COUNT(*) FILTER (WHERE is_active = false) as inactive_assets,
@@ -266,7 +273,7 @@ export class AssetService {
            AVG(current_value) as avg_asset_value,
            COUNT(*) FILTER (WHERE next_maintenance_date <= CURRENT_DATE) as overdue_maintenance,
            COUNT(*) FILTER (WHERE condition_status = 'poor' OR condition_status = 'broken') as poor_condition_assets
-         FROM fixed_assets 
+         FROM fixed_assets
          WHERE business_id = $1`,
         [businessId]
       );
@@ -275,6 +282,8 @@ export class AssetService {
     } catch (error) {
       log.error('Error fetching asset statistics:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 }

@@ -243,83 +243,96 @@ export const businessService = {
       throw new Error('Email and password are required');
     }
 
-    // Find user by email
-    const userQuery = `
-      SELECT 
-        u.id, u.email, u.full_name, u.password_hash, u.role, u.timezone,
-        u.business_id, b.name as business_name, b.currency, b.currency_symbol, b.timezone as business_timezone
-      FROM users u
-      JOIN businesses b ON u.business_id = b.id
-      WHERE u.email = $1
-    `;
+    const client = await getClient();
+    try {
+      // Find user by email
+      const userQuery = `
+        SELECT
+          u.id, u.email, u.full_name, u.password_hash, u.role, u.timezone,
+          u.business_id, b.name as business_name, b.currency, b.currency_symbol, b.timezone as business_timezone
+        FROM users u
+        JOIN businesses b ON u.business_id = b.id
+        WHERE u.email = $1
+      `;
 
-    const userResult = await query(userQuery, [email.toLowerCase().trim()]);
-    
-    if (userResult.rows.length === 0) {
-      log.warn('Login failed: user not found', { email });
-      throw new Error('Invalid email or password');
-    }
+      const userResult = await client.query(userQuery, [email.toLowerCase().trim()]);
 
-    const user = userResult.rows[0];
+      if (userResult.rows.length === 0) {
+        log.warn('Login failed: user not found', { email });
+        throw new Error('Invalid email or password');
+      }
 
-    // Verify password
-    const isPasswordValid = await verifyPassword(password, user.password_hash);
-    
-    if (!isPasswordValid) {
-      log.warn('Login failed: invalid password', { email, userId: user.id });
-      throw new Error('Invalid email or password');
-    }
+      const user = userResult.rows[0];
 
-    // Generate JWT token
-    const token = generateToken({
-      userId: user.id,
-      businessId: user.business_id,
-      email: user.email,
-      role: user.role,
-      timezone: user.timezone || user.business_timezone
-    });
+      // Verify password
+      const isPasswordValid = await verifyPassword(password, user.password_hash);
 
-    log.info('User login successful', {
-      userId: user.id,
-      businessId: user.business_id,
-      role: user.role
-    });
+      if (!isPasswordValid) {
+        log.warn('Login failed: invalid password', { email, userId: user.id });
+        throw new Error('Invalid email or password');
+      }
 
-    return {
-      user: {
-        id: user.id,
+      // Generate JWT token
+      const token = generateToken({
+        userId: user.id,
+        businessId: user.business_id,
         email: user.email,
-        fullName: user.full_name,
         role: user.role,
         timezone: user.timezone || user.business_timezone
-      },
-      business: {
-        id: user.business_id,
-        name: user.business_name,
-        currency: user.currency,
-        currencySymbol: user.currency_symbol,
-        timezone: user.business_timezone
-      },
-      token,
-      timezoneInfo: {
-        detected: user.timezone || user.business_timezone,
-        currentTime: new Date().toLocaleString('en-US', { 
-          timeZone: user.timezone || user.business_timezone 
-        }),
-        isValid: true
-      }
-    };
+      });
+
+      log.info('User login successful', {
+        userId: user.id,
+        businessId: user.business_id,
+        role: user.role
+      });
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.full_name,
+          role: user.role,
+          timezone: user.timezone || user.business_timezone
+        },
+        business: {
+          id: user.business_id,
+          name: user.business_name,
+          currency: user.currency,
+          currencySymbol: user.currency_symbol,
+          timezone: user.business_timezone
+        },
+        token,
+        timezoneInfo: {
+          detected: user.timezone || user.business_timezone,
+          currentTime: new Date().toLocaleString('en-US', {
+            timeZone: user.timezone || user.business_timezone
+          }),
+          isValid: true
+        }
+      };
+    } catch (error) {
+      log.error('Login error:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
   async getBusinessProfile(businessId) {
-    log.info('Fetching business profile', { businessId });
+    const client = await getClient();
+    try {
+      log.info('Fetching business profile', { businessId });
 
-    const result = await query(
-      'SELECT id, name, currency, currency_symbol, timezone, created_at FROM businesses WHERE id = $1',
-      [businessId]
-    );
+      const result = await client.query(
+        'SELECT id, name, currency, currency_symbol, timezone, created_at FROM businesses WHERE id = $1',
+        [businessId]
+      );
 
-    return result.rows[0];
+      return result.rows[0];
+    } finally {
+      client.release();
+    }
   },
 
   // Get system configuration

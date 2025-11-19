@@ -3,10 +3,10 @@ import { jobController } from '../controllers/jobController.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { 
-  createJobSchema, 
-  updateJobSchema, 
-  updateJobStatusSchema 
+import {
+  createJobSchema,
+  updateJobSchema,
+  updateJobStatusSchema
 } from '../schemas/jobSchemas.js';
 
 const router = express.Router();

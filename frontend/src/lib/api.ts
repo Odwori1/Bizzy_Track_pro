@@ -1,19 +1,22 @@
-import { config } from './config';
 import { ApiResponse, ApiError } from '@/types/api';
 
 class ApiClient {
-  private baseUrl: string;
+  private baseURL: string;
+  private defaultHeaders: HeadersInit;
 
   constructor() {
-    this.baseUrl = config.api.baseUrl;
+    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002';
+    this.defaultHeaders = {
+      'Content-Type': 'application/json',
+    };
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
-    const token = this.getToken();
+    const url = `${this.baseURL}${endpoint}`;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      ...this.defaultHeaders,
       ...options.headers,
     };
 
@@ -21,69 +24,60 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+      });
+
+      const data: ApiResponse<T> = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new ApiError(response.status, data.error || data.message || 'Request failed');
+      }
+
+      return data.data as T;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(500, 'Network error occurred');
+    }
+  }
+
+  async get<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
+    const queryString = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.request<T>(endpoint + queryString, {
+      method: 'GET',
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new ApiError(response.status, errorText);
-    }
-
-    const data: ApiResponse<T> = await response.json();
-    
-    if (!data.success) {
-      throw new ApiError(response.status, data.message);
-    }
-
-    return data.data as T;
   }
 
-  private getToken(): string | null {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('auth_token');
-    }
-    return null;
-  }
-
-  // Auth endpoints - match backend response exactly
-  async login(credentials: { email: string; password: string }) {
-    return this.request<{ 
-      user: {
-        id: string;
-        email: string;
-        fullName: string;
-        role: string;
-        timezone: string;
-      };
-      business: {
-        id: string;
-        name: string;
-        currency: string;
-        currencySymbol: string;
-        timezone: string;
-      };
-      token: string;
-      timezoneInfo: any;
-    }>('/api/businesses/login', {
+  async post<T>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
       method: 'POST',
-      body: JSON.stringify(credentials),
+      body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  async register(data: any) {
-    return this.request<{ 
-      user: any; 
-      token: string;
-      business: any;
-    }>('/api/businesses/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
+  async put<T>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  // We don't have a /me endpoint, so we'll remove this for now
+  async patch<T>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async delete<T>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

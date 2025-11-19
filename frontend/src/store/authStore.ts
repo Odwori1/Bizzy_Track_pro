@@ -30,11 +30,11 @@ export const useAuthStore = create<AuthState>()(
       login: async (credentials: LoginData) => {
         set({ isLoading: true });
         try {
-          const response = await apiClient.login(credentials);
-          
-          console.log('Login response:', response); // Debug log
-          
-          // Map backend response to frontend user structure
+          const response = await apiClient.request('/api/businesses/login', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+          });
+
           const user: User = {
             id: response.user.id,
             email: response.user.email,
@@ -42,7 +42,7 @@ export const useAuthStore = create<AuthState>()(
             lastName: response.user.fullName?.split(' ')[1] || '',
             role: response.user.role,
             businessId: response.business.id,
-            permissions: [] // Will be populated from backend in future
+            permissions: []
           };
 
           set({
@@ -52,12 +52,11 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false,
           });
-          
+
           if (typeof window !== 'undefined') {
             localStorage.setItem('auth_token', response.token);
           }
         } catch (error) {
-          console.error('Login error:', error);
           set({ isLoading: false });
           throw error;
         }
@@ -66,8 +65,11 @@ export const useAuthStore = create<AuthState>()(
       register: async (data: RegisterData) => {
         set({ isLoading: true });
         try {
-          const response = await apiClient.register(data);
-          
+          const response = await apiClient.request('/api/businesses/register', {
+            method: 'POST',
+            body: JSON.stringify(data),
+          });
+
           const user: User = {
             id: response.user.id,
             email: response.user.email,
@@ -85,7 +87,7 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false,
           });
-          
+
           if (typeof window !== 'undefined') {
             localStorage.setItem('auth_token', response.token);
           }
@@ -102,21 +104,61 @@ export const useAuthStore = create<AuthState>()(
           business: null,
           isAuthenticated: false,
         });
-        
+
         if (typeof window !== 'undefined') {
           localStorage.removeItem('auth_token');
         }
       },
 
       checkAuth: async () => {
-        // Since we don't have a /me endpoint, we'll check if we have a valid token
-        const token = get().token;
-        const user = get().user;
+        const token = get().token || (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null);
         
-        if (token && user) {
-          set({ isAuthenticated: true });
-        } else {
+        if (!token) {
           set({ isAuthenticated: false });
+          return;
+        }
+
+        try {
+          set({ isLoading: true });
+          
+          // Verify token with backend by making a simple request
+          const response = await apiClient.request('/api/businesses/me', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (response && response.user) {
+            const user: User = {
+              id: response.user.id,
+              email: response.user.email,
+              firstName: response.user.fullName?.split(' ')[0] || 'User',
+              lastName: response.user.fullName?.split(' ')[1] || '',
+              role: response.user.role,
+              businessId: response.business?.id,
+              permissions: []
+            };
+
+            set({
+              user,
+              token,
+              business: response.business,
+              isAuthenticated: true,
+              isLoading: false,
+            });
+          } else {
+            throw new Error('Invalid user data');
+          }
+        } catch (error) {
+          console.error('Auth check failed:', error);
+          set({
+            user: null,
+            token: null,
+            business: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+          
           if (typeof window !== 'undefined') {
             localStorage.removeItem('auth_token');
           }

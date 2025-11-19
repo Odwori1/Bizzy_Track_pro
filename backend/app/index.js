@@ -53,7 +53,7 @@ import securityAuditRoutes from './routes/securityAuditRoutes.js';
 
 // Import security middleware
 import { authenticate } from './middleware/auth.js';
-import { setRLSContext, releaseRLSContext } from './middleware/rlsContext.js';
+import { setRLSContext } from './middleware/rlsContext.js'; // REMOVED releaseRLSContext
 
 // Import timezone middleware
 import { timezoneMiddleware } from './middleware/timezone.js';
@@ -174,8 +174,7 @@ app.use('/api/security', apiSecurityRoutes);
 app.use('/api', branchRoutes);
 app.use('/api', securityAuditRoutes);
 
-// RLS context cleanup middleware (should be after all routes)
-app.use(releaseRLSContext);
+// REMOVED: app.use(releaseRLSContext); - Services handle their own connection cleanup
 
 // 404 handler
 app.use('*', (req, res) => {

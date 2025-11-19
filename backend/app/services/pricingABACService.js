@@ -1,4 +1,4 @@
-import { query } from '../utils/database.js';
+import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export class PricingABACService {
@@ -6,33 +6,36 @@ export class PricingABACService {
    * Check if user has permission to override pricing with fallback
    */
   static async canOverridePricing(userId, businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT up.value as can_override
          FROM user_permissions up
          JOIN permissions p ON up.permission_id = p.id
-         WHERE up.user_id = $1 
+         WHERE up.user_id = $1
            AND up.business_id = $2
            AND p.name = 'pricing:override'
            AND up.value = 'true'`,
         [userId, businessId]
       );
-      
+
       return result.rows.length > 0;
     } catch (error) {
       log.error('Error checking pricing override permission:', error);
-      
+
       // Fallback: Only owners can override pricing by default
-      const fallbackResult = await query(
+      const fallbackResult = await client.query(
         'SELECT role FROM users WHERE id = $1 AND business_id = $2',
         [userId, businessId]
       );
-      
+
       if (fallbackResult.rows.length > 0) {
         return fallbackResult.rows[0].role === 'owner';
       }
-      
+
       return false; // Default to no override permission
+    } finally {
+      client.release();
     }
   }
 
@@ -40,34 +43,37 @@ export class PricingABACService {
    * Check if user has permission to approve discounts with fallback
    */
   static async canApproveDiscounts(userId, businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT up.value as can_approve
          FROM user_permissions up
          JOIN permissions p ON up.permission_id = p.id
-         WHERE up.user_id = $1 
+         WHERE up.user_id = $1
            AND up.business_id = $2
            AND p.name = 'discount:approve'
            AND up.value = 'true'`,
         [userId, businessId]
       );
-      
+
       return result.rows.length > 0;
     } catch (error) {
       log.error('Error checking discount approval permission:', error);
-      
+
       // Fallback: Owners and managers can approve by default
-      const fallbackResult = await query(
+      const fallbackResult = await client.query(
         'SELECT role FROM users WHERE id = $1 AND business_id = $2',
         [userId, businessId]
       );
-      
+
       if (fallbackResult.rows.length > 0) {
         const role = fallbackResult.rows[0].role;
         return role === 'owner' || role === 'manager';
       }
-      
+
       return false;
+    } finally {
+      client.release();
     }
   }
 
@@ -75,31 +81,32 @@ export class PricingABACService {
    * Get user's maximum discount approval limit with fallback
    */
   static async getUserDiscountLimit(userId, businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT up.value as discount_limit
          FROM user_permissions up
          JOIN permissions p ON up.permission_id = p.id
-         WHERE up.user_id = $1 
+         WHERE up.user_id = $1
            AND up.business_id = $2
            AND p.name = 'discount:limit'`,
         [userId, businessId]
       );
-      
+
       if (result.rows.length > 0) {
         return parseFloat(result.rows[0].discount_limit) || 20; // Default 20%
       }
-      
+
       return 20; // Default limit if no specific permission
     } catch (error) {
       log.error('Error getting user discount limit:', error);
-      
+
       // Fallback: Role-based default limits
-      const fallbackResult = await query(
+      const fallbackResult = await client.query(
         'SELECT role FROM users WHERE id = $1 AND business_id = $2',
         [userId, businessId]
       );
-      
+
       if (fallbackResult.rows.length > 0) {
         const role = fallbackResult.rows[0].role;
         switch (role) {
@@ -109,8 +116,10 @@ export class PricingABACService {
           default: return 20;
         }
       }
-      
+
       return 20; // Default fallback
+    } finally {
+      client.release();
     }
   }
 
@@ -121,7 +130,7 @@ export class PricingABACService {
     try {
       const userLimit = await this.getUserDiscountLimit(userId, businessId);
       const requiresApproval = discountPercentage > userLimit;
-      
+
       log.info('Discount approval check', {
         userId,
         businessId,
@@ -129,7 +138,7 @@ export class PricingABACService {
         userLimit,
         requiresApproval
       });
-      
+
       return {
         requires_approval: requiresApproval,
         user_discount_limit: userLimit,
@@ -151,7 +160,7 @@ export class PricingABACService {
   static async applyPricingRules(userId, businessId, basePrice, customerCategoryId, serviceId) {
     try {
       const canOverride = await this.canOverridePricing(userId, businessId);
-      
+
       // If user can override pricing, they can bypass some restrictions
       const pricingContext = {
         base_price: basePrice,
@@ -207,18 +216,21 @@ export class PricingABACService {
    * Get customer category discount percentage with error handling
    */
   static async getCategoryDiscount(businessId, customerCategoryId) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT discount_percentage 
-         FROM customer_categories 
+      const result = await client.query(
+        `SELECT discount_percentage
+         FROM customer_categories
          WHERE id = $1 AND business_id = $2`,
         [customerCategoryId, businessId]
       );
-      
+
       return result.rows[0]?.discount_percentage || 0;
     } catch (error) {
       log.error('Error getting category discount:', error);
       return 0;
+    } finally {
+      client.release();
     }
   }
 
@@ -226,11 +238,12 @@ export class PricingABACService {
    * Simple permission check without complex joins (for better performance)
    */
   static async hasSimplePermission(userId, businessId, permissionName) {
+    const client = await getClient();
     try {
       // Simplified query for better performance
-      const result = await query(
+      const result = await client.query(
         `SELECT 1 FROM user_permissions up
-         WHERE up.user_id = $1 
+         WHERE up.user_id = $1
            AND up.business_id = $2
            AND up.permission_id IN (
              SELECT id FROM permissions WHERE name = $3
@@ -239,11 +252,13 @@ export class PricingABACService {
          LIMIT 1`,
         [userId, businessId, permissionName]
       );
-      
+
       return result.rows.length > 0;
     } catch (error) {
       log.error(`Error checking permission ${permissionName}:`, error);
       return false;
+    } finally {
+      client.release();
     }
   }
 }

@@ -1,4 +1,4 @@
-import { query } from '../utils/database.js';
+import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export class BusinessValuationService {
@@ -41,7 +41,7 @@ export class BusinessValuationService {
       ]);
 
       // Calculate total valuation
-      const totalValuation = 
+      const totalValuation =
         liquidAssets.total_liquid_assets +
         fixedAssets.total_fixed_assets_value +
         equipmentAssets.total_equipment_value +
@@ -75,8 +75,8 @@ export class BusinessValuationService {
         }
       };
 
-      log.info('Business valuation calculated successfully', { 
-        businessId, 
+      log.info('Business valuation calculated successfully', {
+        businessId,
         totalValuation,
         components: valuation.breakdown
       });
@@ -84,7 +84,7 @@ export class BusinessValuationService {
       return valuation;
     } catch (error) {
       log.error('Critical error calculating business valuation:', error);
-      
+
       // Return fallback valuation
       return {
         valuation_date: asOfDate,
@@ -110,20 +110,21 @@ export class BusinessValuationService {
   }
 
   static async getLiquidAssets(businessId, asOfDate) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            COALESCE(SUM(amount_paid), 0) as total_cash_received,
            COALESCE(SUM(balance_due), 0) as outstanding_cash
-         FROM invoices 
-         WHERE business_id = $1 
+         FROM invoices
+         WHERE business_id = $1
            AND invoice_date <= $2
            AND status IN ('paid', 'sent')`,
         [businessId, asOfDate]
       );
 
       const cashData = result.rows[0];
-      
+
       return {
         total_liquid_assets: parseFloat(cashData.total_cash_received) || 0,
         cash_in_hand: parseFloat(cashData.total_cash_received) || 0,
@@ -133,18 +134,21 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getLiquidAssets:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   static async getFixedAssetsValue(businessId, asOfDate) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            category,
            COUNT(*) as asset_count,
            SUM(current_value) as total_value
-         FROM fixed_assets 
-         WHERE business_id = $1 
+         FROM fixed_assets
+         WHERE business_id = $1
            AND is_active = true
            AND disposal_date IS NULL
          GROUP BY category`,
@@ -170,18 +174,21 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getFixedAssetsValue:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   static async getEquipmentAssetsValue(businessId, asOfDate) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            COUNT(*) as equipment_count,
            SUM(fa.current_value) as total_equipment_value
          FROM equipment_assets ea
          JOIN fixed_assets fa ON ea.asset_id = fa.id
-         WHERE ea.business_id = $1 
+         WHERE ea.business_id = $1
            AND fa.is_active = true`,
         [businessId]
       );
@@ -201,17 +208,20 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getEquipmentAssetsValue:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   static async getAccountsReceivable(businessId, asOfDate) {
+    const client = await getClient();
     try {
-      const result = await query(
-        `SELECT 
+      const result = await client.query(
+        `SELECT
            COUNT(*) as invoice_count,
            SUM(balance_due) as total_receivable
-         FROM invoices 
-         WHERE business_id = $1 
+         FROM invoices
+         WHERE business_id = $1
            AND status = 'sent'
            AND due_date <= $2`,
         [businessId, asOfDate]
@@ -225,15 +235,18 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getAccountsReceivable:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   static async getMonthlyAppreciation(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT COALESCE(SUM(purchase_price), 0) as monthly_purchases
-         FROM fixed_assets 
-         WHERE business_id = $1 
+         FROM fixed_assets
+         WHERE business_id = $1
            AND purchase_date >= CURRENT_DATE - INTERVAL '30 days'`,
         [businessId]
       );
@@ -241,15 +254,18 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getMonthlyAppreciation:', error);
       return 0;
+    } finally {
+      client.release();
     }
   }
 
   static async getMonthlyDepreciation(businessId) {
+    const client = await getClient();
     try {
-      const result = await query(
+      const result = await client.query(
         `SELECT COALESCE(SUM(depreciation_amount), 0) as monthly_depreciation
-         FROM asset_depreciation 
-         WHERE business_id = $1 
+         FROM asset_depreciation
+         WHERE business_id = $1
            AND period_date >= CURRENT_DATE - INTERVAL '30 days'`,
         [businessId]
       );
@@ -257,6 +273,8 @@ export class BusinessValuationService {
     } catch (error) {
       log.error('Error in getMonthlyDepreciation:', error);
       return 0;
+    } finally {
+      client.release();
     }
   }
 }

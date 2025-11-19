@@ -1,4 +1,4 @@
-import { query } from '../utils/database.js';
+import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export const auditService = {
@@ -6,6 +6,7 @@ export const auditService = {
    * Search audit logs with filtering and pagination
    */
   async searchAuditLogs(businessId, options = {}) {
+    const client = await getClient();
     try {
       const {
         page = 1,
@@ -58,7 +59,7 @@ export const auditService = {
       if (search) {
         paramCount++;
         conditions.push(`(
-          al.action ILIKE $${paramCount} OR 
+          al.action ILIKE $${paramCount} OR
           al.resource_type ILIKE $${paramCount} OR
           u.email ILIKE $${paramCount} OR
           u.full_name ILIKE $${paramCount}
@@ -76,12 +77,12 @@ export const auditService = {
         ${whereClause}
       `;
 
-      const countResult = await query(countQuery, params);
+      const countResult = await client.query(countQuery, params);
       const total = parseInt(countResult.rows[0].total);
 
       // Main data query
       const dataQuery = `
-        SELECT 
+        SELECT
           al.*,
           u.email as user_email,
           u.full_name as user_name,
@@ -94,7 +95,7 @@ export const auditService = {
       `;
 
       const dataParams = [...params, limit, offset];
-      const result = await query(dataQuery, dataParams);
+      const result = await client.query(dataQuery, dataParams);
 
       const totalPages = Math.ceil(total / limit);
 
@@ -109,6 +110,8 @@ export const auditService = {
     } catch (error) {
       log.error('Audit log search service error', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
@@ -116,6 +119,7 @@ export const auditService = {
    * Get audit summary statistics
    */
   async getAuditSummary(businessId, period = '7d') {
+    const client = await getClient();
     try {
       let interval;
       switch (period) {
@@ -136,24 +140,24 @@ export const auditService = {
       }
 
       const summaryQuery = `
-        SELECT 
+        SELECT
           COUNT(*) as total_actions,
           COUNT(DISTINCT user_id) as unique_users,
           COUNT(DISTINCT resource_type) as resource_types,
           COUNT(DISTINCT action) as action_types,
           MAX(created_at) as latest_action,
           MIN(created_at) as earliest_action
-        FROM audit_logs 
-        WHERE business_id = $1 
+        FROM audit_logs
+        WHERE business_id = $1
         AND created_at >= NOW() - INTERVAL '${interval}'
       `;
 
       const actionsByTypeQuery = `
-        SELECT 
+        SELECT
           action,
           COUNT(*) as count
-        FROM audit_logs 
-        WHERE business_id = $1 
+        FROM audit_logs
+        WHERE business_id = $1
         AND created_at >= NOW() - INTERVAL '${interval}'
         GROUP BY action
         ORDER BY count DESC
@@ -161,11 +165,11 @@ export const auditService = {
       `;
 
       const actionsByResourceQuery = `
-        SELECT 
+        SELECT
           resource_type,
           COUNT(*) as count
-        FROM audit_logs 
-        WHERE business_id = $1 
+        FROM audit_logs
+        WHERE business_id = $1
         AND created_at >= NOW() - INTERVAL '${interval}'
         GROUP BY resource_type
         ORDER BY count DESC
@@ -173,7 +177,7 @@ export const auditService = {
       `;
 
       const topUsersQuery = `
-        SELECT 
+        SELECT
           u.id,
           u.email,
           u.full_name,
@@ -181,7 +185,7 @@ export const auditService = {
           COUNT(*) as action_count
         FROM audit_logs al
         LEFT JOIN users u ON al.user_id = u.id
-        WHERE al.business_id = $1 
+        WHERE al.business_id = $1
         AND al.created_at >= NOW() - INTERVAL '${interval}'
         GROUP BY u.id, u.email, u.full_name, u.role
         ORDER BY action_count DESC
@@ -189,10 +193,10 @@ export const auditService = {
       `;
 
       const [summaryResult, actionsByTypeResult, actionsByResourceResult, topUsersResult] = await Promise.all([
-        query(summaryQuery, [businessId]),
-        query(actionsByTypeQuery, [businessId]),
-        query(actionsByResourceQuery, [businessId]),
-        query(topUsersQuery, [businessId])
+        client.query(summaryQuery, [businessId]),
+        client.query(actionsByTypeQuery, [businessId]),
+        client.query(actionsByResourceQuery, [businessId]),
+        client.query(topUsersQuery, [businessId])
       ]);
 
       return {
@@ -206,6 +210,8 @@ export const auditService = {
     } catch (error) {
       log.error('Audit summary service error', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
@@ -213,9 +219,10 @@ export const auditService = {
    * Get specific audit log by ID
    */
   async getAuditLogById(id, businessId) {
+    const client = await getClient();
     try {
       const queryText = `
-        SELECT 
+        SELECT
           al.*,
           u.email as user_email,
           u.full_name as user_name,
@@ -225,12 +232,14 @@ export const auditService = {
         WHERE al.id = $1 AND al.business_id = $2
       `;
 
-      const result = await query(queryText, [id, businessId]);
+      const result = await client.query(queryText, [id, businessId]);
       return result.rows[0] || null;
 
     } catch (error) {
       log.error('Get audit log by ID service error', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
@@ -238,9 +247,10 @@ export const auditService = {
    * Get recent audit activity
    */
   async getRecentActivity(businessId, limit = 10) {
+    const client = await getClient();
     try {
       const queryText = `
-        SELECT 
+        SELECT
           al.id,
           al.action,
           al.resource_type,
@@ -255,12 +265,14 @@ export const auditService = {
         LIMIT $2
       `;
 
-      const result = await query(queryText, [businessId, limit]);
+      const result = await client.query(queryText, [businessId, limit]);
       return result.rows;
 
     } catch (error) {
       log.error('Recent activity service error', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 };

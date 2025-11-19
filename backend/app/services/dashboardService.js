@@ -1,8 +1,9 @@
-import { query } from '../utils/database.js';
+import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export const dashboardService = {
   async getBusinessOverview(businessId, userId, userRole) {
+    const client = await getClient();
     try {
       log.debug('Fetching business overview', { businessId, userId, userRole });
 
@@ -33,7 +34,7 @@ export const dashboardService = {
           (SELECT COUNT(*) FROM invoices WHERE business_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '7 days') as recent_invoices
       `;
 
-      const statsResult = await query(statsQuery, [businessId]);
+      const statsResult = await client.query(statsQuery, [businessId]);
       const stats = statsResult.rows[0];
 
       // Get recent jobs for activity feed
@@ -53,7 +54,7 @@ export const dashboardService = {
         LIMIT 5
       `;
 
-      const recentJobsResult = await query(recentJobsQuery, [businessId]);
+      const recentJobsResult = await client.query(recentJobsQuery, [businessId]);
       const recentJobs = recentJobsResult.rows;
 
       // Get recent invoices for activity feed
@@ -73,7 +74,7 @@ export const dashboardService = {
         LIMIT 5
       `;
 
-      const recentInvoicesResult = await query(recentInvoicesQuery, [businessId]);
+      const recentInvoicesResult = await client.query(recentInvoicesQuery, [businessId]);
       const recentInvoices = recentInvoicesResult.rows;
 
       // Calculate completion rate
@@ -133,10 +134,13 @@ export const dashboardService = {
     } catch (error) {
       log.error('Failed to fetch business overview', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
   async getFinancialSummary(businessId, period = 'month') {
+    const client = await getClient();
     try {
       log.debug('Fetching financial summary', { businessId, period });
 
@@ -178,12 +182,12 @@ export const dashboardService = {
         WHERE business_id = $1 ${dateFilter}
       `;
 
-      const result = await query(financialQuery, [businessId]);
+      const result = await client.query(financialQuery, [businessId]);
       const financialData = result.rows[0];
 
       // FIXED: Get top customers in a separate query
       const topCustomersQuery = `
-        SELECT 
+        SELECT
           c.first_name || ' ' || c.last_name as customer_name,
           SUM(i.total_amount) as total_spent,
           COUNT(i.id) as invoice_count
@@ -195,7 +199,7 @@ export const dashboardService = {
         LIMIT 5
       `;
 
-      const topCustomersResult = await query(topCustomersQuery, [businessId]);
+      const topCustomersResult = await client.query(topCustomersQuery, [businessId]);
       const topCustomers = topCustomersResult.rows;
 
       // Calculate growth percentage
@@ -231,10 +235,13 @@ export const dashboardService = {
     } catch (error) {
       log.error('Failed to fetch financial summary', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
   async getActivityTimeline(businessId, limit = 20) {
+    const client = await getClient();
     try {
       log.debug('Fetching activity timeline', { businessId, limit });
 
@@ -281,7 +288,7 @@ export const dashboardService = {
         LIMIT $2
       `;
 
-      const result = await query(activityQuery, [businessId, limit]);
+      const result = await client.query(activityQuery, [businessId, limit]);
 
       log.debug('Activity timeline fetched successfully', {
         businessId,
@@ -293,6 +300,8 @@ export const dashboardService = {
     } catch (error) {
       log.error('Failed to fetch activity timeline', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 };

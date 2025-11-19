@@ -12,7 +12,7 @@ export const packageService = {
       // Create the package
       const createPackageQuery = `
         INSERT INTO service_packages
-        (business_id, name, description, base_price, duration_minutes, 
+        (business_id, name, description, base_price, duration_minutes,
          category, is_customizable, min_services, max_services, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
@@ -39,7 +39,7 @@ export const packageService = {
         for (const serviceData of packageData.services) {
           const addServiceQuery = `
             INSERT INTO package_services
-            (package_id, service_id, is_required, default_quantity, 
+            (package_id, service_id, is_required, default_quantity,
              max_quantity, package_price, is_price_overridden)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
           `;
@@ -91,6 +91,7 @@ export const packageService = {
   },
 
   async getAllPackages(businessId, options = {}) {
+    const client = await getClient();
     try {
       let selectQuery = `
         SELECT
@@ -122,7 +123,7 @@ export const packageService = {
 
       selectQuery += ` GROUP BY sp.id ORDER BY sp.name`;
 
-      const result = await query(selectQuery, values);
+      const result = await client.query(selectQuery, values);
 
       log.debug('Fetched packages', {
         businessId,
@@ -134,10 +135,13 @@ export const packageService = {
     } catch (error) {
       log.error('Failed to fetch packages', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
   async getPackageById(id, businessId) {
+    const client = await getClient();
     try {
       // Get package details
       const packageQuery = `
@@ -149,7 +153,7 @@ export const packageService = {
         WHERE sp.id = $1 AND sp.business_id = $2
       `;
 
-      const packageResult = await query(packageQuery, [id, businessId]);
+      const packageResult = await client.query(packageQuery, [id, businessId]);
       const servicePackage = packageResult.rows[0] || null;
 
       if (!servicePackage) {
@@ -172,7 +176,7 @@ export const packageService = {
         ORDER BY s.name
       `;
 
-      const servicesResult = await query(servicesQuery, [id]);
+      const servicesResult = await client.query(servicesQuery, [id]);
       servicePackage.services = servicesResult.rows;
 
       log.debug('Fetched package by ID', { packageId: id, businessId });
@@ -181,6 +185,8 @@ export const packageService = {
     } catch (error) {
       log.error('Failed to fetch package by ID', error);
       throw error;
+    } finally {
+      client.release();
     }
   },
 
@@ -357,6 +363,7 @@ export const packageService = {
   },
 
   async getPackageCategories(businessId) {
+    const client = await getClient();
     try {
       const categoriesQuery = `
         SELECT DISTINCT category
@@ -365,7 +372,7 @@ export const packageService = {
         ORDER BY category
       `;
 
-      const result = await query(categoriesQuery, [businessId]);
+      const result = await client.query(categoriesQuery, [businessId]);
 
       const categories = result.rows.map(row => row.category);
 
@@ -378,6 +385,8 @@ export const packageService = {
     } catch (error) {
       log.error('Failed to fetch package categories', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 };

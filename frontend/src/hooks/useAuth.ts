@@ -1,25 +1,30 @@
+'use client';
+
 import { useAuthStore } from '@/store/authStore';
 
+// Re-export everything from the store with the hook interface
 export const useAuth = () => {
-  const {
-    user,
-    token,
-    isLoading,
-    isAuthenticated,
-    login,
-    register,
-    logout,
-    checkAuth,
+  const { 
+    user, 
+    isAuthenticated, 
+    loading, 
+    error, 
+    login, 
+    register, 
+    logout, 
+    clearError,
+    checkAuth  // Add this missing function
   } = useAuthStore();
 
   return {
     user,
-    token,
-    isLoading,
     isAuthenticated,
+    loading,
+    error,
     login,
     register,
     logout,
-    checkAuth,
+    clearError,
+    checkAuth,  // Now it will be available
   };
 };

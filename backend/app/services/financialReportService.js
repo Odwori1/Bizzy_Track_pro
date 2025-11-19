@@ -1,4 +1,4 @@
-import { query } from '../utils/database.js';
+import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 
 export class FinancialReportService {
@@ -6,9 +6,10 @@ export class FinancialReportService {
    * Get comprehensive financial report
    */
   static async getFinancialReport(businessId, startDate = null, endDate = null) {
+    const client = await getClient();
     try {
       // Get income data from wallet transactions
-      const incomeResult = await query(
+      const incomeResult = await client.query(
         `SELECT
           SUM(amount) as total_income,
           COUNT(*) as transaction_count,
@@ -17,7 +18,7 @@ export class FinancialReportService {
           EXTRACT(YEAR FROM wt.created_at) as year
          FROM wallet_transactions wt
          INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
-         WHERE wt.business_id = $1 
+         WHERE wt.business_id = $1
            AND wt.transaction_type = 'income'
            ${startDate ? ' AND wt.created_at >= $2' : ''}
            ${endDate ? ' AND wt.created_at <= $3' : ''}
@@ -27,7 +28,7 @@ export class FinancialReportService {
       );
 
       // Get expense data
-      const expenseResult = await query(
+      const expenseResult = await client.query(
         `SELECT
           SUM(amount) as total_expenses,
           COUNT(*) as expense_count,
@@ -36,7 +37,7 @@ export class FinancialReportService {
           EXTRACT(YEAR FROM e.expense_date) as year
          FROM expenses e
          INNER JOIN expense_categories ec ON e.category_id = ec.id
-         WHERE e.business_id = $1 
+         WHERE e.business_id = $1
            AND e.status = 'approved'
            ${startDate ? ' AND e.expense_date >= $2' : ''}
            ${endDate ? ' AND e.expense_date <= $3' : ''}
@@ -46,7 +47,7 @@ export class FinancialReportService {
       );
 
       // Get wallet balances
-      const walletResult = await query(
+      const walletResult = await client.query(
         `SELECT
           name,
           wallet_type,
@@ -80,6 +81,8 @@ export class FinancialReportService {
     } catch (error) {
       log.error('Error generating financial report:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -131,13 +134,14 @@ export class FinancialReportService {
    * Get cash flow report
    */
   static async getCashFlowReport(businessId, startDate, endDate) {
+    const client = await getClient();
     try {
-      const cashFlowResult = await query(
+      const cashFlowResult = await client.query(
         `SELECT
           DATE_TRUNC('month', wt.created_at) as period,
           SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) as total_income,
           SUM(CASE WHEN wt.transaction_type = 'expense' THEN wt.amount ELSE 0 END) as total_expenses,
-          (SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) - 
+          (SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) -
            SUM(CASE WHEN wt.transaction_type = 'expense' THEN wt.amount ELSE 0 END)) as net_cash_flow
          FROM wallet_transactions wt
          WHERE wt.business_id = $1
@@ -151,6 +155,8 @@ export class FinancialReportService {
     } catch (error) {
       log.error('Error generating cash flow report:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -160,7 +166,7 @@ export class FinancialReportService {
   static async getProfitAndLoss(businessId, startDate, endDate) {
     try {
       const financialReport = await this.getFinancialReport(businessId, startDate, endDate);
-      
+
       return {
         revenue: {
           total_income: financialReport.summary.total_income,

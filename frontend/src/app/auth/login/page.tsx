@@ -21,12 +21,9 @@ export default function LoginPage() {
     setError('');
 
     try {
-      console.log('Attempting login with:', { email });
       await login({ email, password });
-      console.log('Login successful, redirecting to dashboard...');
       router.push('/dashboard');
     } catch (err: any) {
-      console.error('Login failed:', err);
       setError(err.message || 'Login failed. Please try again.');
     }
   };
