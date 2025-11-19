@@ -8,21 +8,40 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent } from '@/components/ui/Card';
 
+// Common African timezones for dropdown
+const COMMON_TIMEZONES = [
+  'Africa/Accra', 'Africa/Lagos', 'Africa/Nairobi', 'Africa/Johannesburg',
+  'Africa/Cairo', 'Africa/Casablanca', 'Africa/Addis_Ababa', 'Africa/Kampala',
+  'Africa/Dar_es_Salaam', 'Africa/Abidjan', 'Africa/Algiers'
+];
+
+// Common African currencies
+const COMMON_CURRENCIES = [
+  { code: 'GHS', name: 'Ghana Cedi (₵)' },
+  { code: 'NGN', name: 'Nigerian Naira (₦)' },
+  { code: 'KES', name: 'Kenyan Shilling (KSh)' },
+  { code: 'UGX', name: 'Ugandan Shilling (USh)' },
+  { code: 'TZS', name: 'Tanzanian Shilling (TSh)' },
+  { code: 'ZAR', name: 'South African Rand (R)' },
+  { code: 'USD', name: 'US Dollar ($)' },
+  { code: 'EUR', name: 'Euro (€)' }
+];
+
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
     businessName: '',
+    ownerName: '', // CHANGED: single ownerName instead of firstName + lastName
     email: '',
     password: '',
-    firstName: '',
-    lastName: '',
-    phone: '',
+    timezone: 'Africa/Accra', // ADDED: required timezone
+    currency: 'GHS', // ADDED: currency with default
   });
   const [error, setError] = useState('');
-  
+
   const { register, isLoading } = useAuth();
   const router = useRouter();
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData(prev => ({
       ...prev,
       [e.target.name]: e.target.value,
@@ -50,7 +69,7 @@ export default function RegisterPage() {
               {error}
             </div>
           )}
-          
+
           <Input
             label="Business Name"
             name="businessName"
@@ -58,24 +77,17 @@ export default function RegisterPage() {
             onChange={handleChange}
             required
           />
-          
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="First Name"
-              name="firstName"
-              value={formData.firstName}
-              onChange={handleChange}
-              required
-            />
-            <Input
-              label="Last Name"
-              name="lastName"
-              value={formData.lastName}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          
+
+          {/* CHANGED: Single ownerName field */}
+          <Input
+            label="Owner Full Name"
+            name="ownerName"
+            value={formData.ownerName}
+            onChange={handleChange}
+            required
+            placeholder="Enter your full name"
+          />
+
           <Input
             label="Email address"
             type="email"
@@ -85,7 +97,7 @@ export default function RegisterPage() {
             required
             autoComplete="email"
           />
-          
+
           <Input
             label="Password"
             type="password"
@@ -94,16 +106,49 @@ export default function RegisterPage() {
             onChange={handleChange}
             required
             autoComplete="new-password"
+            minLength={8}
           />
-          
-          <Input
-            label="Phone (Optional)"
-            type="tel"
-            name="phone"
-            value={formData.phone}
-            onChange={handleChange}
-          />
-          
+
+          {/* ADDED: Timezone selection */}
+          <div>
+            <label htmlFor="timezone" className="block text-sm font-medium text-gray-700 mb-1">
+              Timezone *
+            </label>
+            <select
+              id="timezone"
+              name="timezone"
+              value={formData.timezone}
+              onChange={handleChange}
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {COMMON_TIMEZONES.map(tz => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">Select your business timezone for proper scheduling</p>
+          </div>
+
+          {/* ADDED: Currency selection */}
+          <div>
+            <label htmlFor="currency" className="block text-sm font-medium text-gray-700 mb-1">
+              Currency
+            </label>
+            <select
+              id="currency"
+              name="currency"
+              value={formData.currency}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {COMMON_CURRENCIES.map(currency => (
+                <option key={currency.code} value={currency.code}>
+                  {currency.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <Button
             type="submit"
             variant="primary"
@@ -111,7 +156,7 @@ export default function RegisterPage() {
             loading={isLoading}
             className="w-full"
           >
-            Create account
+            Create Business Account
           </Button>
         </form>
 

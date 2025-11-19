@@ -125,7 +125,7 @@ export const businessService = {
         }
       ];
 
-      // Copy system permissions to business-specific permissions
+      // FIX: Copy system permissions to business-specific permissions WITH CONFLICT HANDLING
       const systemPermissionsResult = await client.query(
         'SELECT name, category, description, resource_type, action FROM permissions WHERE business_id IS NULL'
       );
@@ -133,17 +133,20 @@ export const businessService = {
       for (const systemPermission of systemPermissionsResult.rows) {
         await client.query(
           `INSERT INTO permissions (business_id, name, category, description, resource_type, action, is_system_permission)
-           VALUES ($1, $2, $3, $4, $5, $6, false)`,
+           VALUES ($1, $2, $3, $4, $5, $6, false)
+           ON CONFLICT (business_id, name) DO NOTHING`,
           [business.id, systemPermission.name, systemPermission.category,
            systemPermission.description, systemPermission.resource_type, systemPermission.action]
         );
       }
 
-      // Create roles and assign permissions
+      // FIX: Create roles and assign permissions WITH CONFLICT HANDLING
       for (const roleData of defaultRoles) {
         const roleResult = await client.query(
           `INSERT INTO roles (business_id, name, description, is_system_role)
-           VALUES ($1, $2, $3, true) RETURNING id`,
+           VALUES ($1, $2, $3, true)
+           ON CONFLICT (business_id, name) DO UPDATE SET description = EXCLUDED.description
+           RETURNING id`,
           [business.id, roleData.name, roleData.description]
         );
 
@@ -155,7 +158,8 @@ export const businessService = {
           await client.query(
             `INSERT INTO role_permissions (role_id, permission_id)
              SELECT $1, id FROM permissions
-             WHERE business_id = $2`,
+             WHERE business_id = $2
+             ON CONFLICT (role_id, permission_id) DO NOTHING`,
             [roleId, business.id]
           );
 
@@ -170,7 +174,8 @@ export const businessService = {
             await client.query(
               `INSERT INTO role_permissions (role_id, permission_id)
                SELECT $1, id FROM permissions
-               WHERE name = $2 AND business_id = $3`,
+               WHERE name = $2 AND business_id = $3
+               ON CONFLICT (role_id, permission_id) DO NOTHING`,
               [roleId, permissionName, business.id]
             );
           }

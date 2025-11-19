@@ -1,178 +1,124 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import { apiClient } from '@/lib/api';
-import { User, LoginData, RegisterData } from '@/types/auth';
+import { User, AuthResponse, LoginData, RegisterData, Business } from '@/types/auth';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
-  business: any | null;
-  isLoading: boolean;
+  business: Business | null;
   isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
   login: (credentials: LoginData) => Promise<void>;
-  register: (data: RegisterData) => Promise<void>;
+  register: (userData: RegisterData) => Promise<void>;
   logout: () => void;
-  setLoading: (loading: boolean) => void;
+  clearError: () => void;
   checkAuth: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      user: null,
-      token: null,
-      business: null,
-      isLoading: false,
-      isAuthenticated: false,
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: null,
+  business: null,
+  isAuthenticated: false,
+  loading: false,
+  error: null,
 
-      setLoading: (loading: boolean) => set({ isLoading: loading }),
+  login: async (credentials: LoginData) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await apiClient.post<AuthResponse>('/businesses/login', credentials);
+      
+      // FIX: Handle both response formats
+      const response = result as any;
+      const { user, business, token, timezoneInfo } = response;
 
-      login: async (credentials: LoginData) => {
-        set({ isLoading: true });
-        try {
-          const response = await apiClient.request('/api/businesses/login', {
-            method: 'POST',
-            body: JSON.stringify(credentials),
-          });
+      const transformedUser: User = {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        businessId: user.business_id || business.id,
+        permissions: [],
+        timezone: user.timezone
+      };
 
-          const user: User = {
-            id: response.user.id,
-            email: response.user.email,
-            firstName: response.user.fullName?.split(' ')[0] || 'User',
-            lastName: response.user.fullName?.split(' ')[1] || '',
-            role: response.user.role,
-            businessId: response.business.id,
-            permissions: []
-          };
-
-          set({
-            user,
-            token: response.token,
-            business: response.business,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('auth_token', response.token);
-          }
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      register: async (data: RegisterData) => {
-        set({ isLoading: true });
-        try {
-          const response = await apiClient.request('/api/businesses/register', {
-            method: 'POST',
-            body: JSON.stringify(data),
-          });
-
-          const user: User = {
-            id: response.user.id,
-            email: response.user.email,
-            firstName: response.user.firstName || data.firstName,
-            lastName: response.user.lastName || data.lastName,
-            role: response.user.role,
-            businessId: response.business.id,
-            permissions: []
-          };
-
-          set({
-            user,
-            token: response.token,
-            business: response.business,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('auth_token', response.token);
-          }
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      logout: () => {
-        set({
-          user: null,
-          token: null,
-          business: null,
-          isAuthenticated: false,
-        });
-
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('auth_token');
-        }
-      },
-
-      checkAuth: async () => {
-        const token = get().token || (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null);
-        
-        if (!token) {
-          set({ isAuthenticated: false });
-          return;
-        }
-
-        try {
-          set({ isLoading: true });
-          
-          // Verify token with backend by making a simple request
-          const response = await apiClient.request('/api/businesses/me', {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (response && response.user) {
-            const user: User = {
-              id: response.user.id,
-              email: response.user.email,
-              firstName: response.user.fullName?.split(' ')[0] || 'User',
-              lastName: response.user.fullName?.split(' ')[1] || '',
-              role: response.user.role,
-              businessId: response.business?.id,
-              permissions: []
-            };
-
-            set({
-              user,
-              token,
-              business: response.business,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-          } else {
-            throw new Error('Invalid user data');
-          }
-        } catch (error) {
-          console.error('Auth check failed:', error);
-          set({
-            user: null,
-            token: null,
-            business: null,
-            isAuthenticated: false,
-            isLoading: false,
-          });
-          
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('auth_token');
-          }
-        }
-      },
-    }),
-    {
-      name: 'auth-storage',
-      partialize: (state) => ({
-        user: state.user,
-        token: state.token,
-        business: state.business,
-        isAuthenticated: state.isAuthenticated,
-      }),
+      localStorage.setItem('token', token);
+      set({
+        user: transformedUser,
+        business,
+        isAuthenticated: true,
+        loading: false
+      });
+    } catch (error: any) {
+      set({
+        error: error.message || 'Login failed',
+        loading: false
+      });
+      throw error;
     }
-  )
-);
+  },
+
+  register: async (userData: RegisterData) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await apiClient.post<AuthResponse>('/businesses/register', userData);
+      
+      // FIX: Handle both response formats
+      const response = result as any;
+      const { user, business, token, timezoneInfo } = response;
+
+      const transformedUser: User = {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        businessId: user.business_id || business.id,
+        permissions: [],
+        timezone: user.timezone
+      };
+
+      localStorage.setItem('token', token);
+      set({
+        user: transformedUser,
+        business,
+        isAuthenticated: true,
+        loading: false
+      });
+    } catch (error: any) {
+      set({
+        error: error.message || 'Registration failed',
+        loading: false
+      });
+      throw error;
+    }
+  },
+
+  logout: () => {
+    localStorage.removeItem('token');
+    set({
+      user: null,
+      business: null,
+      isAuthenticated: false
+    });
+  },
+
+  clearError: () => set({ error: null }),
+
+  checkAuth: async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      set({ isAuthenticated: false, user: null, business: null });
+      return;
+    }
+
+    set({ loading: true });
+    try {
+      // You might want to add a verify-token endpoint or use current user endpoint
+      const response = await apiClient.get('/businesses/profile');
+      // Handle profile response if needed
+      set({ isAuthenticated: true, loading: false });
+    } catch (error) {
+      localStorage.removeItem('token');
+      set({ isAuthenticated: false, user: null, business: null, loading: false });
+    }
+  },
+}));
