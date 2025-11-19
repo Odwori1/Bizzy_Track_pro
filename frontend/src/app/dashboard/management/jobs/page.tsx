@@ -61,16 +61,21 @@ export default function JobsPage() {
     }
   };
 
+  // Format date for display
+  const formatDate = (dateData: any) => {
+    if (!dateData) return 'Not scheduled';
+    return dateData.formatted || new Date(dateData.utc).toLocaleString();
+  };
+
   // Filter jobs client-side for search (until backend supports search)
-  // FIXED: Added safe property access to prevent undefined errors
   const filteredJobs = jobs.filter(job => {
     const searchLower = searchTerm.toLowerCase();
-    
+
     return (
       (job.title?.toLowerCase() || '').includes(searchLower) ||
-      (job.customerFirstName?.toLowerCase() || '').includes(searchLower) ||
-      (job.customerLastName?.toLowerCase() || '').includes(searchLower) ||
-      (job.jobNumber?.toLowerCase() || '').includes(searchLower)
+      (job.customer_first_name?.toLowerCase() || '').includes(searchLower) ||
+      (job.customer_last_name?.toLowerCase() || '').includes(searchLower) ||
+      (job.job_number?.toLowerCase() || '').includes(searchLower)
     );
   });
 
@@ -194,7 +199,7 @@ export default function JobsPage() {
                       </div>
                     </Link>
                     <div className="text-sm text-gray-600">
-                      {job.customerFirstName} {job.customerLastName} • {job.serviceName}
+                      {job.customer_first_name} {job.customer_last_name} • {job.service_name}
                     </div>
                     <div className="flex space-x-2 mt-1">
                       <span className={`text-xs px-2 py-1 rounded-full ${
@@ -204,16 +209,16 @@ export default function JobsPage() {
                       }`}>
                         {job.priority}
                       </span>
-                      <span className="text-xs text-gray-500">#{job.jobNumber}</span>
+                      <span className="text-xs text-gray-500">#{job.job_number}</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="font-medium">
-                    {job.scheduledDate ? job.scheduledDate.formatted : 'Not scheduled'}
+                    {formatDate(job.scheduled_date)}
                   </div>
                   <div className="text-sm text-gray-600">
-                    {job.estimatedDurationMinutes || 'Unknown'} min
+                    {job.estimated_duration_minutes || 'Unknown'} min
                   </div>
                   <div className="flex space-x-2 mt-2">
                     <Link href={`/dashboard/management/jobs/${job.id}`}>

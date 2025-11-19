@@ -1,46 +1,117 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
-
-// Mock data - will be replaced with API calls
-const mockJob = {
-  id: '1',
-  jobNumber: 'JOB-001',
-  title: 'Complete Hair Styling Service',
-  description: 'Full hair styling with wash and blow dry',
-  status: 'in-progress' as const,
-  priority: 'high' as const,
-  customerFirstName: 'Robert',
-  customerLastName: 'Williams',
-  customerEmail: 'robert.williams@example.com',
-  customerPhone: '+254744538707',
-  serviceName: 'Hair Styling',
-  serviceBasePrice: '45.00',
-  scheduledDate: {
-    formatted: 'Today, 2:00 PM'
-  },
-  estimatedDurationMinutes: 60,
-  location: 'Main Salon',
-  createdAt: {
-    formatted: 'Nov 18, 2025, 08:42 AM'
-  }
-};
+import { useJob, useJobActions } from '@/hooks/useJobs';
+import { Job } from '@/types/jobs';
 
 interface JobDetailPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export default function JobDetailPage({ params }: JobDetailPageProps) {
-  const job = mockJob; // In real app, fetch by params.id
+  const [jobId, setJobId] = useState<string | null>(null);
+  const { job, loading, error, refetch } = useJob(jobId || undefined);
+  const { updateJobStatus } = useJobActions();
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+
+  // Unwrap the params promise
+  useEffect(() => {
+    const unwrapParams = async () => {
+      const unwrappedParams = await params;
+      setJobId(unwrappedParams.id);
+    };
+    
+    unwrapParams();
+  }, [params]);
+
+  // Refresh data when needed (after status updates)
+  useEffect(() => {
+    if (needsRefresh && jobId) {
+      refetch();
+      setNeedsRefresh(false);
+    }
+  }, [needsRefresh, jobId, refetch]);
+
+  // Handle status update
+  const handleStatusUpdate = async (newStatus: Job['status']) => {
+    if (!job) return;
+    
+    setStatusUpdating(true);
+    try {
+      const result = await updateJobStatus(job.id, newStatus);
+      if (result.success) {
+        // Set flag to refresh data instead of calling refetch directly
+        setNeedsRefresh(true);
+      } else {
+        alert(result.error || 'Failed to update status');
+      }
+    } catch (err) {
+      alert('Error updating status');
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  // Format date for display
+  const formatDate = (dateData: any) => {
+    if (!dateData) return 'Not scheduled';
+    return dateData.formatted || new Date(dateData.utc).toLocaleString();
+  };
+
+  if (!jobId) {
+    return (
+      <div className="flex justify-center items-center min-h-64">
+        <div className="text-gray-500">Loading job details...</div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-64">
+        <div className="text-gray-500">Loading job details...</div>
+      </div>
+    );
+  }
+
+  if (error || !job) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Job Not Found</h1>
+            <p className="text-gray-600">Unable to load job details</p>
+          </div>
+          <Link href="/dashboard/management/jobs">
+            <Button variant="secondary">
+              Back to Jobs
+            </Button>
+          </Link>
+        </div>
+        <Card>
+          <div className="p-6 text-center">
+            <div className="text-red-600 mb-4">Error loading job: {error}</div>
+            <Button variant="primary" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{job.title}</h1>
-          <p className="text-gray-600">Job #{job.jobNumber}</p>
+          <p className="text-gray-600">Job #{job.job_number}</p>
         </div>
         <div className="flex space-x-4">
           <Link href="/dashboard/management/jobs">
@@ -48,9 +119,11 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
               Back to Jobs
             </Button>
           </Link>
-          <Button variant="primary">
-            Edit Job
-          </Button>
+          <Link href={`/dashboard/management/jobs/${job.id}/edit`}>
+            <Button variant="primary">
+              Edit Job
+            </Button>
+          </Link>
         </div>
       </div>
 
@@ -84,18 +157,18 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600">Scheduled</label>
-                    <div className="text-sm mt-1">{job.scheduledDate.formatted}</div>
+                    <div className="text-sm mt-1">{formatDate(job.scheduled_date)}</div>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600">Duration</label>
-                    <div className="text-sm mt-1">{job.estimatedDurationMinutes} minutes</div>
+                    <div className="text-sm mt-1">{job.estimated_duration_minutes || 'Unknown'} minutes</div>
                   </div>
                   <div className="col-span-2">
                     <label className="text-sm font-medium text-gray-600">Location</label>
-                    <div className="text-sm mt-1">{job.location}</div>
+                    <div className="text-sm mt-1">{job.location || 'Not specified'}</div>
                   </div>
                 </div>
-                
+
                 {job.description && (
                   <div>
                     <label className="text-sm font-medium text-gray-600">Description</label>
@@ -115,17 +188,35 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
                   <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
                   <div className="text-sm">
                     <span className="font-medium">Job Created</span>
-                    <span className="text-gray-600 ml-2">{job.createdAt.formatted}</span>
+                    <span className="text-gray-600 ml-2">{formatDate(job.created_at)}</span>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
-                  <div className="text-sm text-gray-600">In Progress - Started today</div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
-                  <div className="text-sm text-gray-600">Completion - Pending</div>
-                </div>
+                {job.started_at && (
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <div className="text-sm">
+                      <span className="font-medium">Started</span>
+                      <span className="text-gray-600 ml-2">{formatDate(job.started_at)}</span>
+                    </div>
+                  </div>
+                )}
+                {job.completed_at && (
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                    <div className="text-sm">
+                      <span className="font-medium">Completed</span>
+                      <span className="text-gray-600 ml-2">{formatDate(job.completed_at)}</span>
+                    </div>
+                  </div>
+                )}
+                {!job.completed_at && job.status !== 'cancelled' && (
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+                    <div className="text-sm text-gray-600">
+                      {job.status === 'in-progress' ? 'Completion - In Progress' : 'Completion - Pending'}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </Card>
@@ -138,9 +229,9 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer</h2>
               <div className="space-y-2">
-                <div className="font-medium">{job.customerFirstName} {job.customerLastName}</div>
-                <div className="text-sm text-gray-600">{job.customerEmail}</div>
-                <div className="text-sm text-gray-600">{job.customerPhone}</div>
+                <div className="font-medium">{job.customer_first_name} {job.customer_last_name}</div>
+                <div className="text-sm text-gray-600">{job.customer_email}</div>
+                <div className="text-sm text-gray-600">{job.customer_phone}</div>
               </div>
             </div>
           </Card>
@@ -150,20 +241,73 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Service</h2>
               <div className="space-y-2">
-                <div className="font-medium">{job.serviceName}</div>
-                <div className="text-sm text-gray-600">${job.serviceBasePrice}</div>
+                <div className="font-medium">{job.service_name}</div>
+                <div className="text-sm text-gray-600">${job.service_base_price}</div>
               </div>
             </div>
           </Card>
 
-          {/* Actions */}
+          {/* Status Actions */}
+          <Card>
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Update Status</h2>
+              <div className="space-y-2">
+                {job.status !== 'pending' && (
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => handleStatusUpdate('pending')}
+                    disabled={statusUpdating}
+                  >
+                    Mark as Pending
+                  </Button>
+                )}
+                {job.status !== 'in-progress' && (
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => handleStatusUpdate('in-progress')}
+                    disabled={statusUpdating}
+                  >
+                    Mark as In Progress
+                  </Button>
+                )}
+                {job.status !== 'completed' && (
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => handleStatusUpdate('completed')}
+                    disabled={statusUpdating}
+                  >
+                    Mark as Completed
+                  </Button>
+                )}
+                {job.status !== 'cancelled' && (
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => handleStatusUpdate('cancelled')}
+                    disabled={statusUpdating}
+                  >
+                    Cancel Job
+                  </Button>
+                )}
+              </div>
+              {statusUpdating && (
+                <div className="text-xs text-gray-500 mt-2">Updating status...</div>
+              )}
+            </div>
+          </Card>
+
+          {/* Quick Actions */}
           <Card>
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
               <div className="space-y-2">
-                <Button variant="secondary" size="sm" className="w-full justify-start">
-                  Update Status
-                </Button>
                 <Button variant="secondary" size="sm" className="w-full justify-start">
                   Assign Staff
                 </Button>

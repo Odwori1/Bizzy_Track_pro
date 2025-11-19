@@ -58,6 +58,7 @@ export interface Job {
   service_name: string;
   service_base_price: string;
   assigned_to_name: string | null;
+  location: string | null; // Added location field
 }
 
 export interface JobCreateRequest {
@@ -69,6 +70,7 @@ export interface JobCreateRequest {
   estimated_duration_minutes?: number;
   priority: Job['priority'];
   assigned_to?: string;
+  location?: string; // Added location field
 }
 
 export interface JobUpdateRequest {
@@ -80,6 +82,7 @@ export interface JobUpdateRequest {
   estimated_duration_minutes?: number;
   priority?: Job['priority'];
   assigned_to?: string;
+  location?: string; // Added location field
 }
 
 export interface JobFilters {

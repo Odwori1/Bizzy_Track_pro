@@ -10,10 +10,10 @@ const setRLSContext = async (client, businessId, userId) => {
   if (!businessId || typeof businessId !== 'string') {
     throw new Error('Invalid businessId for RLS context');
   }
-  
+
   // Use template literal for SET command (parameterized queries not supported)
   await client.query(`SET app.current_business_id = '${businessId}'`);
-  
+
   if (userId && typeof userId === 'string') {
     await client.query(`SET app.current_user_id = '${userId}'`);
   }
@@ -25,7 +25,7 @@ export const jobService = {
     try {
       // SET RLS CONTEXT FIRST
       await setRLSContext(client, businessId, userId);
-      
+
       await client.query('BEGIN');
 
       // Get service details for pricing
@@ -58,9 +58,9 @@ export const jobService = {
         INSERT INTO jobs (
           business_id, job_number, title, description, customer_id, service_id,
           scheduled_date, estimated_duration_minutes, base_price, final_price,
-          discount_amount, priority, assigned_to, created_by
+          discount_amount, priority, assigned_to, created_by, location
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING *
       `;
 
@@ -78,7 +78,8 @@ export const jobService = {
         jobData.discount_amount || 0,
         jobData.priority || 'medium',
         jobData.assigned_to || null,
-        userId
+        userId,
+        jobData.location || null  // FIX: Added location field
       ];
 
       const result = await client.query(createQuery, values);
@@ -126,7 +127,7 @@ export const jobService = {
     try {
       // SET RLS CONTEXT FIRST
       await setRLSContext(client, businessId);
-      
+
       let selectQuery = `
         SELECT
           j.*,
@@ -185,7 +186,7 @@ export const jobService = {
     try {
       // SET RLS CONTEXT FIRST
       await setRLSContext(client, businessId);
-      
+
       const selectQuery = `
         SELECT
           j.*,
@@ -276,6 +277,9 @@ export const jobService = {
 
       await client.query('COMMIT');
 
+      // FIX: Get fresh data AFTER commit to ensure we have the latest state
+      const freshJob = await this.getJobById(id, businessId);
+
       log.info('Job status updated', {
         jobId: id,
         fromStatus: currentJob.status,
@@ -284,7 +288,7 @@ export const jobService = {
         userId
       });
 
-      return updatedJob;
+      return freshJob; // FIX: Return the fresh job data with updated timestamps
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -299,7 +303,7 @@ export const jobService = {
     const client = await getClient();
     try {
       await setRLSContext(client, businessId, userId);
-      
+
       // First get the current values for audit logging
       const currentJob = await this.getJobById(id, businessId);
       if (!currentJob) {
@@ -312,7 +316,7 @@ export const jobService = {
       const values = [];
       let paramCount = 1;
 
-      // Build dynamic update query
+      // Build dynamic update query - FIXED: Added location field
       const fields = {
         title: jobData.title,
         description: jobData.description,
@@ -321,7 +325,8 @@ export const jobService = {
         actual_duration_minutes: jobData.actual_duration_minutes,
         priority: jobData.priority,
         assigned_to: jobData.assigned_to,
-        discount_amount: jobData.discount_amount
+        discount_amount: jobData.discount_amount,
+        location: jobData.location  // FIX: Added location field
       };
 
       Object.entries(fields).forEach(([key, value]) => {
@@ -391,7 +396,7 @@ export const jobService = {
     const client = await getClient();
     try {
       await setRLSContext(client, businessId, userId);
-      
+
       // First get the current values for audit logging
       const currentJob = await this.getJobById(id, businessId);
       if (!currentJob) {
