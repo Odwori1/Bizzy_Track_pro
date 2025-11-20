@@ -22,7 +22,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     fetchInvoices(filters);
-  }, [filters]);
+  }, [filters, fetchInvoices]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,9 +51,40 @@ export default function InvoicesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
           <p className="text-gray-600">Manage and track your business invoices</p>
         </div>
-        <Link href="/dashboard/management/invoices/new">
-          <Button variant="primary">Create Invoice</Button>
+        <div className="flex space-x-4">
+          <Link href="/dashboard/management/invoices/new">
+            <Button variant="primary">Create Invoice</Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Link href="/dashboard/management/invoices/templates">
+          <Card className="cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="p-6 text-center">
+              <div className="text-2xl mb-2">📋</div>
+              <h3 className="font-semibold text-gray-900">Invoice Templates</h3>
+              <p className="text-gray-600 text-sm">Manage invoice templates</p>
+            </CardContent>
+          </Card>
         </Link>
+        <Link href="/dashboard/management/invoices/recurring">
+          <Card className="cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="p-6 text-center">
+              <div className="text-2xl mb-2">🔄</div>
+              <h3 className="font-semibold text-gray-900">Recurring Invoices</h3>
+              <p className="text-gray-600 text-sm">Automated recurring billing</p>
+            </CardContent>
+          </Card>
+        </Link>
+        <Card className="cursor-pointer hover:shadow-md transition-shadow bg-gray-50">
+          <CardContent className="p-6 text-center">
+            <div className="text-2xl mb-2">📊</div>
+            <h3 className="font-semibold text-gray-900">Invoice Analytics</h3>
+            <p className="text-gray-600 text-sm">Coming Soon</p>
+          </CardContent>
+        </Card>
       </div>
 
       {error && (
@@ -138,7 +169,7 @@ export default function InvoicesPage() {
                       </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-1">
-                      Due: {invoice.due_date.formatted}
+                      Due: {invoice.due_date?.formatted || new Date(invoice.due_date).toLocaleDateString()}
                     </p>
                   </div>
 
@@ -151,7 +182,12 @@ export default function InvoicesPage() {
                     </p>
                   </div>
 
-                  <div className="ml-4">
+                  <div className="ml-4 flex gap-2">
+                    <Link href={`/dashboard/management/invoices/${invoice.id}/preview`}>
+                      <Button variant="outline" size="sm">
+                        Preview
+                      </Button>
+                    </Link>
                     <Link href={`/dashboard/management/invoices/${invoice.id}`}>
                       <Button variant="outline" size="sm">
                         View

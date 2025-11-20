@@ -1,4 +1,3 @@
-import { randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { query, getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
@@ -514,13 +513,13 @@ export class PricingRuleService {
     }
   }
 
-    static async bulkUpdateServicesPricing(businessId, services, updateType, value, changeReason, userId) {
+  static async bulkUpdateServicesPricing(businessId, services, updateType, value, changeReason, userId) {
     const client = await getClient();
 
     try {
       await client.query('BEGIN');
 
-      const batchId = cryptoRandomUUID();
+      const batchId = require('crypto').randomUUID();
       const results = [];
 
       for (const service of services) {
@@ -568,13 +567,13 @@ export class PricingRuleService {
           [newPrice, service.id, businessId]
         );
 
-        // Log price change - CORRECTED COLUMN NAMES
+        // Log price change
         await client.query(
           `INSERT INTO price_history (
             business_id, entity_type, entity_id, entity_name,
             old_price, new_price, change_type, change_reason,
-            changed_by, change_source, bulk_update_batch, effective_from
-          ) VALUES ($1, 'service', $2, $3, $4, $5, 'bulk_update', $6, $7, 'system', $8, CURRENT_DATE)`,
+            changed_by, change_source, bulk_update_batch
+          ) VALUES ($1, 'service', $2, $3, $4, $5, 'bulk_update', $6, $7, 'system', $8)`,
           [businessId, service.id, service.name, oldPrice, newPrice, changeReason, userId, batchId]
         );
 
@@ -595,8 +594,8 @@ export class PricingRuleService {
         resourceType: 'pricing',
         resourceId: batchId,
         newValues: {
-          update_type: updateType,
-          value: value,
+          update_type,
+          value,
           services_updated: results.filter(r => r.success).length,
           total_services: services.length
         }
@@ -613,10 +612,10 @@ export class PricingRuleService {
       await client.query('COMMIT');
       return {
         batch_id: batchId,
-        update_type: updateType,
-        value: value,
-        change_reason: changeReason,
-        results: results,
+        update_type,
+        value,
+        change_reason,
+        results,
         summary: {
           total_services: services.length,
           successful_updates: results.filter(r => r.success).length,
@@ -637,7 +636,7 @@ export class PricingRuleService {
     try {
       await client.query('BEGIN');
 
-      const batchId = cryptoRandomUUID();
+      const batchId = require('crypto').randomUUID();
       const results = [];
 
       for (const pkg of packages) {
@@ -687,13 +686,13 @@ export class PricingRuleService {
 
         // Log price change
         await client.query(
-    `INSERT INTO price_history (
-      business_id, entity_type, entity_id, entity_name,
-      old_price, new_price, change_type, change_reason,
-      changed_by, change_source, bulk_update_batch, effective_from
-    ) VALUES ($1, 'package', $2, $3, $4, $5, 'bulk_update', $6, $7, 'system', $8, CURRENT_DATE)`,
-    [businessId, pkg.id, pkg.name, oldPrice, newPrice, changeReason, userId, batchId]
-  );
+          `INSERT INTO price_history (
+            business_id, entity_type, entity_id, entity_name,
+            old_price, new_price, change_type, change_reason,
+            changed_by, change_source, bulk_update_batch
+          ) VALUES ($1, 'package', $2, $3, $4, $5, 'bulk_update', $6, $7, 'system', $8)`,
+          [businessId, pkg.id, pkg.name, oldPrice, newPrice, changeReason, userId, batchId]
+        );
 
         results.push({
           package_id: pkg.id,
@@ -712,7 +711,7 @@ export class PricingRuleService {
         resourceType: 'pricing',
         resourceId: batchId,
         newValues: {
-          updateType,
+          update_type,
           value,
           packages_updated: results.filter(r => r.success).length,
           total_packages: packages.length
@@ -730,9 +729,9 @@ export class PricingRuleService {
       await client.query('COMMIT');
       return {
         batch_id: batchId,
-        updateType,
+        update_type,
         value,
-        changeReason,
+        change_reason,
         results,
         summary: {
           total_packages: packages.length,

@@ -43,6 +43,15 @@ import cameraRoutes from './routes/cameraRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import branchRoutes from './routes/branchRoutes.js';
 
+//additional invoice routes
+import invoiceTemplateRoutes from './routes/invoiceTemplateRoutes.js';
+import recurringInvoiceRoutes from './routes/recurringInvoiceRoutes.js';
+import invoicePdfRoutes from './routes/invoicePdfRoutes.js';
+
+//additional week 5 routes
+import seasonalPricingRoutes from './routes/seasonalPricingRoutes.js';
+import priceHistoryRoutes from './routes/priceHistoryRoutes.js';
+
 // ✅ WEEK 14: API SECURITY & INTEGRATION ROUTES
 import apiKeyRoutes from './routes/apiKeyRoutes.js';
 import webhookSecurityRoutes from './routes/webhookSecurityRoutes.js';
@@ -164,6 +173,15 @@ app.use('/api/behavioral-analytics', behavioralAnalyticsRoutes);
 app.use('/api/mobile', mobileRoutes);
 app.use('/api/camera', cameraRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+//additional invoice routes
+app.use('/api/invoice-templates', invoiceTemplateRoutes);
+app.use('/api/recurring-invoices', recurringInvoiceRoutes);
+app.use('/api/invoices', invoicePdfRoutes);
+
+//additional week 5 routes
+app.use('/api/seasonal-pricing', seasonalPricingRoutes);
+app.use('/api/price-history', priceHistoryRoutes);
 
 // ✅ WEEK 14: API SECURITY & INTEGRATION PROTECTED ROUTES
 app.use('/api/api-keys', apiKeyRoutes);

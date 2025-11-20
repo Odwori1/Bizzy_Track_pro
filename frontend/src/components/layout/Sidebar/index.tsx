@@ -14,10 +14,10 @@ const navigationItems = {
   ],
   management: [
     {
-      name: 'Customer Management',
-      href: '/dashboard/management/customers',
-      icon: '👥',
-      permission: 'customer:view',
+      name: 'Job Management',
+      href: '/dashboard/management/jobs',
+      icon: '🔧',
+      permission: 'job:view',
     },
     {
       name: 'Invoice Management',
@@ -26,10 +26,10 @@ const navigationItems = {
       permission: 'invoice:view',
     },
     {
-      name: 'Job Management',
-      href: '/dashboard/management/jobs',
-      icon: '🔧',
-      permission: 'job:view',
+      name: 'Customer Management',
+      href: '/dashboard/management/customers',
+      icon: '👥',
+      permission: 'customer:view',
     },
     {
       name: 'Service Management',
@@ -94,4 +94,4 @@ export const Sidebar: React.FC = () => {
       </div>
     </div>
   );
-};
+}

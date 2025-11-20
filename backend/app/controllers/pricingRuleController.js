@@ -202,7 +202,7 @@ export const pricingRuleController = {
 
     } catch (error) {
       log.error('ABAC pricing evaluation controller error', error);
-      
+
       // Provide specific error response
       res.status(500).json({
         success: false,
@@ -278,12 +278,12 @@ export const pricingRuleController = {
         });
       }
 
-      const updatePromises = rule_ids.map(ruleId => 
+      const updatePromises = rule_ids.map(ruleId =>
         PricingRuleService.updatePricingRule(businessId, ruleId, { is_active }, userId)
       );
 
       const results = await Promise.allSettled(updatePromises);
-      
+
       const successfulUpdates = results.filter(result => result.status === 'fulfilled' && result.value).length;
       const failedUpdates = results.filter(result => result.status === 'rejected').length;
 
@@ -308,5 +308,108 @@ export const pricingRuleController = {
       log.error('Pricing rules bulk update controller error', error);
       next(error);
     }
-  }
-};
+  }, // ← THIS COMMA WAS MISSING
+
+  async bulkUpdateServicesPricing(req, res, next) {
+    try {
+      const { services, update_type, value, change_reason } = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Bulk updating services pricing', {
+        businessId,
+        userId,
+        servicesCount: services?.length || 0,
+        update_type,
+        value
+      });
+
+      const result = await PricingRuleService.bulkUpdateServicesPricing(
+        businessId,
+        services,
+        update_type,
+        value,
+        change_reason,
+        userId
+      );
+
+      res.json({
+        success: true,
+        data: result,
+        message: `Bulk pricing update completed successfully`
+      });
+
+    } catch (error) {
+      log.error('Bulk services pricing update controller error', error);
+      next(error);
+    }
+  }, // ← THIS COMMA WAS MISSING
+
+  async bulkUpdatePackagesPricing(req, res, next) {
+    try {
+      const { packages, update_type, value, change_reason } = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Bulk updating packages pricing', {
+        businessId,
+        userId,
+        packagesCount: packages?.length || 0,
+        update_type,
+        value
+      });
+
+      const result = await PricingRuleService.bulkUpdatePackagesPricing(
+        businessId,
+        packages,
+        update_type,
+        value,
+        change_reason,
+        userId
+      );
+
+      res.json({
+        success: true,
+        data: result,
+        message: `Bulk packages pricing update completed successfully`
+      });
+
+    } catch (error) {
+      log.error('Bulk packages pricing update controller error', error);
+      next(error);
+    }
+  }, // ← THIS COMMA WAS MISSING
+
+  async previewBulkPricingChanges(req, res, next) {
+    try {
+      const { services, packages, update_type, value } = req.body;
+      const businessId = req.user.businessId;
+
+      log.info('Previewing bulk pricing changes', {
+        businessId,
+        servicesCount: services?.length || 0,
+        packagesCount: packages?.length || 0,
+        update_type,
+        value
+      });
+
+      const preview = await PricingRuleService.previewBulkPricingChanges(
+        businessId,
+        services,
+        packages,
+        update_type,
+        value
+      );
+
+      res.json({
+        success: true,
+        data: preview,
+        message: 'Bulk pricing changes preview generated successfully'
+      });
+
+    } catch (error) {
+      log.error('Bulk pricing preview controller error', error);
+      next(error);
+    }
+  } // ← NO COMMA HERE (last function)
+}; // ← CLOSING BRACE FOR THE ENTIRE CONTROLLER OBJECT

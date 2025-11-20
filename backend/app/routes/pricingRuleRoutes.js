@@ -111,3 +111,28 @@ router.patch(
 );
 
 export default router;
+
+// =============================================
+// BULK PRICING OPERATIONS
+// =============================================
+
+// Bulk update services pricing
+router.post(
+  '/bulk/update-services',
+  requirePermission('pricing:bulk_update'),
+  pricingRuleController.bulkUpdateServicesPricing
+);
+
+// Bulk update packages pricing
+router.post(
+  '/bulk/update-packages', 
+  requirePermission('pricing:bulk_update'),
+  pricingRuleController.bulkUpdatePackagesPricing
+);
+
+// Preview bulk pricing changes
+router.post(
+  '/bulk/preview',
+  requirePermission('pricing:bulk_update'),
+  pricingRuleController.previewBulkPricingChanges
+);
