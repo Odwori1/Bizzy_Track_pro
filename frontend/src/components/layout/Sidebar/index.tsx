@@ -38,6 +38,38 @@ const navigationItems = {
       permission: 'service:view',
     },
   ],
+  pricing: [
+    {
+      name: 'Pricing Rules',
+      href: '/dashboard/management/pricing/rules',
+      icon: '💰',
+      permission: 'pricing:view',
+    },
+    {
+      name: 'Seasonal Pricing',
+      href: '/dashboard/management/pricing/seasonal',
+      icon: '📅',
+      permission: 'pricing:view',
+    },
+    {
+      name: 'Bulk Operations',
+      href: '/dashboard/management/pricing/bulk',
+      icon: '⚡',
+      permission: 'pricing:manage',
+    },
+    {
+      name: 'Price History',
+      href: '/dashboard/management/pricing/history',
+      icon: '📊',
+      permission: 'pricing:view',
+    },
+    {
+      name: 'Evaluation Tool',
+      href: '/dashboard/management/pricing/evaluate',
+      icon: '🔍',
+      permission: 'pricing:view',
+    },
+  ],
   security: [
     {
       name: 'Permission Audits',
@@ -84,6 +116,7 @@ export const Sidebar: React.FC = () => {
         <nav className="space-y-8">
           <NavigationSection title="Overview" items={navigationItems.overview} />
           <NavigationSection title="Management" items={navigationItems.management} />
+          <NavigationSection title="Pricing Management" items={navigationItems.pricing} />
           <NavigationSection title="Security" items={navigationItems.security} />
         </nav>
       </div>
