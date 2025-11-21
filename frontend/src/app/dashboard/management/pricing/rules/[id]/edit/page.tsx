@@ -21,13 +21,21 @@ interface PricingRuleFormData {
   conditions: {
     customer_category_id?: string;
     min_quantity?: number;
+    max_quantity?: number;
     day_of_week?: number[];
+    time_of_day_start?: string;
+    time_of_day_end?: string;
+    min_total_amount?: number;
+    package_id?: string;
   };
   adjustment_type: string;
   adjustment_value: number;
   target_entity: string;
+  target_id?: string;
   priority: number;
   is_active: boolean;
+  valid_from?: string;
+  valid_until?: string;
 }
 
 export default function EditPricingRulePage({ params }: EditPricingRulePageProps) {
@@ -43,9 +51,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
     name: '',
     description: '',
     rule_type: 'customer_category',
-    conditions: {
-      customer_category_id: '7c1b1017-c8a7-4471-bb8d-cfd137d19fe5'
-    },
+    conditions: {},
     adjustment_type: 'percentage',
     adjustment_value: 0,
     target_entity: 'service',
@@ -66,18 +72,31 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
   // Populate form when rule data is loaded
   useEffect(() => {
     if (pricingRule) {
+      // Format dates for input fields
+      const formatDateForInput = (dateString: string | null) => {
+        if (!dateString) return '';
+        try {
+          const date = new Date(dateString);
+          return date.toISOString().split('T')[0];
+        } catch (error) {
+          console.error('Error formatting date:', dateString, error);
+          return '';
+        }
+      };
+
       setFormData({
         name: pricingRule.name || '',
         description: pricingRule.description || '',
         rule_type: pricingRule.rule_type || 'customer_category',
-        conditions: pricingRule.conditions || {
-          customer_category_id: '7c1b1017-c8a7-4471-bb8d-cfd137d19fe5'
-        },
+        conditions: pricingRule.conditions || {},
         adjustment_type: pricingRule.adjustment_type || 'percentage',
         adjustment_value: pricingRule.adjustment_value || 0,
         target_entity: pricingRule.target_entity || 'service',
+        target_id: pricingRule.target_id || '',
         priority: pricingRule.priority || 50,
-        is_active: pricingRule.is_active !== undefined ? pricingRule.is_active : true
+        is_active: pricingRule.is_active !== undefined ? pricingRule.is_active : true,
+        valid_from: formatDateForInput(pricingRule.valid_from),
+        valid_until: formatDateForInput(pricingRule.valid_until)
       });
     }
   }, [pricingRule]);
@@ -92,10 +111,28 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
     try {
       console.log('Updating pricing rule:', ruleId, formData);
 
-      const result = await updatePricingRule(ruleId, formData);
+      // Prepare data for backend
+      const submitData = {
+        ...formData,
+        // Ensure numeric values are properly formatted
+        adjustment_value: Number(formData.adjustment_value),
+        priority: Number(formData.priority),
+        // Convert empty strings to undefined for optional fields
+        target_id: formData.target_id || undefined,
+        valid_from: formData.valid_from || undefined,
+        valid_until: formData.valid_until || undefined,
+        // Ensure conditions has proper numeric values
+        conditions: {
+          ...formData.conditions,
+          min_quantity: formData.conditions.min_quantity ? Number(formData.conditions.min_quantity) : undefined,
+          max_quantity: formData.conditions.max_quantity ? Number(formData.conditions.max_quantity) : undefined,
+          min_total_amount: formData.conditions.min_total_amount ? Number(formData.conditions.min_total_amount) : undefined
+        }
+      };
+
+      const result = await updatePricingRule(ruleId, submitData);
 
       if (result.success) {
-        // Redirect to pricing rules list on success
         router.push('/dashboard/management/pricing/rules');
         router.refresh();
       } else {
@@ -111,21 +148,21 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    
+
     if (name.startsWith('conditions.')) {
       const conditionField = name.split('.')[1];
       setFormData(prev => ({
         ...prev,
         conditions: {
           ...prev.conditions,
-          [conditionField]: type === 'number' ? parseFloat(value) : value
+          [conditionField]: type === 'number' && value !== '' ? parseFloat(value) : value
         }
       }));
     } else {
       setFormData(prev => ({
         ...prev,
-        [name]: type === 'number' ? parseFloat(value) : 
-                type === 'checkbox' ? (e.target as HTMLInputElement).checked : 
+        [name]: type === 'number' && value !== '' ? parseFloat(value) :
+                type === 'checkbox' ? (e.target as HTMLInputElement).checked :
                 value
       }));
     }
@@ -134,27 +171,44 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
   const handleRuleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const ruleType = e.target.value;
     let conditions = {};
-    
-    // Set default conditions based on rule type
+
+    // Set default conditions based on rule type (matching backend schema)
     switch (ruleType) {
       case 'customer_category':
-        conditions = { customer_category_id: '7c1b1017-c8a7-4471-bb8d-cfd137d19fe5' };
+        conditions = { customer_category_id: '' };
         break;
-      case 'quantity_tier':
-        conditions = { min_quantity: 10 };
+      case 'quantity':
+        conditions = { min_quantity: 1 };
         break;
       case 'time_based':
         conditions = { day_of_week: [0, 6] }; // Weekend
         break;
+      case 'bundle':
+        conditions = { package_id: '' };
+        break;
       default:
         conditions = {};
     }
-    
+
     setFormData(prev => ({
       ...prev,
       rule_type: ruleType,
       conditions
     }));
+  };
+
+  const handleTargetEntityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const targetEntity = e.target.value;
+    setFormData(prev => ({
+      ...prev,
+      target_entity: targetEntity,
+      target_id: '' // Reset target ID when entity changes
+    }));
+  };
+
+  // Safe number display to prevent NaN
+  const safeNumberValue = (value: number | undefined): string => {
+    return value !== undefined && !isNaN(value) ? value.toString() : '';
   };
 
   if (!ruleId || ruleLoading) {
@@ -218,6 +272,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Basic Information */}
               <div className="space-y-2">
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700">
                   Rule Name *
@@ -247,9 +302,9 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                   disabled={loading}
                 >
                   <option value="customer_category">Customer Category</option>
-                  <option value="quantity_tier">Quantity Tier</option>
+                  <option value="quantity">Quantity Tier</option>
                   <option value="time_based">Time Based</option>
-                  <option value="seasonal">Seasonal</option>
+                  <option value="bundle">Bundle</option>
                 </select>
               </div>
 
@@ -261,17 +316,37 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                   id="target_entity"
                   name="target_entity"
                   value={formData.target_entity}
-                  onChange={handleChange}
+                  onChange={handleTargetEntityChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   required
                   disabled={loading}
                 >
                   <option value="service">Service</option>
+                  <option value="package">Package</option>
                   <option value="customer">Customer</option>
-                  <option value="category">Category</option>
                 </select>
               </div>
 
+              {formData.target_entity !== 'customer' && (
+                <div className="space-y-2">
+                  <label htmlFor="target_id" className="block text-sm font-medium text-gray-700">
+                    Target ID
+                  </label>
+                  <Input
+                    id="target_id"
+                    name="target_id"
+                    value={formData.target_id || ''}
+                    onChange={handleChange}
+                    placeholder={`Enter ${formData.target_entity} ID`}
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Leave empty to apply to all {formData.target_entity}s
+                  </p>
+                </div>
+              )}
+
+              {/* Adjustment Settings */}
               <div className="space-y-2">
                 <label htmlFor="adjustment_type" className="block text-sm font-medium text-gray-700">
                   Adjustment Type *
@@ -287,6 +362,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                 >
                   <option value="percentage">Percentage</option>
                   <option value="fixed">Fixed Amount</option>
+                  <option value="override">Override Price</option>
                 </select>
               </div>
 
@@ -298,13 +374,22 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                   type="number"
                   id="adjustment_value"
                   name="adjustment_value"
-                  value={formData.adjustment_value}
+                  value={safeNumberValue(formData.adjustment_value)}
                   onChange={handleChange}
                   placeholder="Enter value"
                   required
                   disabled={loading}
                   step="0.01"
+                  min={formData.adjustment_type === 'percentage' ? 0 : undefined}
+                  max={formData.adjustment_type === 'percentage' ? 100 : undefined}
                 />
+                <p className="text-xs text-gray-500">
+                  {formData.adjustment_type === 'percentage' 
+                    ? 'Enter percentage (0-100)' 
+                    : formData.adjustment_type === 'fixed' 
+                    ? 'Enter fixed amount' 
+                    : 'Enter override price'}
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -315,7 +400,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                   type="number"
                   id="priority"
                   name="priority"
-                  value={formData.priority}
+                  value={safeNumberValue(formData.priority)}
                   onChange={handleChange}
                   placeholder="Enter priority (1-100)"
                   min="1"
@@ -325,7 +410,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                 />
               </div>
 
-              {/* Conditional fields based on rule type */}
+              {/* Rule Type Specific Conditions */}
               {formData.rule_type === 'customer_category' && (
                 <div className="space-y-2 md:col-span-2">
                   <label htmlFor="conditions.customer_category_id" className="block text-sm font-medium text-gray-700">
@@ -342,24 +427,87 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                 </div>
               )}
 
-              {formData.rule_type === 'quantity_tier' && (
+              {formData.rule_type === 'quantity' && (
+                <>
+                  <div className="space-y-2">
+                    <label htmlFor="conditions.min_quantity" className="block text-sm font-medium text-gray-700">
+                      Minimum Quantity
+                    </label>
+                    <Input
+                      type="number"
+                      id="conditions.min_quantity"
+                      name="conditions.min_quantity"
+                      value={safeNumberValue(formData.conditions.min_quantity)}
+                      onChange={handleChange}
+                      placeholder="Enter minimum quantity"
+                      min="1"
+                      disabled={loading}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="conditions.max_quantity" className="block text-sm font-medium text-gray-700">
+                      Maximum Quantity
+                    </label>
+                    <Input
+                      type="number"
+                      id="conditions.max_quantity"
+                      name="conditions.max_quantity"
+                      value={safeNumberValue(formData.conditions.max_quantity)}
+                      onChange={handleChange}
+                      placeholder="Enter maximum quantity"
+                      min="1"
+                      disabled={loading}
+                    />
+                  </div>
+                </>
+              )}
+
+              {formData.rule_type === 'bundle' && (
                 <div className="space-y-2 md:col-span-2">
-                  <label htmlFor="conditions.min_quantity" className="block text-sm font-medium text-gray-700">
-                    Minimum Quantity
+                  <label htmlFor="conditions.package_id" className="block text-sm font-medium text-gray-700">
+                    Package ID
                   </label>
                   <Input
-                    type="number"
-                    id="conditions.min_quantity"
-                    name="conditions.min_quantity"
-                    value={formData.conditions.min_quantity || ''}
+                    id="conditions.package_id"
+                    name="conditions.package_id"
+                    value={formData.conditions.package_id || ''}
                     onChange={handleChange}
-                    placeholder="Enter minimum quantity"
-                    min="1"
+                    placeholder="Enter package ID"
                     disabled={loading}
                   />
                 </div>
               )}
 
+              {/* Validity Period */}
+              <div className="space-y-2">
+                <label htmlFor="valid_from" className="block text-sm font-medium text-gray-700">
+                  Valid From
+                </label>
+                <Input
+                  type="date"
+                  id="valid_from"
+                  name="valid_from"
+                  value={formData.valid_from || ''}
+                  onChange={handleChange}
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="valid_until" className="block text-sm font-medium text-gray-700">
+                  Valid Until
+                </label>
+                <Input
+                  type="date"
+                  id="valid_until"
+                  name="valid_until"
+                  value={formData.valid_until || ''}
+                  onChange={handleChange}
+                  disabled={loading}
+                />
+              </div>
+
+              {/* Description */}
               <div className="space-y-2 md:col-span-2">
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700">
                   Description
@@ -376,6 +524,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                 />
               </div>
 
+              {/* Active Status */}
               <div className="flex items-center md:col-span-2">
                 <input
                   type="checkbox"
@@ -383,7 +532,7 @@ export default function EditPricingRulePage({ params }: EditPricingRulePageProps
                   name="is_active"
                   checked={formData.is_active}
                   onChange={handleChange}
-                  className="mr-2"
+                  className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:bg-gray-100"
                   disabled={loading}
                 />
                 <label htmlFor="is_active" className="text-sm font-medium text-gray-700">
