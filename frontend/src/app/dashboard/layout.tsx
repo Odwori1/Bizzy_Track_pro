@@ -11,11 +11,16 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, checkAuth } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    // Check authentication status
+    // Check authentication on component mount
+    checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    // Only redirect if we're done loading and not authenticated
     if (!isLoading && !isAuthenticated) {
       router.push('/auth/login');
     }

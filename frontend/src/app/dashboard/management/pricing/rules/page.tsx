@@ -1,34 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { usePricing } from '@/hooks/usePricing';
-import { Button } from '@/components/ui/Button';
+import { useState } from 'react';
+import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { PricingRule } from '@/types/pricing';
+import { usePricing, usePricingActions } from '@/hooks/usePricing';
 
 export default function PricingRulesPage() {
-  const { getPricingRules, createPricingRule, updatePricingRule, deletePricingRule } = usePricing();
-  const [rules, setRules] = useState<PricingRule[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const { pricingRules, loading, error, refetch } = usePricing();
+  const { deletePricingRule } = usePricingActions();
 
-  useEffect(() => {
-    loadRules();
-  }, []);
-
-  const loadRules = async () => {
-    try {
-      const data = await getPricingRules();
-      setRules(data);
-    } catch (error) {
-      console.error('Error loading pricing rules:', error);
-    } finally {
-      setLoading(false);
+  const handleDeleteRule = async (ruleId: string, ruleName: string) => {
+    if (confirm(`Are you sure you want to delete the rule "${ruleName}"?`)) {
+      const result = await deletePricingRule(ruleId);
+      if (result.success) {
+        refetch();
+      } else {
+        alert(result.error);
+      }
     }
   };
 
-  const filteredRules = rules.filter(rule =>
+  const filteredRules = pricingRules.filter(rule =>
     rule.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     rule.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -44,10 +39,21 @@ export default function PricingRulesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Pricing Rules</h1>
           <p className="text-gray-600">Manage dynamic pricing rules and discounts</p>
         </div>
-        <Button onClick={() => {/* Open create modal */}}>
-          Create Rule
-        </Button>
+        <Link href="/dashboard/management/pricing/rules/new">
+          <Button>
+            Create Rule
+          </Button>
+        </Link>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+          <div className="text-red-800 text-sm">{error}</div>
+          <Button variant="secondary" size="sm" onClick={refetch} className="mt-2">
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Search and Filters */}
       <Card className="p-4 mb-6">
@@ -82,8 +88,8 @@ export default function PricingRulesPage() {
                 <p className="text-gray-600 text-sm mt-1">{rule.description}</p>
                 <div className="flex gap-4 mt-2 text-sm">
                   <span className={`px-2 py-1 rounded-full ${
-                    rule.is_active 
-                      ? 'bg-green-100 text-green-800' 
+                    rule.is_active
+                      ? 'bg-green-100 text-green-800'
                       : 'bg-gray-100 text-gray-800'
                   }`}>
                     {rule.is_active ? 'Active' : 'Inactive'}
@@ -93,10 +99,16 @@ export default function PricingRulesPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
-                  Edit
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => deletePricingRule(rule.id)}>
+                <Link href={`/dashboard/management/pricing/rules/${rule.id}/edit`}>
+                  <Button variant="outline" size="sm">
+                    Edit
+                  </Button>
+                </Link>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => handleDeleteRule(rule.id, rule.name)}
+                >
                   Delete
                 </Button>
               </div>
@@ -105,9 +117,14 @@ export default function PricingRulesPage() {
         ))}
       </div>
 
-      {filteredRules.length === 0 && (
+      {filteredRules.length === 0 && !loading && (
         <Card className="p-8 text-center">
           <p className="text-gray-500">No pricing rules found</p>
+          <Link href="/dashboard/management/pricing/rules/new">
+            <Button className="mt-4">
+              Create Your First Rule
+            </Button>
+          </Link>
         </Card>
       )}
     </div>

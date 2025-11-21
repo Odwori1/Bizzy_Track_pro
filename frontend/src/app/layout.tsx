@@ -1,5 +1,6 @@
 import './globals.css';
 import { Inter } from 'next/font/google';
+import { AuthInitializer } from '@/components/AuthInitializer';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -16,6 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+        <AuthInitializer />
         <div className="min-h-screen bg-gray-50">
           {children}
         </div>

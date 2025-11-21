@@ -308,27 +308,28 @@ export const pricingRuleController = {
       log.error('Pricing rules bulk update controller error', error);
       next(error);
     }
-  }, // ← THIS COMMA WAS MISSING
+  },
 
   async bulkUpdateServicesPricing(req, res, next) {
     try {
-      const { services, update_type, value, change_reason } = req.body;
+      // FIXED: Correct parameter names to match frontend expectations
+      const { target_services, operation_type, adjustment_value, change_reason } = req.body;
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
       log.info('Bulk updating services pricing', {
         businessId,
         userId,
-        servicesCount: services?.length || 0,
-        update_type,
-        value
+        servicesCount: target_services?.length || 0,
+        operation_type,
+        adjustment_value
       });
 
       const result = await PricingRuleService.bulkUpdateServicesPricing(
         businessId,
-        services,
-        update_type,
-        value,
+        target_services,
+        operation_type,
+        adjustment_value,
         change_reason,
         userId
       );
@@ -343,27 +344,28 @@ export const pricingRuleController = {
       log.error('Bulk services pricing update controller error', error);
       next(error);
     }
-  }, // ← THIS COMMA WAS MISSING
+  },
 
   async bulkUpdatePackagesPricing(req, res, next) {
     try {
-      const { packages, update_type, value, change_reason } = req.body;
+      // FIXED: Correct parameter names to match frontend expectations
+      const { target_packages, operation_type, adjustment_value, change_reason } = req.body;
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
       log.info('Bulk updating packages pricing', {
         businessId,
         userId,
-        packagesCount: packages?.length || 0,
-        update_type,
-        value
+        packagesCount: target_packages?.length || 0,
+        operation_type,
+        adjustment_value
       });
 
       const result = await PricingRuleService.bulkUpdatePackagesPricing(
         businessId,
-        packages,
-        update_type,
-        value,
+        target_packages,
+        operation_type,
+        adjustment_value,
         change_reason,
         userId
       );
@@ -378,27 +380,28 @@ export const pricingRuleController = {
       log.error('Bulk packages pricing update controller error', error);
       next(error);
     }
-  }, // ← THIS COMMA WAS MISSING
+  },
 
   async previewBulkPricingChanges(req, res, next) {
     try {
-      const { services, packages, update_type, value } = req.body;
+      // FIXED: Correct parameter names to match frontend expectations
+      const { target_services, target_packages, operation_type, adjustment_value } = req.body;
       const businessId = req.user.businessId;
 
       log.info('Previewing bulk pricing changes', {
         businessId,
-        servicesCount: services?.length || 0,
-        packagesCount: packages?.length || 0,
-        update_type,
-        value
+        servicesCount: target_services?.length || 0,
+        packagesCount: target_packages?.length || 0,
+        operation_type,
+        adjustment_value
       });
 
       const preview = await PricingRuleService.previewBulkPricingChanges(
         businessId,
-        services,
-        packages,
-        update_type,
-        value
+        target_services,
+        target_packages,
+        operation_type,
+        adjustment_value
       );
 
       res.json({
@@ -411,5 +414,5 @@ export const pricingRuleController = {
       log.error('Bulk pricing preview controller error', error);
       next(error);
     }
-  } // ← NO COMMA HERE (last function)
-}; // ← CLOSING BRACE FOR THE ENTIRE CONTROLLER OBJECT
+  }
+};

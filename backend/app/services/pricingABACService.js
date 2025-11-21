@@ -124,6 +124,94 @@ export class PricingABACService {
   }
 
   /**
+   * Get user pricing restrictions with fallback
+   */
+  static async getUserPricingRestrictions(userId, businessId) {
+    const client = await getClient();
+    try {
+      const result = await client.query(
+        `SELECT p.name, up.value
+         FROM user_permissions up
+         JOIN permissions p ON up.permission_id = p.id
+         WHERE up.user_id = $1
+           AND up.business_id = $2
+           AND p.name LIKE 'pricing:%'`,
+        [userId, businessId]
+      );
+
+      const restrictions = {};
+      result.rows.forEach(row => {
+        restrictions[row.name] = row.value;
+      });
+
+      return restrictions;
+    } catch (error) {
+      log.error('Error getting user pricing restrictions:', error);
+      
+      // Fallback: Return empty restrictions
+      return {};
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Evaluate ABAC rules for pricing decisions
+   */
+  static async evaluateABACRules(userId, businessId, action, resourceType, resourceAttributes, userAttributes) {
+    try {
+      // Get user permissions and restrictions
+      const canOverride = await this.canOverridePricing(userId, businessId);
+      const discountLimit = await this.getUserDiscountLimit(userId, businessId);
+      const restrictions = await this.getUserPricingRestrictions(userId, businessId);
+
+      // Basic ABAC evaluation logic
+      const evaluation = {
+        allowed: true,
+        constraints: {},
+        reasons: []
+      };
+
+      // Check discount limits
+      if (resourceAttributes?.adjustment_value > discountLimit) {
+        evaluation.allowed = false;
+        evaluation.constraints.max_discount = discountLimit;
+        evaluation.reasons.push(`Discount exceeds user limit of ${discountLimit}%`);
+      }
+
+      // Check if override is allowed for excessive discounts
+      if (!canOverride && resourceAttributes?.adjustment_value > 50) {
+        evaluation.allowed = false;
+        evaluation.constraints.requires_approval = true;
+        evaluation.reasons.push('Discount exceeds 50% and requires approval');
+      }
+
+      // Add user context
+      evaluation.user_context = {
+        can_override: canOverride,
+        discount_limit: discountLimit,
+        restrictions: restrictions
+      };
+
+      return evaluation;
+    } catch (error) {
+      log.error('Error evaluating ABAC rules:', error);
+      
+      // Fallback: Allow with default constraints
+      return {
+        allowed: true,
+        constraints: { max_discount: 25 },
+        reasons: ['Using fallback ABAC evaluation'],
+        user_context: {
+          can_override: false,
+          discount_limit: 25,
+          restrictions: {}
+        }
+      };
+    }
+  }
+
+  /**
    * Check if discount requires approval based on user's permissions
    */
   static async checkDiscountApprovalRequired(userId, businessId, discountPercentage) {

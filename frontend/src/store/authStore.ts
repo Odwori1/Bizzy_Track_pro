@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { apiClient } from '@/lib/api';
 import { User, AuthResponse, LoginData, RegisterData, Business } from '@/types/auth';
 
@@ -15,110 +16,132 @@ interface AuthState {
   checkAuth: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  business: null,
-  isAuthenticated: false,
-  loading: false,
-  error: null,
-
-  login: async (credentials: LoginData) => {
-    set({ loading: true, error: null });
-    try {
-      const result = await apiClient.post<AuthResponse>('/businesses/login', credentials);
-      
-      // FIX: Handle both response formats
-      const response = result as any;
-      const { user, business, token, timezoneInfo } = response;
-
-      const transformedUser: User = {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
-        businessId: user.business_id || business.id,
-        permissions: [],
-        timezone: user.timezone
-      };
-
-      localStorage.setItem('token', token);
-      set({
-        user: transformedUser,
-        business,
-        isAuthenticated: true,
-        loading: false
-      });
-    } catch (error: any) {
-      set({
-        error: error.message || 'Login failed',
-        loading: false
-      });
-      throw error;
-    }
-  },
-
-  register: async (userData: RegisterData) => {
-    set({ loading: true, error: null });
-    try {
-      const result = await apiClient.post<AuthResponse>('/businesses/register', userData);
-      
-      // FIX: Handle both response formats
-      const response = result as any;
-      const { user, business, token, timezoneInfo } = response;
-
-      const transformedUser: User = {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
-        businessId: user.business_id || business.id,
-        permissions: [],
-        timezone: user.timezone
-      };
-
-      localStorage.setItem('token', token);
-      set({
-        user: transformedUser,
-        business,
-        isAuthenticated: true,
-        loading: false
-      });
-    } catch (error: any) {
-      set({
-        error: error.message || 'Registration failed',
-        loading: false
-      });
-      throw error;
-    }
-  },
-
-  logout: () => {
-    localStorage.removeItem('token');
-    set({
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
       user: null,
       business: null,
-      isAuthenticated: false
-    });
-  },
+      isAuthenticated: false,
+      loading: false,
+      error: null,
 
-  clearError: () => set({ error: null }),
+      login: async (credentials: LoginData) => {
+        set({ loading: true, error: null });
+        try {
+          const result = await apiClient.post<AuthResponse>('/businesses/login', credentials);
 
-  checkAuth: async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      set({ isAuthenticated: false, user: null, business: null });
-      return;
+          // FIX: Handle both response formats
+          const response = result as any;
+          const { user, business, token, timezoneInfo } = response;
+
+          const transformedUser: User = {
+            id: user.id,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            businessId: user.business_id || business.id,
+            permissions: [],
+            timezone: user.timezone
+          };
+
+          localStorage.setItem('token', token);
+          set({
+            user: transformedUser,
+            business,
+            isAuthenticated: true,
+            loading: false
+          });
+        } catch (error: any) {
+          set({
+            error: error.message || 'Login failed',
+            loading: false
+          });
+          throw error;
+        }
+      },
+
+      register: async (userData: RegisterData) => {
+        set({ loading: true, error: null });
+        try {
+          const result = await apiClient.post<AuthResponse>('/businesses/register', userData);
+
+          // FIX: Handle both response formats
+          const response = result as any;
+          const { user, business, token, timezoneInfo } = response;
+
+          const transformedUser: User = {
+            id: user.id,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            businessId: user.business_id || business.id,
+            permissions: [],
+            timezone: user.timezone
+          };
+
+          localStorage.setItem('token', token);
+          set({
+            user: transformedUser,
+            business,
+            isAuthenticated: true,
+            loading: false
+          });
+        } catch (error: any) {
+          set({
+            error: error.message || 'Registration failed',
+            loading: false
+          });
+          throw error;
+        }
+      },
+
+      logout: () => {
+        localStorage.removeItem('token');
+        set({
+          user: null,
+          business: null,
+          isAuthenticated: false,
+          loading: false
+        });
+      },
+
+      clearError: () => set({ error: null }),
+
+      checkAuth: async () => {
+        const token = localStorage.getItem('token');
+        console.log('🔐 checkAuth called, token exists:', !!token);
+        
+        if (!token) {
+          set({ isAuthenticated: false, user: null, business: null, loading: false });
+          return;
+        }
+
+        set({ loading: true });
+        try {
+          // Use a simple endpoint that requires auth to verify token
+          // Using dashboard overview as it's likely to exist and require auth
+          await apiClient.get('/dashboard/overview');
+          console.log('✅ Token is valid, user authenticated');
+          set({ isAuthenticated: true, loading: false });
+        } catch (error) {
+          console.log('❌ Token invalid, logging out');
+          localStorage.removeItem('token');
+          set({ 
+            isAuthenticated: false, 
+            user: null, 
+            business: null, 
+            loading: false 
+          });
+        }
+      },
+    }),
+    {
+      name: 'auth-storage',
+      partialize: (state) => ({ 
+        user: state.user,
+        business: state.business,
+        isAuthenticated: state.isAuthenticated
+      }),
     }
-
-    set({ loading: true });
-    try {
-      // You might want to add a verify-token endpoint or use current user endpoint
-      const response = await apiClient.get('/businesses/profile');
-      // Handle profile response if needed
-      set({ isAuthenticated: true, loading: false });
-    } catch (error) {
-      localStorage.removeItem('token');
-      set({ isAuthenticated: false, user: null, business: null, loading: false });
-    }
-  },
-}));
+  )
+);

@@ -1,75 +1,205 @@
-import useSWR from 'swr';
-import { useApi } from './useApi';
-import { PricingRule, SeasonalPricing, PriceHistory, PricingEvaluation, BulkUpdatePreview } from '@/types/pricing';
+import { useEffect } from 'react';
+import { usePricingStore } from '@/store/pricingStore';
 
 export const usePricing = () => {
-  const { get, post, put, del } = useApi();
+  const { pricingRules, seasonalPricing, priceHistory, loading, error } = usePricingStore();
+  const { fetchPricingRules, fetchSeasonalPricing, fetchPriceHistory } = usePricingStore(state => state.actions);
 
-  // Pricing Rules
-  const usePricingRules = () => useSWR<PricingRule[]>('/api/pricing-rules', get);
-  const usePricingRule = (id: string) => useSWR<PricingRule>(id ? `/api/pricing-rules/${id}` : null, get);
-  const useActivePricingRules = () => useSWR<PricingRule[]>('/api/pricing-rules/active', get);
-  
-  const createPricingRule = (data: Partial<PricingRule>) => post('/api/pricing-rules', data);
-  const updatePricingRule = (id: string, data: Partial<PricingRule>) => put(`/api/pricing-rules/${id}`, data);
-  const deletePricingRule = (id: string) => del(`/api/pricing-rules/${id}`);
-
-  // Seasonal Pricing
-  const useSeasonalPricing = () => useSWR<SeasonalPricing[]>('/api/seasonal-pricing', get);
-  const useSeasonalPricingRule = (id: string) => useSWR<SeasonalPricing>(id ? `/api/seasonal-pricing/${id}` : null, get);
-  
-  const createSeasonalPricing = (data: Partial<SeasonalPricing>) => post('/api/seasonal-pricing', data);
-  const updateSeasonalPricing = (id: string, data: Partial<SeasonalPricing>) => put(`/api/seasonal-pricing/${id}`, data);
-  const deleteSeasonalPricing = (id: string) => del(`/api/seasonal-pricing/${id}`);
-
-  // Price History
-  const usePriceHistory = () => useSWR<PriceHistory[]>('/api/price-history/business', get);
-  const usePriceHistoryStats = () => useSWR('/api/price-history/stats/summary', get);
-
-  // Evaluation
-  const evaluatePricing = (data: any) => post<PricingEvaluation>('/api/pricing-rules/evaluate', data);
-  const evaluatePricingWithABAC = (data: any) => post<PricingEvaluation>('/api/pricing-rules/evaluate-with-abac', data);
-  const evaluateSeasonalPricing = (data: any) => post('/api/seasonal-pricing/evaluate', data);
-
-  // Bulk Operations
-  const previewBulkChanges = (data: any) => post<BulkUpdatePreview>('/api/pricing-rules/bulk/preview', data);
-  const bulkUpdateServices = (data: any) => post('/api/pricing-rules/bulk/update-services', data);
-
-  // Statistics
-  const usePricingStats = () => useSWR('/api/pricing-rules/stats/summary', get);
-  const useSeasonalPricingStats = () => useSWR('/api/seasonal-pricing/stats/summary', get);
+  useEffect(() => {
+    fetchPricingRules();
+    fetchSeasonalPricing();
+    fetchPriceHistory();
+  }, [fetchPricingRules, fetchSeasonalPricing, fetchPriceHistory]);
 
   return {
-    // Pricing Rules
-    usePricingRules,
-    usePricingRule,
-    useActivePricingRules,
+    pricingRules,
+    seasonalPricing,
+    priceHistory,
+    loading,
+    error,
+    refetch: () => {
+      fetchPricingRules();
+      fetchSeasonalPricing();
+      fetchPriceHistory();
+    }
+  };
+};
+
+export const usePricingRule = (id?: string) => {
+  const { selectedPricingRule, loading, error } = usePricingStore();
+  const { fetchPricingRule } = usePricingStore(state => state.actions);
+
+  useEffect(() => {
+    if (id) {
+      fetchPricingRule(id);
+    }
+  }, [id, fetchPricingRule]);
+
+  return {
+    pricingRule: selectedPricingRule,
+    loading,
+    error,
+    refetch: () => id ? fetchPricingRule(id) : Promise.resolve()
+  };
+};
+
+export const useSeasonalPricing = (id?: string) => {
+  const { selectedSeasonalPricing, loading, error } = usePricingStore();
+  const { fetchSeasonalPricingById } = usePricingStore(state => state.actions);
+
+  useEffect(() => {
+    if (id) {
+      fetchSeasonalPricingById(id);
+    }
+  }, [id, fetchSeasonalPricingById]);
+
+  return {
+    seasonalPricing: selectedSeasonalPricing,
+    loading,
+    error,
+    refetch: () => id ? fetchSeasonalPricingById(id) : Promise.resolve()
+  };
+};
+
+export const usePricingActions = () => {
+  const {
     createPricingRule,
     updatePricingRule,
     deletePricingRule,
-    
-    // Seasonal Pricing
-    useSeasonalPricing,
-    useSeasonalPricingRule,
     createSeasonalPricing,
     updateSeasonalPricing,
     deleteSeasonalPricing,
-    
-    // Price History
-    usePriceHistory,
-    usePriceHistoryStats,
-    
-    // Evaluation
-    evaluatePricing,
     evaluatePricingWithABAC,
-    evaluateSeasonalPricing,
-    
-    // Bulk Operations
-    previewBulkChanges,
+    bulkUpdatePreview,
     bulkUpdateServices,
-    
-    // Statistics
-    usePricingStats,
-    useSeasonalPricingStats,
+    fetchSeasonalPricingById,
+    clearError
+  } = usePricingStore(state => state.actions);
+
+  return {
+    // Pricing Rule Actions
+    createPricingRule: async (ruleData: any) => {
+      try {
+        const result = await createPricingRule(ruleData);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to create pricing rule'
+        };
+      }
+    },
+
+    updatePricingRule: async (id: string, ruleData: any) => {
+      try {
+        const result = await updatePricingRule(id, ruleData);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update pricing rule'
+        };
+      }
+    },
+
+    deletePricingRule: async (id: string) => {
+      try {
+        await deletePricingRule(id);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete pricing rule'
+        };
+      }
+    },
+
+    // Seasonal Pricing Actions
+    createSeasonalPricing: async (pricingData: any) => {
+      try {
+        const result = await createSeasonalPricing(pricingData);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to create seasonal pricing'
+        };
+      }
+    },
+
+    updateSeasonalPricing: async (id: string, pricingData: any) => {
+      try {
+        const result = await updateSeasonalPricing(id, pricingData);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update seasonal pricing'
+        };
+      }
+    },
+
+    deleteSeasonalPricing: async (id: string) => {
+      try {
+        await deleteSeasonalPricing(id);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete seasonal pricing'
+        };
+      }
+    },
+
+    getSeasonalPricingById: async (id: string) => {
+      try {
+        const result = await fetchSeasonalPricingById(id);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to fetch seasonal pricing'
+        };
+      }
+    },
+
+    // Evaluation and Bulk Actions
+    evaluatePricingWithABAC: async (params: any) => {
+      try {
+        const result = await evaluatePricingWithABAC(params);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to evaluate pricing'
+        };
+      }
+    },
+
+    bulkUpdatePreview: async (params: any) => {
+      try {
+        const result = await bulkUpdatePreview(params);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to preview bulk update'
+        };
+      }
+    },
+
+    bulkUpdateServices: async (params: any) => {
+      try {
+        await bulkUpdateServices(params);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to execute bulk update'
+        };
+      }
+    },
+
+    clearError
   };
 };

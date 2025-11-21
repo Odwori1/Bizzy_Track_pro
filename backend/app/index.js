@@ -51,6 +51,7 @@ import invoicePdfRoutes from './routes/invoicePdfRoutes.js';
 //additional week 5 routes
 import seasonalPricingRoutes from './routes/seasonalPricingRoutes.js';
 import priceHistoryRoutes from './routes/priceHistoryRoutes.js';
+import pricingABACRoutes from './routes/pricingABACRoutes.js';
 
 // ✅ WEEK 14: API SECURITY & INTEGRATION ROUTES
 import apiKeyRoutes from './routes/apiKeyRoutes.js';
@@ -182,6 +183,7 @@ app.use('/api/invoices', invoicePdfRoutes);
 //additional week 5 routes
 app.use('/api/seasonal-pricing', seasonalPricingRoutes);
 app.use('/api/price-history', priceHistoryRoutes);
+app.use('/api/pricing-abac', pricingABACRoutes);
 
 // ✅ WEEK 14: API SECURITY & INTEGRATION PROTECTED ROUTES
 app.use('/api/api-keys', apiKeyRoutes);
