@@ -2,6 +2,7 @@ import { packageService } from '../services/packageService.js';
 import { log } from '../utils/logger.js';
 
 export const packageController = {
+  // EXISTING METHODS (unchanged)
   async create(req, res, next) {
     try {
       const packageData = req.body;
@@ -54,7 +55,7 @@ export const packageController = {
       });
 
     } catch (error) {
-      log.error('Packages fetch controller error', error);
+      log.error('Package fetch all controller error', error);
       next(error);
     }
   },
@@ -92,7 +93,7 @@ export const packageController = {
   async update(req, res, next) {
     try {
       const { id } = req.params;
-      const updateData = req.body;
+      const packageData = req.body;
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
@@ -104,7 +105,7 @@ export const packageController = {
 
       const updatedPackage = await packageService.updatePackage(
         id,
-        updateData,
+        packageData,
         userId,
         businessId
       );
@@ -182,6 +183,133 @@ export const packageController = {
 
     } catch (error) {
       log.error('Package categories fetch controller error', error);
+      next(error);
+    }
+  },
+
+  // ==========================================================================
+  // NEW DECONSTRUCTION CONTROLLER METHODS
+  // ==========================================================================
+
+  async validateDeconstruction(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { selected_services } = req.body;
+      const businessId = req.user.businessId;
+
+      log.info('Validating package deconstruction', {
+        packageId: id,
+        businessId,
+        selectedServicesCount: selected_services?.length || 0
+      });
+
+      if (!selected_services || !Array.isArray(selected_services)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected services array is required'
+        });
+      }
+
+      const validationResult = await packageService.validatePackageDeconstruction(
+        id,
+        selected_services,
+        businessId
+      );
+
+      res.json({
+        success: true,
+        data: validationResult
+      });
+
+    } catch (error) {
+      log.error('Package deconstruction validation controller error', error);
+      next(error);
+    }
+  },
+
+  async getDeconstructionRules(req, res, next) {
+    try {
+      const { id } = req.params;
+      const businessId = req.user.businessId;
+
+      log.info('Fetching package deconstruction rules', {
+        packageId: id,
+        businessId
+      });
+
+      const rules = await packageService.getDeconstructionRules(id, businessId);
+
+      res.json({
+        success: true,
+        data: rules
+      });
+
+    } catch (error) {
+      log.error('Package deconstruction rules fetch controller error', error);
+      next(error);
+    }
+  },
+
+  async updateDeconstructionRules(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { rules } = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating package deconstruction rules', {
+        packageId: id,
+        userId,
+        businessId,
+        ruleCount: rules?.length || 0
+      });
+
+      if (!rules || !Array.isArray(rules)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Rules array is required'
+        });
+      }
+
+      const updatedRules = await packageService.updateDeconstructionRules(
+        id,
+        rules,
+        userId,
+        businessId
+      );
+
+      res.json({
+        success: true,
+        message: 'Deconstruction rules updated successfully',
+        data: updatedRules
+      });
+
+    } catch (error) {
+      log.error('Package deconstruction rules update controller error', error);
+      next(error);
+    }
+  },
+
+  async getCustomizablePackages(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      log.info('Fetching customizable packages', {
+        businessId
+      });
+
+      const packages = await packageService.getAllPackages(businessId, {
+        activeOnly: true,
+        customizableOnly: true
+      });
+
+      res.json({
+        success: true,
+        data: packages
+      });
+
+    } catch (error) {
+      log.error('Customizable packages fetch controller error', error);
       next(error);
     }
   }

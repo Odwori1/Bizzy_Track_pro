@@ -32,6 +32,10 @@ const validateRequest = (schema) => {
 // All routes require authentication and RLS context
 router.use(authenticate, setRLSContext);
 
+// ============================================================================
+// EXISTING PACKAGE CRUD ROUTES
+// ============================================================================
+
 // GET /api/packages - Get all packages (requires package:read permission)
 router.get('/', requirePermission('package:read'), packageController.getAll);
 
@@ -59,5 +63,37 @@ router.put(
 
 // DELETE /api/packages/:id - Delete package (requires package:delete permission)
 router.delete('/:id', requirePermission('package:delete'), packageController.delete);
+
+// ============================================================================
+// NEW PACKAGE DECONSTRUCTION ROUTES
+// ============================================================================
+
+// POST /api/packages/:id/validate-deconstruction - Validate package deconstruction
+router.post(
+  '/:id/validate-deconstruction',
+  requirePermission('package:deconstruct'),
+  packageController.validateDeconstruction
+);
+
+// GET /api/packages/:id/deconstruction-rules - Get package deconstruction rules
+router.get(
+  '/:id/deconstruction-rules',
+  requirePermission('package:read'),
+  packageController.getDeconstructionRules
+);
+
+// PUT /api/packages/:id/deconstruction-rules - Update package deconstruction rules
+router.put(
+  '/:id/deconstruction-rules',
+  requirePermission('package:rules:manage'),
+  packageController.updateDeconstructionRules
+);
+
+// GET /api/packages/customizable - Get only customizable packages
+router.get(
+  '/filter/customizable',
+  requirePermission('package:read'),
+  packageController.getCustomizablePackages
+);
 
 export default router;

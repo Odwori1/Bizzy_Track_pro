@@ -34,14 +34,15 @@ export const packageService = {
       const packageResult = await client.query(createPackageQuery, packageValues);
       const newPackage = packageResult.rows[0];
 
-      // Add services to package
+      // Add services to package with enhanced deconstruction features
       if (packageData.services && packageData.services.length > 0) {
         for (const serviceData of packageData.services) {
           const addServiceQuery = `
             INSERT INTO package_services
             (package_id, service_id, is_required, default_quantity,
-             max_quantity, package_price, is_price_overridden)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+             max_quantity, package_price, is_price_overridden,
+             service_dependencies, timing_constraints, resource_requirements, substitution_rules)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           `;
 
           const serviceValues = [
@@ -51,10 +52,36 @@ export const packageService = {
             serviceData.default_quantity || 1,
             serviceData.max_quantity || null,
             serviceData.package_price || null,
-            serviceData.package_price !== undefined && serviceData.package_price !== null
+            serviceData.package_price !== undefined && serviceData.package_price !== null,
+            serviceData.service_dependencies || [],
+            serviceData.timing_constraints || null,
+            serviceData.resource_requirements || null,
+            serviceData.substitution_rules || null
           ];
 
           await client.query(addServiceQuery, serviceValues);
+        }
+      }
+
+      // Add deconstruction rules if provided
+      if (packageData.deconstruction_rules && packageData.deconstruction_rules.length > 0) {
+        for (const ruleData of packageData.deconstruction_rules) {
+          const addRuleQuery = `
+            INSERT INTO package_deconstruction_rules
+            (package_id, rule_type, rule_conditions, rule_actions, priority, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `;
+
+          const ruleValues = [
+            newPackage.id,
+            ruleData.rule_type,
+            ruleData.rule_conditions,
+            ruleData.rule_actions,
+            ruleData.priority || 1,
+            ruleData.is_active !== undefined ? ruleData.is_active : true
+          ];
+
+          await client.query(addRuleQuery, ruleValues);
         }
       }
 
@@ -75,10 +102,11 @@ export const packageService = {
         businessId,
         userId,
         packageName: newPackage.name,
-        serviceCount: packageData.services?.length || 0
+        serviceCount: packageData.services?.length || 0,
+        ruleCount: packageData.deconstruction_rules?.length || 0
       });
 
-      // Return the complete package with services
+      // Return the complete package with services and rules
       return await this.getPackageById(newPackage.id, businessId);
 
     } catch (error) {
@@ -118,6 +146,13 @@ export const packageService = {
       if (options.category) {
         selectQuery += ` AND sp.category = $${paramCount}`;
         values.push(options.category);
+        paramCount++;
+      }
+
+      // Filter by customizable if provided
+      if (options.customizableOnly) {
+        selectQuery += ` AND sp.is_customizable = $${paramCount}`;
+        values.push(true);
         paramCount++;
       }
 
@@ -161,7 +196,7 @@ export const packageService = {
         return null;
       }
 
-      // Get package services
+      // Get package services with enhanced deconstruction features
       const servicesQuery = `
         SELECT
           ps.*,
@@ -179,7 +214,23 @@ export const packageService = {
       const servicesResult = await client.query(servicesQuery, [id]);
       servicePackage.services = servicesResult.rows;
 
-      log.debug('Fetched package by ID', { packageId: id, businessId });
+      // Get deconstruction rules
+      const rulesQuery = `
+        SELECT *
+        FROM package_deconstruction_rules
+        WHERE package_id = $1 AND is_active = true
+        ORDER BY priority DESC, rule_type
+      `;
+
+      const rulesResult = await client.query(rulesQuery, [id]);
+      servicePackage.deconstruction_rules = rulesResult.rows;
+
+      log.debug('Fetched package by ID', { 
+        packageId: id, 
+        businessId,
+        serviceCount: servicePackage.services.length,
+        ruleCount: servicePackage.deconstruction_rules.length
+      });
 
       return servicePackage;
     } catch (error) {
@@ -279,6 +330,37 @@ export const packageService = {
       const result = await client.query(updateQuery, values);
       const updatedPackage = result.rows[0];
 
+      // Update deconstruction rules if provided
+      if (packageData.deconstruction_rules !== undefined) {
+        // First deactivate all existing rules
+        await client.query(
+          'UPDATE package_deconstruction_rules SET is_active = false WHERE package_id = $1',
+          [id]
+        );
+
+        // Insert new rules
+        if (packageData.deconstruction_rules.length > 0) {
+          for (const ruleData of packageData.deconstruction_rules) {
+            const addRuleQuery = `
+              INSERT INTO package_deconstruction_rules
+              (package_id, rule_type, rule_conditions, rule_actions, priority, is_active)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `;
+
+            const ruleValues = [
+              id,
+              ruleData.rule_type,
+              ruleData.rule_conditions,
+              ruleData.rule_actions,
+              ruleData.priority || 1,
+              ruleData.is_active !== undefined ? ruleData.is_active : true
+            ];
+
+            await client.query(addRuleQuery, ruleValues);
+          }
+        }
+      }
+
       // Log the audit action
       await auditLogger.logAction({
         businessId,
@@ -332,6 +414,12 @@ export const packageService = {
       const result = await client.query(deleteQuery, [id, businessId]);
       const deletedPackage = result.rows[0];
 
+      // Also deactivate all deconstruction rules
+      await client.query(
+        'UPDATE package_deconstruction_rules SET is_active = false WHERE package_id = $1',
+        [id]
+      );
+
       // Log the audit action
       await auditLogger.logAction({
         businessId,
@@ -384,6 +472,247 @@ export const packageService = {
       return categories;
     } catch (error) {
       log.error('Failed to fetch package categories', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // NEW: Package Deconstruction Methods
+  async validatePackageDeconstruction(packageId, selectedServices, businessId) {
+    const client = await getClient();
+    try {
+      const pkgData = await this.getPackageById(packageId, businessId);
+      if (!pkgData) {
+        throw new Error('Package not found');
+      }
+
+      const validationResult = {
+        isValid: true,
+        errors: [],
+        warnings: [],
+        totalPrice: 0,
+        totalDuration: 0
+      };
+
+      // Check minimum services constraint
+      if (selectedServices.length < pkgData.min_services) {
+        validationResult.isValid = false;
+        validationResult.errors.push(`Minimum ${pkgData.min_services} services required`);
+      }
+
+      // Check maximum services constraint
+      if (pkgData.max_services && selectedServices.length > pkgData.max_services) {
+        validationResult.isValid = false;
+        validationResult.errors.push(`Maximum ${pkgData.max_services} services allowed`);
+      }
+
+      // Check required services
+      const requiredServices = pkgData.services.filter(s => s.is_required);
+      for (const requiredService of requiredServices) {
+        if (!selectedServices.find(s => s.service_id === requiredService.service_id)) {
+          validationResult.isValid = false;
+          validationResult.errors.push(`Required service "${requiredService.service_name}" is missing`);
+        }
+      }
+
+      // Apply deconstruction rules
+      for (const rule of pkgData.deconstruction_rules) {
+        const ruleValidation = await this.applyDeconstructionRule(rule, selectedServices, pkgData);
+        if (!ruleValidation.isValid) {
+          validationResult.isValid = false;
+          validationResult.errors.push(...ruleValidation.errors);
+        }
+        if (ruleValidation.warnings.length > 0) {
+          validationResult.warnings.push(...ruleValidation.warnings);
+        }
+      }
+
+      // Calculate pricing and duration
+      for (const selectedService of selectedServices) {
+        const packageService = pkgData.services.find(s => s.service_id === selectedService.service_id);
+        if (packageService) {
+          const servicePrice = packageService.is_price_overridden 
+            ? packageService.package_price 
+            : packageService.service_base_price;
+          
+          const quantity = selectedService.quantity || 1;
+          validationResult.totalPrice += servicePrice * quantity;
+          validationResult.totalDuration += packageService.service_duration * quantity;
+        }
+      }
+
+      log.debug('Package deconstruction validation', {
+        packageId,
+        businessId,
+        selectedServicesCount: selectedServices.length,
+        isValid: validationResult.isValid,
+        errorCount: validationResult.errors.length,
+        warningCount: validationResult.warnings.length
+      });
+
+      return validationResult;
+
+    } catch (error) {
+      log.error('Package deconstruction validation failed', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async applyDeconstructionRule(rule, selectedServices, pkgData) {
+    const result = {
+      isValid: true,
+      errors: [],
+      warnings: []
+    };
+
+    try {
+      // This is a simplified rule engine - can be expanded based on rule_type
+      switch (rule.rule_type) {
+        case 'dependency':
+          // Check if required dependencies are met
+          const conditions = rule.rule_conditions;
+          if (conditions.requires) {
+            const requiredService = pkgData.services.find(s => s.service_id === conditions.requires);
+            if (requiredService && !selectedServices.find(s => s.service_id === conditions.requires)) {
+              result.isValid = false;
+              result.errors.push(`Service requires "${requiredService.service_name}" to be selected`);
+            }
+          }
+          break;
+
+        case 'timing':
+          // Check timing constraints
+          const timingConditions = rule.rule_conditions;
+          if (timingConditions.before || timingConditions.after) {
+            // Implement timing logic based on service sequencing
+            result.warnings.push('Timing constraints would be validated during scheduling');
+          }
+          break;
+
+        case 'pricing':
+          // Apply pricing rules
+          const pricingActions = rule.rule_actions;
+          if (pricingActions.adjustment) {
+            // This would adjust the final price calculation
+            result.warnings.push('Pricing rules will be applied to final calculation');
+          }
+          break;
+
+        case 'substitution':
+          // Handle service substitutions
+          const substitutionConditions = rule.rule_conditions;
+          if (substitutionConditions.allows_substitution) {
+            // Check if substitutions are valid
+            result.warnings.push('Substitution rules are available for this package');
+          }
+          break;
+      }
+
+      return result;
+    } catch (error) {
+      log.error('Error applying deconstruction rule', error);
+      result.isValid = false;
+      result.errors.push('Error applying package rules');
+      return result;
+    }
+  },
+
+  async getDeconstructionRules(packageId, businessId) {
+    const client = await getClient();
+    try {
+      const rulesQuery = `
+        SELECT *
+        FROM package_deconstruction_rules
+        WHERE package_id = $1 AND is_active = true
+        ORDER BY priority DESC, rule_type
+      `;
+
+      const result = await client.query(rulesQuery, [packageId]);
+
+      log.debug('Fetched deconstruction rules', {
+        packageId,
+        businessId,
+        ruleCount: result.rows.length
+      });
+
+      return result.rows;
+    } catch (error) {
+      log.error('Failed to fetch deconstruction rules', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateDeconstructionRules(packageId, rules, userId, businessId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Verify package exists and belongs to business
+      const packageVerify = await client.query(
+        'SELECT id FROM service_packages WHERE id = $1 AND business_id = $2',
+        [packageId, businessId]
+      );
+
+      if (packageVerify.rows.length === 0) {
+        throw new Error('Package not found');
+      }
+
+      // Deactivate all existing rules
+      await client.query(
+        'UPDATE package_deconstruction_rules SET is_active = false WHERE package_id = $1',
+        [packageId]
+      );
+
+      // Insert new rules
+      for (const ruleData of rules) {
+        const insertRuleQuery = `
+          INSERT INTO package_deconstruction_rules
+          (package_id, rule_type, rule_conditions, rule_actions, priority, is_active)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `;
+
+        const ruleValues = [
+          packageId,
+          ruleData.rule_type,
+          ruleData.rule_conditions,
+          ruleData.rule_actions,
+          ruleData.priority || 1,
+          ruleData.is_active !== undefined ? ruleData.is_active : true
+        ];
+
+        await client.query(insertRuleQuery, ruleValues);
+      }
+
+      // Log the audit action
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'package.rules.updated',
+        resourceType: 'package',
+        resourceId: packageId,
+        newValues: { rules_updated: rules.length }
+      });
+
+      await client.query('COMMIT');
+
+      log.info('Deconstruction rules updated', {
+        packageId,
+        businessId,
+        userId,
+        ruleCount: rules.length
+      });
+
+      return await this.getDeconstructionRules(packageId, businessId);
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      log.error('Failed to update deconstruction rules', error);
       throw error;
     } finally {
       client.release();

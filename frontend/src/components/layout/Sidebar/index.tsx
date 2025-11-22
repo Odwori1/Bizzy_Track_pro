@@ -37,6 +37,12 @@ const navigationItems = {
       icon: '🎯',
       permission: 'service:view',
     },
+    {
+      name: 'Package Management',
+      href: '/dashboard/management/packages',
+      icon: '📦',
+      permission: 'package:view',
+    },
   ],
   pricing: [
     {
