@@ -1,319 +1,186 @@
-import { query, getClient } from '../utils/database.js';
+import { query } from '../utils/database.js';
 import { log } from '../utils/logger.js';
-import { auditLogger } from '../utils/auditLogger.js';
 
 export const serviceService = {
   async createService(serviceData, userId, businessId) {
-    const client = await getClient();
-
     try {
-      await client.query('BEGIN');
+      const { name, description, base_price, duration_minutes, category, service_category_id } = serviceData;
 
-      const createQuery = `
-        INSERT INTO services
-        (business_id, name, description, base_price, duration_minutes, category, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *
-      `;
+      const result = await query(
+        `INSERT INTO services 
+         (business_id, name, description, base_price, duration_minutes, category, service_category_id, created_by) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+         RETURNING *`,
+        [businessId, name, description, base_price, duration_minutes, category, service_category_id, userId]
+      );
 
-      const values = [
-        businessId,
-        serviceData.name,
-        serviceData.description || '',
-        serviceData.base_price,
-        serviceData.duration_minutes || 60,
-        serviceData.category || 'General',
-        userId
-      ];
-
-      const result = await client.query(createQuery, values);
-      const newService = result.rows[0];
-
-      // Log the audit action
-      await auditLogger.logAction({
-        businessId,
-        userId,
-        action: 'service.created',
-        resourceType: 'service',
-        resourceId: newService.id,
-        newValues: newService
+      log.info('Service created successfully', {
+        serviceId: result.rows[0].id,
+        businessId
       });
 
-      await client.query('COMMIT');
-
-      log.info('Service created', {
-        serviceId: newService.id,
-        businessId,
-        userId,
-        serviceName: newService.name
-      });
-
-      return newService;
+      return result.rows[0];
 
     } catch (error) {
-      await client.query('ROLLBACK');
-      log.error('Service creation failed', error);
+      log.error('Service creation service error', error);
       throw error;
-    } finally {
-      client.release();
     }
   },
 
   async getAllServices(businessId, options = {}) {
-    const client = await getClient();
     try {
-      let selectQuery = `
-        SELECT
-          id, name, description, base_price, duration_minutes,
-          category, is_active, created_at, updated_at
-        FROM services
-        WHERE business_id = $1
+      let queryStr = `
+        SELECT s.*, 
+               sc.name as category_name,
+               sc.color as category_color,
+               COALESCE(sc.name, s.category) as display_category
+        FROM services s
+        LEFT JOIN service_categories sc ON s.service_category_id = sc.id
+        WHERE s.business_id = $1
       `;
-
-      const values = [businessId];
-      let paramCount = 2;
-
-      // Filter by active status if provided
-      if (options.activeOnly) {
-        selectQuery += ` AND is_active = $${paramCount}`;
-        values.push(true);
-        paramCount++;
-      }
-
-      // Filter by category if provided
-      if (options.category) {
-        selectQuery += ` AND category = $${paramCount}`;
-        values.push(options.category);
-        paramCount++;
-      }
-
-      selectQuery += ` ORDER BY name`;
-
-      const result = await client.query(selectQuery, values);
-
-      log.debug('Fetched services', {
-        businessId,
-        count: result.rows.length,
-        filters: options
-      });
-
-      return result.rows;
-    } catch (error) {
-      log.error('Failed to fetch services', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async getServiceById(id, businessId) {
-    const client = await getClient();
-    try {
-      const selectQuery = `
-        SELECT
-          id, name, description, base_price, duration_minutes,
-          category, is_active, created_at, updated_at
-        FROM services
-        WHERE id = $1 AND business_id = $2
-      `;
-
-      const result = await client.query(selectQuery, [id, businessId]);
-      const service = result.rows[0] || null;
-
-      if (service) {
-        log.debug('Fetched service by ID', { serviceId: id, businessId });
-      } else {
-        log.debug('Service not found', { serviceId: id, businessId });
-      }
-
-      return service;
-    } catch (error) {
-      log.error('Failed to fetch service by ID', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async updateService(id, serviceData, userId, businessId) {
-    const client = await getClient();
-
-    try {
-      // First get the current values for audit logging
-      const currentService = await this.getServiceById(id, businessId);
-      if (!currentService) {
-        throw new Error('Service not found');
-      }
-
-      await client.query('BEGIN');
-
-      const updateFields = [];
-      const values = [];
+      const queryParams = [businessId];
       let paramCount = 1;
 
-      // Build dynamic update query
-      if (serviceData.name !== undefined) {
-        updateFields.push(`name = $${paramCount}`);
-        values.push(serviceData.name);
+      if (options.activeOnly) {
+        queryStr += ` AND s.is_active = true`;
+      }
+
+      if (options.category) {
         paramCount++;
+        queryStr += ` AND (s.category = $${paramCount} OR sc.name = $${paramCount})`;
+        queryParams.push(options.category);
       }
 
-      if (serviceData.description !== undefined) {
-        updateFields.push(`description = $${paramCount}`);
-        values.push(serviceData.description);
-        paramCount++;
-      }
+      queryStr += ` ORDER BY s.name`;
 
-      if (serviceData.base_price !== undefined) {
-        updateFields.push(`base_price = $${paramCount}`);
-        values.push(serviceData.base_price);
-        paramCount++;
-      }
-
-      if (serviceData.duration_minutes !== undefined) {
-        updateFields.push(`duration_minutes = $${paramCount}`);
-        values.push(serviceData.duration_minutes);
-        paramCount++;
-      }
-
-      if (serviceData.category !== undefined) {
-        updateFields.push(`category = $${paramCount}`);
-        values.push(serviceData.category);
-        paramCount++;
-      }
-
-      if (serviceData.is_active !== undefined) {
-        updateFields.push(`is_active = $${paramCount}`);
-        values.push(serviceData.is_active);
-        paramCount++;
-      }
-
-      if (updateFields.length === 0) {
-        throw new Error('No valid fields to update');
-      }
-
-      updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
-
-      values.push(id, businessId);
-
-      const updateQuery = `
-        UPDATE services
-        SET ${updateFields.join(', ')}
-        WHERE id = $${paramCount} AND business_id = $${paramCount + 1}
-        RETURNING *
-      `;
-
-      const result = await client.query(updateQuery, values);
-      const updatedService = result.rows[0];
-
-      // Log the audit action
-      await auditLogger.logAction({
-        businessId,
-        userId,
-        action: 'service.updated',
-        resourceType: 'service',
-        resourceId: id,
-        oldValues: currentService,
-        newValues: updatedService
-      });
-
-      await client.query('COMMIT');
-
-      log.info('Service updated', {
-        serviceId: id,
-        businessId,
-        userId
-      });
-
-      return updatedService;
+      const result = await query(queryStr, queryParams);
+      return result.rows;
 
     } catch (error) {
-      await client.query('ROLLBACK');
-      log.error('Service update failed', error);
+      log.error('Services fetch service error', error);
       throw error;
-    } finally {
-      client.release();
     }
   },
 
-  async deleteService(id, userId, businessId) {
-    const client = await getClient();
-
+  async getServiceById(serviceId, businessId) {
     try {
-      // First get the current values for audit logging
-      const currentService = await this.getServiceById(id, businessId);
-      if (!currentService) {
-        throw new Error('Service not found');
-      }
+      const result = await query(
+        `SELECT s.*, 
+                sc.name as category_name,
+                sc.color as category_color,
+                COALESCE(sc.name, s.category) as display_category
+         FROM services s
+         LEFT JOIN service_categories sc ON s.service_category_id = sc.id
+         WHERE s.id = $1 AND s.business_id = $2`,
+        [serviceId, businessId]
+      );
 
-      await client.query('BEGIN');
-
-      // Soft delete by setting is_active to false
-      const deleteQuery = `
-        UPDATE services
-        SET is_active = false, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1 AND business_id = $2
-        RETURNING *
-      `;
-
-      const result = await client.query(deleteQuery, [id, businessId]);
-      const deletedService = result.rows[0];
-
-      // Log the audit action
-      await auditLogger.logAction({
-        businessId,
-        userId,
-        action: 'service.deleted',
-        resourceType: 'service',
-        resourceId: id,
-        oldValues: currentService,
-        newValues: deletedService
-      });
-
-      await client.query('COMMIT');
-
-      log.info('Service deleted', {
-        serviceId: id,
-        businessId,
-        userId
-      });
-
-      return deletedService;
+      return result.rows[0] || null;
 
     } catch (error) {
-      await client.query('ROLLBACK');
-      log.error('Service deletion failed', error);
+      log.error('Service fetch by ID service error', error);
       throw error;
-    } finally {
-      client.release();
+    }
+  },
+
+  async updateService(serviceId, updateData, userId, businessId) {
+    try {
+      const { name, description, base_price, duration_minutes, category, service_category_id, is_active } = updateData;
+
+      const result = await query(
+        `UPDATE services 
+         SET name = COALESCE($1, name),
+             description = COALESCE($2, description),
+             base_price = COALESCE($3, base_price),
+             duration_minutes = COALESCE($4, duration_minutes),
+             category = COALESCE($5, category),
+             service_category_id = COALESCE($6, service_category_id),
+             is_active = COALESCE($7, is_active),
+             updated_at = NOW()
+         WHERE id = $8 AND business_id = $9
+         RETURNING *`,
+        [name, description, base_price, duration_minutes, category, service_category_id, is_active, serviceId, businessId]
+      );
+
+      if (result.rows.length > 0) {
+        log.info('Service updated successfully', {
+          serviceId,
+          businessId
+        });
+      }
+
+      return result.rows[0] || null;
+
+    } catch (error) {
+      log.error('Service update service error', error);
+      throw error;
+    }
+  },
+
+  async deleteService(serviceId, userId, businessId) {
+    try {
+      const result = await query(
+        `DELETE FROM services 
+         WHERE id = $1 AND business_id = $2 
+         RETURNING *`,
+        [serviceId, businessId]
+      );
+
+      if (result.rows.length > 0) {
+        log.info('Service deleted successfully', {
+          serviceId,
+          businessId
+        });
+      }
+
+      return result.rows[0] || null;
+
+    } catch (error) {
+      log.error('Service deletion service error', error);
+      throw error;
     }
   },
 
   async getServiceCategories(businessId) {
-    const client = await getClient();
     try {
-      const categoriesQuery = `
-        SELECT DISTINCT category
-        FROM services
-        WHERE business_id = $1 AND is_active = true
-        ORDER BY category
-      `;
+      // Get both relational categories and unique text categories
+      const relationalCategories = await query(
+        `SELECT id, name, description, color, is_active, sort_order
+         FROM service_categories 
+         WHERE business_id = $1 
+         ORDER BY sort_order, name`,
+        [businessId]
+      );
 
-      const result = await client.query(categoriesQuery, [businessId]);
+      // Also get unique text categories from services
+      const textCategories = await query(
+        `SELECT DISTINCT category as name
+         FROM services 
+         WHERE business_id = $1 
+         AND category IS NOT NULL 
+         AND category != ''
+         AND service_category_id IS NULL`,
+        [businessId]
+      );
 
-      const categories = result.rows.map(row => row.category);
+      // Combine both, marking text categories as not having an ID
+      const allCategories = [
+        ...relationalCategories.rows.map(cat => ({
+          ...cat,
+          type: 'relational'
+        })),
+        ...textCategories.rows.map(cat => ({
+          name: cat.name,
+          type: 'text',
+          is_active: true
+        }))
+      ];
 
-      log.debug('Fetched service categories', {
-        businessId,
-        categories
-      });
+      return allCategories;
 
-      return categories;
     } catch (error) {
-      log.error('Failed to fetch service categories', error);
+      log.error('Service categories fetch service error', error);
       throw error;
-    } finally {
-      client.release();
     }
   }
 };

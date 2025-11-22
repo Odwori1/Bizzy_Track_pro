@@ -8,6 +8,11 @@ import businessRoutes from './routes/businessRoutes.js';
 import customerCategoryRoutes from './routes/customerCategoryRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import serviceRoutes from './routes/serviceRoutes.js';
+
+//addtional service and customer routes
+import serviceCategoryRoutes from './routes/serviceCategoryRoutes.js';
+import customerCommunicationRoutes from './routes/customerCommunicationRoutes.js';
+
 import discountRuleRoutes from './routes/discountRuleRoutes.js';
 import jobRoutes from './routes/jobRoutes.js';
 import userFeatureToggleRoutes from './routes/userFeatureToggleRoutes.js';
@@ -140,6 +145,11 @@ app.use(timezoneMiddleware.formatResponseDates); // CRITICAL: This must be BEFOR
 app.use('/api/customer-categories', customerCategoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/services', serviceRoutes);
+
+//additional service and customer routes
+app.use('/api/service-categories', serviceCategoryRoutes);
+app.use('/api/customer-communications', customerCommunicationRoutes);
+
 app.use('/api/discount-rules', discountRuleRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/user-feature-toggles', userFeatureToggleRoutes);
@@ -219,6 +229,19 @@ app.use('*', (req, res) => {
       'GET /api/customers/:id',
       'PUT /api/customers/:id',
       'DELETE /api/customers/:id',
+      // Add with the other endpoints
+      'GET /api/service-categories',
+      'POST /api/service-categories', 
+      'GET /api/service-categories/:id',
+      'PUT /api/service-categories/:id',
+      'DELETE /api/service-categories/:id',
+
+      'GET /api/customer-communications',
+      'POST /api/customer-communications',
+      'GET /api/customer-communications/customer/:customerId',
+      'GET /api/customer-communications/:id',
+      'PUT /api/customer-communications/:id',
+      'DELETE /api/customer-communications/:id',	    
       'GET /api/dashboard/overview',
       'GET /api/dashboard/financial-summary',
       'GET /api/dashboard/activity-timeline',
