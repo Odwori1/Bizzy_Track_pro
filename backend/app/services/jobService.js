@@ -1,17 +1,13 @@
 import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 import { auditLogger } from '../utils/auditLogger.js';
-import { withPerformanceLogging } from '../utils/performance.js';
 
 // Helper function to set RLS context on a client
 const setRLSContext = async (client, businessId, userId) => {
-  // SET command doesn't support parameterized queries, so we use template literals
-  // But we MUST validate the input to prevent SQL injection
   if (!businessId || typeof businessId !== 'string') {
     throw new Error('Invalid businessId for RLS context');
   }
 
-  // Use template literal for SET command (parameterized queries not supported)
   await client.query(`SET app.current_business_id = '${businessId}'`);
 
   if (userId && typeof userId === 'string') {
@@ -28,21 +24,51 @@ export const jobService = {
 
       await client.query('BEGIN');
 
-      // Get service details for pricing
-      const serviceQuery = `
-        SELECT base_price, name
-        FROM services
-        WHERE id = $1 AND business_id = $2
-      `;
-      const serviceResult = await client.query(serviceQuery, [jobData.service_id, businessId]);
+      let service = null;
+      let finalPrice = 0;
+      let totalDuration = 0;
 
-      if (serviceResult.rows.length === 0) {
-        throw new Error('Service not found');
+      // Handle single service jobs (existing functionality)
+      if (jobData.service_id && !jobData.is_package_job) {
+        // Get service details for pricing
+        const serviceQuery = `
+          SELECT base_price, name, duration_minutes
+          FROM services
+          WHERE id = $1 AND business_id = $2
+        `;
+        const serviceResult = await client.query(serviceQuery, [jobData.service_id, businessId]);
+
+        if (serviceResult.rows.length === 0) {
+          throw new Error('Service not found');
+        }
+
+        service = serviceResult.rows[0];
+        finalPrice = service.base_price - (jobData.discount_amount || 0);
+        totalDuration = service.duration_minutes;
+      }
+      // Handle package jobs (new functionality)
+      else if (jobData.is_package_job && jobData.package_id) {
+        // Verify package exists and get details
+        const packageQuery = `
+          SELECT name, base_price, duration_minutes
+          FROM service_packages
+          WHERE id = $1 AND business_id = $2
+        `;
+        const packageResult = await client.query(packageQuery, [jobData.package_id, businessId]);
+
+        if (packageResult.rows.length === 0) {
+          throw new Error('Package not found');
+        }
+
+        const packageData = packageResult.rows[0];
+        service = { name: packageData.name, base_price: packageData.base_price };
+        finalPrice = packageData.base_price - (jobData.discount_amount || 0);
+        totalDuration = packageData.duration_minutes;
+      } else {
+        throw new Error('Either service_id or package_id with is_package_job must be provided');
       }
 
-      const service = serviceResult.rows[0];
-
-      // Generate job number (BUS-001, etc.)
+      // Generate job number
       const jobNumberQuery = `
         SELECT COUNT(*) as job_count
         FROM jobs
@@ -51,16 +77,14 @@ export const jobService = {
       const countResult = await client.query(jobNumberQuery, [businessId]);
       const jobNumber = `JOB-${(parseInt(countResult.rows[0].job_count) + 1).toString().padStart(3, '0')}`;
 
-      // Calculate final price with discount
-      const finalPrice = service.base_price - (jobData.discount_amount || 0);
-
       const createQuery = `
         INSERT INTO jobs (
           business_id, job_number, title, description, customer_id, service_id,
+          package_id, is_package_job, package_configuration,
           scheduled_date, estimated_duration_minutes, base_price, final_price,
           discount_amount, priority, assigned_to, created_by, location
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *
       `;
 
@@ -70,20 +94,61 @@ export const jobService = {
         jobData.title,
         jobData.description || '',
         jobData.customer_id,
-        jobData.service_id,
+        jobData.service_id || null, // Can be null for package jobs
+        jobData.package_id || null, // Can be null for single service jobs
+        jobData.is_package_job || false,
+        jobData.package_configuration || null,
         jobData.scheduled_date || null,
-        jobData.estimated_duration_minutes || null,
+        jobData.estimated_duration_minutes || totalDuration,
         service.base_price,
         finalPrice,
         jobData.discount_amount || 0,
         jobData.priority || 'medium',
         jobData.assigned_to || null,
         userId,
-        jobData.location || null  // FIX: Added location field
+        jobData.location || null
       ];
 
       const result = await client.query(createQuery, values);
       const newJob = result.rows[0];
+
+      // Create job services for package jobs
+      if (jobData.is_package_job && jobData.job_services && jobData.job_services.length > 0) {
+        for (const jobService of jobData.job_services) {
+          const serviceDetailQuery = `
+            SELECT base_price, duration_minutes, name
+            FROM services
+            WHERE id = $1 AND business_id = $2
+          `;
+          const serviceDetailResult = await client.query(serviceDetailQuery, [jobService.service_id, businessId]);
+          
+          if (serviceDetailResult.rows.length === 0) {
+            throw new Error(`Service ${jobService.service_id} not found`);
+          }
+
+          const serviceDetail = serviceDetailResult.rows[0];
+          const unitPrice = jobService.unit_price || serviceDetail.base_price;
+          const quantity = jobService.quantity || 1;
+
+          const jobServiceQuery = `
+            INSERT INTO job_services (
+              job_id, service_id, quantity, unit_price, total_price,
+              estimated_duration_minutes, sequence_order
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `;
+
+          await client.query(jobServiceQuery, [
+            newJob.id,
+            jobService.service_id,
+            quantity,
+            unitPrice,
+            unitPrice * quantity,
+            serviceDetail.duration_minutes * quantity,
+            jobService.sequence_order || 0
+          ]);
+        }
+      }
 
       // Create initial status history
       const statusHistoryQuery = `
@@ -108,10 +173,12 @@ export const jobService = {
         jobId: newJob.id,
         jobNumber: newJob.job_number,
         businessId,
-        userId
+        userId,
+        isPackageJob: newJob.is_package_job
       });
 
-      return newJob;
+      // Return the complete job with services if it's a package job
+      return await this.getJobById(newJob.id, businessId);
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -137,11 +204,13 @@ export const jobService = {
           c.phone as customer_phone,
           s.name as service_name,
           s.base_price as service_base_price,
-          u.full_name as assigned_to_name
+          u.full_name as assigned_to_name,
+          sp.name as package_name
         FROM jobs j
         LEFT JOIN customers c ON j.customer_id = c.id
         LEFT JOIN services s ON j.service_id = s.id
         LEFT JOIN users u ON j.assigned_to = u.id
+        LEFT JOIN service_packages sp ON j.package_id = sp.id
         WHERE j.business_id = $1
       `;
 
@@ -159,6 +228,13 @@ export const jobService = {
       if (options.assigned_to) {
         selectQuery += ` AND j.assigned_to = $${paramCount}`;
         values.push(options.assigned_to);
+        paramCount++;
+      }
+
+      // Filter by package jobs if provided
+      if (options.is_package_job !== undefined) {
+        selectQuery += ` AND j.is_package_job = $${paramCount}`;
+        values.push(options.is_package_job);
         paramCount++;
       }
 
@@ -196,11 +272,13 @@ export const jobService = {
           c.phone as customer_phone,
           s.name as service_name,
           s.base_price as service_base_price,
-          u.full_name as assigned_to_name
+          u.full_name as assigned_to_name,
+          sp.name as package_name
         FROM jobs j
         LEFT JOIN customers c ON j.customer_id = c.id
         LEFT JOIN services s ON j.service_id = s.id
         LEFT JOIN users u ON j.assigned_to = u.id
+        LEFT JOIN service_packages sp ON j.package_id = sp.id
         WHERE j.id = $1 AND j.business_id = $2
       `;
 
@@ -208,7 +286,28 @@ export const jobService = {
       const job = result.rows[0] || null;
 
       if (job) {
-        log.debug('Fetched job by ID', { jobId: id, businessId });
+        // If it's a package job, fetch the job services
+        if (job.is_package_job) {
+          const jobServicesQuery = `
+            SELECT
+              js.*,
+              s.name as service_name,
+              s.description as service_description
+            FROM job_services js
+            JOIN services s ON js.service_id = s.id
+            WHERE js.job_id = $1
+            ORDER BY js.sequence_order
+          `;
+          const jobServicesResult = await client.query(jobServicesQuery, [id]);
+          job.job_services = jobServicesResult.rows;
+        }
+
+        log.debug('Fetched job by ID', { 
+          jobId: id, 
+          businessId,
+          isPackageJob: job.is_package_job,
+          serviceCount: job.job_services?.length || 0
+        });
       } else {
         log.debug('Job not found', { jobId: id, businessId });
       }

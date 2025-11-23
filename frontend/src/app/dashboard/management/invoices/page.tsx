@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 const statusColors = {
   draft: 'bg-gray-100 text-gray-800',
@@ -19,6 +20,7 @@ const statusColors = {
 export default function InvoicesPage() {
   const { invoices, loading, error, filters, setFilters, fetchInvoices } = useInvoices();
   const [searchTerm, setSearchTerm] = useState('');
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   useEffect(() => {
     fetchInvoices(filters);
@@ -38,9 +40,7 @@ export default function InvoicesPage() {
     setFilters({ ...filters, search: '' });
   };
 
-  const formatCurrency = (amount: string, currencySymbol: string) => {
-    return `${currencySymbol} ${parseFloat(amount).toFixed(2)}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   if (loading) return <Loading />;
 
@@ -175,10 +175,10 @@ export default function InvoicesPage() {
 
                   <div className="text-right">
                     <p className="font-semibold text-gray-900">
-                      {formatCurrency(invoice.total_amount, invoice.currency_symbol)}
+                      {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
                     </p>
                     <p className="text-sm text-gray-500">
-                      Balance: {formatCurrency(invoice.balance_due, invoice.currency_symbol)}
+                      Balance: {formatCurrency(invoice.balance_due)} {/* FIXED: Dynamic currency */}
                     </p>
                   </div>
 

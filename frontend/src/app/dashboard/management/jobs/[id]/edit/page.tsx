@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useJob, useJobActions } from '@/hooks/useJobs';
 import { apiClient } from '@/lib/api';
 import { JobUpdateRequest } from '@/types/jobs';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface Customer {
   id: string;
@@ -46,6 +47,7 @@ export default function EditJobPage({ params }: EditJobPageProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const { job, loading: jobLoading, error: jobError, refetch } = useJob(jobId || undefined);
   const { updateJob } = useJobActions();
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export default function EditJobPage({ params }: EditJobPageProps) {
       const unwrappedParams = await params;
       setJobId(unwrappedParams.id);
     };
-    
+
     unwrapParams();
   }, [params]);
 
@@ -316,7 +318,7 @@ export default function EditJobPage({ params }: EditJobPageProps) {
                     <option value="">Select a service</option>
                     {services.map((service) => (
                       <option key={service.id} value={service.id}>
-                        {service.name} (${service.base_price})
+                        {service.name} ({formatCurrency(parseFloat(service.base_price))}) {/* FIXED: Dynamic currency */}
                       </option>
                     ))}
                   </select>

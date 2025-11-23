@@ -7,6 +7,7 @@ import { useInvoices } from '@/hooks/useInvoices';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 const statusColors = {
   draft: 'bg-gray-100 text-gray-800',
@@ -19,16 +20,17 @@ const statusColors = {
 export default function InvoiceDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { 
-    currentInvoice, 
-    loading, 
-    error, 
-    fetchInvoice, 
-    updateInvoiceStatus, 
+  const {
+    currentInvoice,
+    loading,
+    error,
+    fetchInvoice,
+    updateInvoiceStatus,
     recordPayment,
-    clearError 
+    clearError
   } = useInvoices();
-  
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [updating, setUpdating] = useState(false);
@@ -79,9 +81,7 @@ export default function InvoiceDetailPage() {
     }
   };
 
-  const formatCurrency = (amount: string, currencySymbol: string = '$') => {
-    return `${currencySymbol} ${parseFloat(amount).toFixed(2)}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   if (loading) return <Loading />;
   if (error) return <div className="p-4 text-red-700 bg-red-50 rounded-lg">{error}</div>;
@@ -116,9 +116,9 @@ export default function InvoiceDetailPage() {
         <CardContent>
           <div className="flex gap-2 flex-wrap">
             {invoice.status === 'draft' && (
-              <Button 
-                onClick={() => handleStatusUpdate('sent')} 
-                variant="primary" 
+              <Button
+                onClick={() => handleStatusUpdate('sent')}
+                variant="primary"
                 size="sm"
                 disabled={updating}
               >
@@ -126,9 +126,9 @@ export default function InvoiceDetailPage() {
               </Button>
             )}
             {invoice.status === 'sent' && (
-              <Button 
-                onClick={() => handleStatusUpdate('paid')} 
-                variant="primary" 
+              <Button
+                onClick={() => handleStatusUpdate('paid')}
+                variant="primary"
                 size="sm"
                 disabled={updating}
               >
@@ -136,9 +136,9 @@ export default function InvoiceDetailPage() {
               </Button>
             )}
             {(invoice.status === 'draft' || invoice.status === 'sent') && (
-              <Button 
-                onClick={() => handleStatusUpdate('cancelled')} 
-                variant="danger" 
+              <Button
+                onClick={() => handleStatusUpdate('cancelled')}
+                variant="danger"
                 size="sm"
                 disabled={updating}
               >
@@ -164,7 +164,7 @@ export default function InvoiceDetailPage() {
                 </p>
                 <p className="text-sm text-gray-600">{invoice.customer_email}</p>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium text-gray-700">Due Date</label>
                 <p className="text-gray-900">
@@ -182,7 +182,7 @@ export default function InvoiceDetailPage() {
               <div>
                 <label className="text-sm font-medium text-gray-700">Total Amount</label>
                 <p className="text-gray-900 font-semibold">
-                  {formatCurrency(invoice.total_amount, invoice.currency_symbol)}
+                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
                 </p>
               </div>
             </div>
@@ -213,19 +213,19 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between">
                 <span className="text-gray-700">Total Amount:</span>
                 <span className="font-semibold">
-                  {formatCurrency(invoice.total_amount, invoice.currency_symbol)}
+                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-700">Amount Paid:</span>
                 <span className="font-semibold text-green-600">
-                  {formatCurrency(invoice.amount_paid, invoice.currency_symbol)}
+                  {formatCurrency(invoice.amount_paid)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
               <div className="flex justify-between border-t pt-2">
                 <span className="text-gray-700 font-medium">Balance Due:</span>
                 <span className="font-semibold text-red-600">
-                  {formatCurrency(invoice.balance_due, invoice.currency_symbol)}
+                  {formatCurrency(invoice.balance_due)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
             </div>
@@ -234,7 +234,7 @@ export default function InvoiceDetailPage() {
             {parseFloat(invoice.balance_due) > 0 && (
               <form onSubmit={handleRecordPayment} className="space-y-3 pt-4 border-t">
                 <h3 className="font-medium text-gray-900">Record Payment</h3>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Amount
@@ -270,9 +270,9 @@ export default function InvoiceDetailPage() {
                   </select>
                 </div>
 
-                <Button 
-                  type="submit" 
-                  variant="primary" 
+                <Button
+                  type="submit"
+                  variant="primary"
                   className="w-full"
                   disabled={updating || !paymentAmount}
                 >
@@ -301,10 +301,10 @@ export default function InvoiceDetailPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-gray-900">
-                    {item.quantity} × {formatCurrency(item.unit_price.toString(), invoice.currency_symbol)}
+                    {item.quantity} × {formatCurrency(item.unit_price.toString())} {/* FIXED: Dynamic currency */}
                   </p>
                   <p className="font-semibold text-gray-900">
-                    {formatCurrency((item.quantity * item.unit_price).toString(), invoice.currency_symbol)}
+                    {formatCurrency((item.quantity * item.unit_price).toString())} {/* FIXED: Dynamic currency */}
                   </p>
                   {item.tax_rate > 0 && (
                     <p className="text-sm text-gray-600">Tax: {item.tax_rate}%</p>

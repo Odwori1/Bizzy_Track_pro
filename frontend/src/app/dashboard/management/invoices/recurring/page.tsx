@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface RecurringInvoice {
   id: string;
@@ -64,6 +65,7 @@ export default function RecurringInvoicesPage() {
     next_invoice_date: '',
     total_amount: ''
   });
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   const fetchRecurringInvoices = async () => {
     try {
@@ -460,7 +462,7 @@ export default function RecurringInvoicesPage() {
           <CardContent className="pt-6">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
-                ${calculateMonthlyRevenue().toFixed(2)}
+                {formatCurrency(calculateMonthlyRevenue())} {/* FIXED: Dynamic currency */}
               </div>
               <div className="text-gray-600">Monthly Revenue</div>
             </div>
@@ -523,7 +525,7 @@ export default function RecurringInvoicesPage() {
                     </div>
                     <div className="text-sm text-gray-600 space-y-1">
                       <p>Customer: {invoice.customer_full_name} ({invoice.customer_email})</p>
-                      <p>Amount: ${parseFloat(invoice.total_amount).toFixed(2)} • Next: {formatDateSafely(invoice.next_invoice_date)}</p>
+                      <p>Amount: {formatCurrency(parseFloat(invoice.total_amount))} • Next: {formatDateSafely(invoice.next_invoice_date)}</p> {/* FIXED: Dynamic currency */}
                       {invoice.description && <p>Description: {invoice.description}</p>}
                       <p>Started: {formatDateSafely(invoice.start_date)}</p>
                     </div>
@@ -564,4 +566,3 @@ export default function RecurringInvoicesPage() {
     </div>
   );
 }
-

@@ -34,17 +34,6 @@ export default function EditPackagePage() {
     router.push(`/dashboard/management/packages/${packageId}`);
   };
 
-  if (packageId === 'edit') {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="text-center">Invalid package ID</div>
-        <Link href="/dashboard/management/packages">
-          <Button className="mt-4">Back to Packages</Button>
-        </Link>
-      </div>
-    );
-  }
-
   if (loading && !currentPackage) {
     return <div className="flex justify-center p-8">Loading package...</div>;
   }

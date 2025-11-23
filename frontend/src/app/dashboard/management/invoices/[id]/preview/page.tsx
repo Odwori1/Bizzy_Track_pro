@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface Invoice {
   id: string;
@@ -37,6 +38,7 @@ export default function InvoicePreviewPage() {
   const params = useParams();
   const router = useRouter();
   const invoiceId = params.id as string;
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,14 +72,14 @@ export default function InvoicePreviewPage() {
   const handleDownloadPDF = async () => {
     try {
       setPdfLoading(true);
-      
+
       // Call the PDF generation endpoint
       const response = await apiClient.get(`/invoices/${invoiceId}/pdf`);
-      
+
       if (response.success) {
         // Create a download link for the PDF
         const downloadUrl = `http://localhost:8002${response.data.pdf_url}`;
-        
+
         // Create a temporary anchor element to trigger download
         const link = document.createElement('a');
         link.href = downloadUrl;
@@ -85,7 +87,7 @@ export default function InvoicePreviewPage() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         console.log('PDF download initiated:', response.data);
       } else {
         throw new Error('Failed to generate PDF');
@@ -98,9 +100,7 @@ export default function InvoicePreviewPage() {
     }
   };
 
-  const formatCurrency = (amount: string, currencySymbol: string) => {
-    return `${currencySymbol} ${parseFloat(amount).toFixed(2)}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   const calculateLineTotal = (item: any) => {
     const subtotal = item.quantity * item.unit_price;
@@ -244,11 +244,11 @@ export default function InvoicePreviewPage() {
                     </td>
                     <td className="py-3 text-right text-gray-700">{item.quantity}</td>
                     <td className="py-3 text-right text-gray-700">
-                      {formatCurrency(item.unit_price.toString(), invoice.currency_symbol)}
+                      {formatCurrency(item.unit_price.toString())} {/* FIXED: Dynamic currency */}
                     </td>
                     <td className="py-3 text-right text-gray-700">{item.tax_rate}%</td>
                     <td className="py-3 text-right font-semibold text-gray-900">
-                      {formatCurrency(calculateLineTotal(item).toString(), invoice.currency_symbol)}
+                      {formatCurrency(calculateLineTotal(item).toString())} {/* FIXED: Dynamic currency */}
                     </td>
                   </tr>
                 ))}
@@ -262,19 +262,19 @@ export default function InvoicePreviewPage() {
               <div className="flex justify-between py-2">
                 <span className="text-gray-700">Subtotal:</span>
                 <span className="font-semibold">
-                  {formatCurrency(invoice.total_amount, invoice.currency_symbol)}
+                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
               <div className="flex justify-between py-2">
                 <span className="text-gray-700">Amount Paid:</span>
                 <span className="font-semibold text-green-600">
-                  {formatCurrency(invoice.amount_paid, invoice.currency_symbol)}
+                  {formatCurrency(invoice.amount_paid)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
               <div className="flex justify-between py-3 border-t border-gray-300">
                 <span className="font-semibold text-gray-900">Balance Due:</span>
                 <span className="font-semibold text-red-600">
-                  {formatCurrency(invoice.balance_due, invoice.currency_symbol)}
+                  {formatCurrency(invoice.balance_due)} {/* FIXED: Dynamic currency */}
                 </span>
               </div>
             </div>

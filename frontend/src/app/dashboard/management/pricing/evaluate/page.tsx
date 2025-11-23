@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePricingActions } from '@/hooks/usePricing';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface CustomerCategory {
   id: string;
@@ -62,6 +63,7 @@ export default function PricingEvaluationPage() {
   const [loading, setLoading] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   const { evaluatePricingWithABAC } = usePricingActions();
 
@@ -71,20 +73,20 @@ export default function PricingEvaluationPage() {
       try {
         setLoading(true);
         console.log('🔄 Loading evaluation data from API...');
-        
+
         // Load customer categories
         const categoriesResponse = await apiClient.get('/customer-categories');
         console.log('📊 Customer categories response:', categoriesResponse);
-        
-        const categories = Array.isArray(categoriesResponse) ? categoriesResponse : 
+
+        const categories = Array.isArray(categoriesResponse) ? categoriesResponse :
                           (categoriesResponse.data && Array.isArray(categoriesResponse.data)) ? categoriesResponse.data : [];
         setCustomerCategories(categories);
 
         // Load services
         const servicesResponse = await apiClient.get('/services');
         console.log('📊 Services response:', servicesResponse);
-        
-        const services = Array.isArray(servicesResponse) ? servicesResponse : 
+
+        const services = Array.isArray(servicesResponse) ? servicesResponse :
                         (servicesResponse.data && Array.isArray(servicesResponse.data)) ? servicesResponse.data : [];
         setServices(services);
 
@@ -151,12 +153,7 @@ export default function PricingEvaluationPage() {
     }
   };
 
-  const formatCurrency = (value: number | undefined | null): string => {
-    if (value === undefined || value === null || isNaN(value)) {
-      return '$0.00';
-    }
-    return `$${value.toFixed(2)}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   const formatPercentage = (value: number | undefined | null): string => {
     if (value === undefined || value === null || isNaN(value)) {
@@ -225,7 +222,7 @@ export default function PricingEvaluationPage() {
                 <option value="">Select Service</option>
                 {services.map(service => (
                   <option key={service.id} value={service.id}>
-                    {service.name} (${service.base_price})
+                    {service.name} ({formatCurrency(parseFloat(service.base_price))}) {/* FIXED: Dynamic currency */}
                   </option>
                 ))}
               </select>
@@ -233,7 +230,7 @@ export default function PricingEvaluationPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Base Price ($) *
+                Base Price ({currencySymbol}) * {/* FIXED: Dynamic currency symbol */}
               </label>
               <Input
                 type="number"
@@ -301,22 +298,22 @@ export default function PricingEvaluationPage() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-600">Original Price:</span>
-                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.original_price)}</div>
+                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.original_price)}</div> {/* FIXED: Dynamic currency */}
                     </div>
                     <div>
                       <span className="text-gray-600">Final Price:</span>
-                      <div className="font-medium text-lg text-green-600">{formatCurrency(evaluationResult.final_price)}</div>
+                      <div className="font-medium text-lg text-green-600">{formatCurrency(evaluationResult.final_price)}</div> {/* FIXED: Dynamic currency */}
                     </div>
                     <div>
                       <span className="text-gray-600">Total Discount:</span>
                       <div className="font-medium text-red-600">
-                        {formatCurrency(evaluationResult.summary.total_discount)}
+                        {formatCurrency(evaluationResult.summary.total_discount)} {/* FIXED: Dynamic currency */}
                         <span className="text-xs ml-1">({formatPercentage(evaluationResult.summary.total_discount_percentage)})</span>
                       </div>
                     </div>
                     <div>
                       <span className="text-gray-600">Total Amount:</span>
-                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.total_amount)}</div>
+                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.total_amount)}</div> {/* FIXED: Dynamic currency */}
                     </div>
                   </div>
                 </div>
@@ -332,11 +329,11 @@ export default function PricingEvaluationPage() {
                             <div className="font-medium text-gray-900">{rule.rule_name}</div>
                             <div className="text-sm text-gray-600">
                               {rule.rule_type} • {rule.adjustment_type} • {rule.adjustment_value}
-                              {rule.adjustment_type === 'percentage' ? '%' : '$'}
+                              {rule.adjustment_type === 'percentage' ? '%' : currencySymbol} {/* FIXED: Dynamic currency symbol */}
                             </div>
                           </div>
                           <div className="text-sm font-medium text-green-600">
-                            {formatCurrency(rule.new_price)}
+                            {formatCurrency(rule.new_price)} {/* FIXED: Dynamic currency */}
                           </div>
                         </div>
                       ))}
@@ -389,11 +386,11 @@ export default function PricingEvaluationPage() {
                             <div className="text-sm font-medium">{adjustment.rule_name || adjustment.type}</div>
                             <div className="text-xs text-gray-600">
                               {adjustment.adjustment_type} • {adjustment.value}
-                              {adjustment.adjustment_type === 'percentage' ? '%' : '$'}
+                              {adjustment.adjustment_type === 'percentage' ? '%' : currencySymbol} {/* FIXED: Dynamic currency symbol */}
                             </div>
                           </div>
                           <div className={`text-sm font-medium ${(adjustment.amount || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(adjustment.amount)}
+                            {formatCurrency(adjustment.amount)} {/* FIXED: Dynamic currency */}
                           </div>
                         </div>
                       ))}

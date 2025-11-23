@@ -2,6 +2,7 @@ import { Package } from '@/types/packages';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { DollarSign, Clock, Settings, Users } from 'lucide-react';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface PackageDetailsProps {
   package: Package;
@@ -11,6 +12,12 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
   // Safely handle all possible undefined values
   const services = pkg.services || [];
   const rules = pkg.deconstruction_rules || [];
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+
+  // Helper function to get service display name
+  const getServiceDisplayName = (service: any) => {
+    return service.service_name || service.service_id;
+  };
 
   return (
     <div className="space-y-6">
@@ -24,7 +31,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
             <DollarSign className="text-green-600" size={20} />
             <div>
               <p className="text-sm text-gray-600">Base Price</p>
-              <p className="font-semibold">${pkg.base_price}</p>
+              <p className="font-semibold">{formatCurrency(pkg.base_price)}</p> {/* FIXED: Dynamic currency */}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -93,7 +100,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
               <div key={service.service_id || index} className="flex items-center justify-between border rounded-lg p-3">
                 <div className="flex items-center gap-3">
                   <div>
-                    <p className="font-medium">{service.service_id}</p>
+                    <p className="font-medium">{getServiceDisplayName(service)}</p>
                     <div className="flex gap-2 mt-1">
                       {service.is_required && (
                         <Badge variant="secondary" className="text-xs">
@@ -102,7 +109,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
                       )}
                       {service.is_price_overridden && (
                         <Badge variant="outline" className="text-xs">
-                          ${service.package_price}
+                          {formatCurrency(service.package_price)} {/* FIXED: Dynamic currency */}
                         </Badge>
                       )}
                     </div>

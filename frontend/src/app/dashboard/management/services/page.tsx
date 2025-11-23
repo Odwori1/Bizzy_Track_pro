@@ -7,12 +7,14 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function ServicesPage() {
   const { services, serviceCategories, loading, error, actions } = useServiceStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   useEffect(() => {
     actions.fetchServices();
@@ -44,9 +46,7 @@ export default function ServicesPage() {
     }
   };
 
-  const formatCurrency = (amount: string) => {
-    return `USh ${parseFloat(amount).toLocaleString()}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   if (loading && services.length === 0) {
     return <Loading />;
@@ -89,7 +89,7 @@ export default function ServicesPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1 min-w-[200px]"
           />
-          <select 
+          <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="border rounded-md px-3 py-2 min-w-[150px]"
@@ -112,16 +112,16 @@ export default function ServicesPage() {
             <div className="flex justify-between items-start mb-3">
               <h3 className="font-semibold text-lg">{service.name}</h3>
               <span className={`px-2 py-1 rounded-full text-xs ${
-                service.is_active 
-                  ? 'bg-green-100 text-green-800' 
+                service.is_active
+                  ? 'bg-green-100 text-green-800'
                   : 'bg-gray-100 text-gray-800'
               }`}>
                 {service.is_active ? 'Active' : 'Inactive'}
               </span>
             </div>
-            
+
             <p className="text-gray-600 text-sm mb-3">{service.description}</p>
-            
+
             <div className="flex justify-between items-center text-sm">
               <div>
                 <div className="font-semibold">{formatCurrency(service.base_price)}</div>

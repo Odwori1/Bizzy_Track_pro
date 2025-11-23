@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePricingActions } from '@/hooks/usePricing';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface Service {
   id: string;
@@ -43,6 +44,7 @@ export default function BulkPricingPage() {
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   const { bulkUpdatePreview, bulkUpdateServices } = usePricingActions();
 
@@ -137,28 +139,28 @@ export default function BulkPricingPage() {
         // ✅ FIXED: Handle different response structures safely
         const previewData = result.data;
         console.log('📊 Preview data structure:', previewData);
-        
+
         // Create a map of selected services by ID for name lookup
         const selectedServicesMap = new Map();
         selectedServices.forEach(service => {
           selectedServicesMap.set(service.id, service);
         });
-        
+
         // Ensure we have the correct data structure
         if (previewData.services && Array.isArray(previewData.services)) {
           // ✅ FIXED: Better service name matching - use original selected services
           const normalizedServices = previewData.services.map((service, index) => {
             // Try multiple ways to find the correct service name
             let serviceName = 'Unknown Service';
-            
+
             // 1. First try by exact ID match
             const originalService = selectedServicesMap.get(service.id);
             if (originalService) {
               serviceName = originalService.name;
-            } 
+            }
             // 2. Try by name match (case insensitive)
             else {
-              const nameMatch = selectedServices.find(s => 
+              const nameMatch = selectedServices.find(s =>
                 s.name.toLowerCase() === service.name?.toLowerCase()
               );
               if (nameMatch) {
@@ -173,7 +175,7 @@ export default function BulkPricingPage() {
                 serviceName = selectedServices[index].name;
               }
             }
-            
+
             return {
               id: service.id || `service-${index}-${Date.now()}`,
               name: serviceName,
@@ -184,7 +186,7 @@ export default function BulkPricingPage() {
               current_price: service.current_price || service.old_price || parseFloat(selectedServices[index]?.base_price || '0')
             };
           });
-          
+
           setPreviewData({
             services: normalizedServices,
             summary: previewData.summary || {
@@ -200,7 +202,7 @@ export default function BulkPricingPage() {
           const normalizedServices = selectedServices.map((service, index) => {
             const currentPrice = parseFloat(service.base_price) || 0;
             let newPrice = currentPrice;
-            
+
             // Calculate new price based on update type
             switch (updateType) {
               case 'percentage_increase':
@@ -219,10 +221,10 @@ export default function BulkPricingPage() {
                 newPrice = parseFloat(value);
                 break;
             }
-            
+
             const priceChange = newPrice - currentPrice;
             const changePercentage = (priceChange / currentPrice) * 100;
-            
+
             return {
               id: service.id || `service-${index}-${Date.now()}`,
               name: service.name,
@@ -233,12 +235,12 @@ export default function BulkPricingPage() {
               current_price: currentPrice
             };
           });
-          
+
           const totalPriceChange = normalizedServices.reduce((sum, service) => sum + (service.price_change || 0), 0);
-          const averageChangePercentage = normalizedServices.length > 0 
+          const averageChangePercentage = normalizedServices.length > 0
             ? normalizedServices.reduce((sum, service) => sum + (service.change_percentage || 0), 0) / normalizedServices.length
             : 0;
-            
+
           setPreviewData({
             services: normalizedServices,
             summary: {
@@ -313,14 +315,6 @@ export default function BulkPricingPage() {
     return selectedServices.some(s => s.id === service.id);
   };
 
-  // ✅ FIXED: Safe number formatting function
-  const formatCurrency = (value: number | undefined | null): string => {
-    if (value === undefined || value === null || isNaN(value)) {
-      return '$0.00';
-    }
-    return `$${value.toFixed(2)}`;
-  };
-
   // ✅ FIXED: Safe percentage formatting function
   const formatPercentage = (value: number | undefined | null): string => {
     if (value === undefined || value === null || isNaN(value)) {
@@ -392,7 +386,7 @@ export default function BulkPricingPage() {
                   <div className="flex-1">
                     <div className="font-medium text-gray-900">{service.name}</div>
                     <div className="text-sm text-gray-600">
-                      {service.category_name && `${service.category_name} • `}${service.base_price}
+                      {service.category_name && `${service.category_name} • `}{formatCurrency(parseFloat(service.base_price))} {/* FIXED: Dynamic currency */}
                     </div>
                   </div>
                 </div>
@@ -445,9 +439,9 @@ export default function BulkPricingPage() {
                 <p className="text-xs text-gray-500 mt-1">
                   {updateType === 'percentage_increase' && 'Enter percentage to increase prices'}
                   {updateType === 'percentage_decrease' && 'Enter percentage to decrease prices'}
-                  {updateType === 'fixed_increase' && 'Enter fixed amount to add to prices'}
-                  {updateType === 'fixed_decrease' && 'Enter fixed amount to subtract from prices'}
-                  {updateType === 'override' && 'Enter new price to set for all selected services'}
+                  {updateType === 'fixed_increase' && `Enter fixed amount to add to prices (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
+                  {updateType === 'fixed_decrease' && `Enter fixed amount to subtract from prices (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
+                  {updateType === 'override' && `Enter new price to set for all selected services (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
                 </p>
               </div>
 
@@ -503,13 +497,13 @@ export default function BulkPricingPage() {
                     <div className="flex-1">
                       <div className="font-medium text-gray-900">{service.name}</div>
                       <div className="text-sm text-gray-600">
-                        {formatCurrency(service.old_price)} → <span className="font-medium">{formatCurrency(service.new_price)}</span>
+                        {formatCurrency(service.old_price)} → <span className="font-medium">{formatCurrency(service.new_price)}</span> {/* FIXED: Dynamic currency */}
                       </div>
                     </div>
                     <div className={`font-medium text-sm ${
                       (service.price_change || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                     }`}>
-                      {(service.price_change || 0) >= 0 ? '+' : ''}{formatCurrency(service.price_change)}
+                      {(service.price_change || 0) >= 0 ? '+' : ''}{formatCurrency(service.price_change)} {/* FIXED: Dynamic currency */}
                       <div className={`text-xs ${(service.change_percentage || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                         ({formatPercentage(service.change_percentage)})
                       </div>

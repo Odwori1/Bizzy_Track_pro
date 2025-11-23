@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface PriceHistoryItem {
   id: string;
@@ -26,6 +27,7 @@ export default function PriceHistoryPage() {
   const [entityFilter, setEntityFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   // Load price history directly from API (bypassing store issues)
   const loadPriceHistory = async () => {
@@ -39,7 +41,7 @@ export default function PriceHistoryPage() {
 
       // Handle different response structures
       let historyData: PriceHistoryItem[] = [];
-      
+
       if (Array.isArray(response)) {
         historyData = response;
       } else if (response && response.data && Array.isArray(response.data)) {
@@ -50,7 +52,7 @@ export default function PriceHistoryPage() {
 
       console.log(`✅ Loaded ${historyData.length} price history records`);
       setPriceHistory(historyData);
-      
+
     } catch (err) {
       console.error('❌ Failed to load price history:', err);
       setError('Failed to load price history. Please try again.');
@@ -185,7 +187,7 @@ export default function PriceHistoryPage() {
       {/* Debug Info - Temporary */}
       <Card className="p-4 mb-4 bg-blue-50 border-blue-200">
         <div className="text-sm text-blue-800">
-          <strong>Data Status:</strong> Loaded {priceHistory.length} price history records | 
+          <strong>Data Status:</strong> Loaded {priceHistory.length} price history records |
           Showing {filteredHistory.length} filtered records
         </div>
       </Card>
@@ -254,8 +256,8 @@ export default function PriceHistoryPage() {
                   <div>
                     <span className="text-gray-600">Price Change:</span>
                     <div className="font-medium">
-                      {item.old_price ? `$${item.old_price} → ` : 'Initial: '}
-                      <span className="text-green-600">${item.new_price}</span>
+                      {item.old_price ? `${formatCurrency(parseFloat(item.old_price))} → ` : 'Initial: '} {/* FIXED: Dynamic currency */}
+                      <span className="text-green-600">{formatCurrency(parseFloat(item.new_price))}</span> {/* FIXED: Dynamic currency */}
                     </div>
                   </div>
 

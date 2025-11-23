@@ -1,3 +1,30 @@
+export interface JobService {
+  id: string;
+  job_id: string;
+  service_id: string;
+  quantity: number;
+  unit_price: string;
+  total_price: string;
+  estimated_duration_minutes: number;
+  sequence_order: number;
+  created_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  updated_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  service_name?: string;
+  service_description?: string;
+}
+
 export interface Job {
   id: string;
   business_id: string;
@@ -5,7 +32,7 @@ export interface Job {
   title: string;
   description: string | null;
   customer_id: string;
-  service_id: string;
+  service_id: string | null; // Can be null for package jobs
   scheduled_date: {
     utc: string;
     local: string;
@@ -51,26 +78,52 @@ export interface Job {
     timestamp: number;
   };
   package_id: string | null;
+  is_package_job: boolean;
+  package_configuration: {
+    deconstructed_from?: string;
+    selected_services?: string[];
+    total_price?: number;
+    total_duration?: number;
+  } | null;
   customer_first_name: string;
   customer_last_name: string;
   customer_email: string;
   customer_phone: string;
-  service_name: string;
-  service_base_price: string;
+  service_name: string | null;
+  service_base_price: string | null;
   assigned_to_name: string | null;
-  location: string | null; // Added location field
+  package_name: string | null;
+  location: string | null;
+  job_services?: JobService[]; // Only for package jobs
 }
 
 export interface JobCreateRequest {
   title: string;
   description?: string;
   customer_id: string;
-  service_id: string;
+  // Single service job fields
+  service_id?: string;
+  // Package job fields
+  package_id?: string;
+  is_package_job?: boolean;
+  package_configuration?: {
+    deconstructed_from?: string;
+    selected_services?: string[];
+    total_price?: number;
+    total_duration?: number;
+  };
+  job_services?: Array<{
+    service_id: string;
+    quantity?: number;
+    unit_price?: number;
+    sequence_order?: number;
+  }>;
+  // Common fields
   scheduled_date?: string;
   estimated_duration_minutes?: number;
   priority: Job['priority'];
   assigned_to?: string;
-  location?: string; // Added location field
+  location?: string;
 }
 
 export interface JobUpdateRequest {
@@ -82,7 +135,7 @@ export interface JobUpdateRequest {
   estimated_duration_minutes?: number;
   priority?: Job['priority'];
   assigned_to?: string;
-  location?: string; // Added location field
+  location?: string;
 }
 
 export interface JobFilters {
@@ -90,4 +143,5 @@ export interface JobFilters {
   priority?: Job['priority'];
   customerId?: string;
   assigned_to?: string;
+  is_package_job?: boolean;
 }

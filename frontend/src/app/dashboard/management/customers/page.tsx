@@ -7,12 +7,14 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function CustomersPage() {
   const { customers, customerCategories, loading, error, filters, actions } = useCustomerStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   useEffect(() => {
     actions.fetchCustomers();
@@ -50,9 +52,7 @@ export default function CustomersPage() {
     }
   };
 
-  const formatCurrency = (amount: string) => {
-    return `USh ${parseFloat(amount).toLocaleString()}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   if (loading && customers.length === 0) {
     return <Loading />;
@@ -97,7 +97,7 @@ export default function CustomersPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1 min-w-[200px]"
           />
-          <select 
+          <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="border rounded-md px-3 py-2 min-w-[150px]"
@@ -129,9 +129,9 @@ export default function CustomersPage() {
                     {customer.first_name} {customer.last_name}
                   </h3>
                   {customer.category_name && (
-                    <span 
+                    <span
                       className="px-2 py-1 rounded-full text-xs font-medium"
-                      style={{ 
+                      style={{
                         backgroundColor: `${customer.category_color}20`,
                         color: customer.category_color
                       }}
@@ -140,14 +140,14 @@ export default function CustomersPage() {
                     </span>
                   )}
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    customer.is_active 
-                      ? 'bg-green-100 text-green-800' 
+                    customer.is_active
+                      ? 'bg-green-100 text-green-800'
                       : 'bg-gray-100 text-gray-800'
                   }`}>
                     {customer.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
                   <div>
                     <strong>Contact:</strong>
@@ -166,7 +166,7 @@ export default function CustomersPage() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex gap-2 ml-4">
                 <Link href={`/dashboard/management/customers/${customer.id}`}>
                   <Button variant="outline" size="sm">

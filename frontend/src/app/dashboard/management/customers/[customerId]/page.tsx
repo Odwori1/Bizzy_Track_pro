@@ -7,12 +7,14 @@ import { useCustomerStore } from '@/store/customerStore';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function CustomerDetailPage() {
   const params = useParams();
   const customerId = params.customerId as string;
-  
+
   const { selectedCustomer, customerCommunications, loading, error, actions } = useCustomerStore();
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   useEffect(() => {
     if (customerId) {
@@ -46,9 +48,7 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const formatCurrency = (amount: string) => {
-    return `USh ${parseFloat(amount).toLocaleString()}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   return (
     <div className="container mx-auto p-6">
@@ -93,8 +93,8 @@ export default function CustomerDetailPage() {
             <div>
               <label className="text-sm text-gray-500">Status</label>
               <div className={`inline-block px-2 py-1 rounded-full text-xs ${
-                selectedCustomer.is_active 
-                  ? 'bg-green-100 text-green-800' 
+                selectedCustomer.is_active
+                  ? 'bg-green-100 text-green-800'
                   : 'bg-gray-100 text-gray-800'
               }`}>
                 {selectedCustomer.is_active ? 'Active' : 'Inactive'}

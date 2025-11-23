@@ -1,6 +1,7 @@
 import { businessService } from '../services/businessService.js';
 import { businessRegistrationSchema } from '../schemas/businessSchemas.js';
 import { log } from '../utils/logger.js';
+// REMOVED: import db from '../database/db.js'; - This file doesn't exist
 
 export const businessController = {
   async register(req, res) {
@@ -90,7 +91,7 @@ export const businessController = {
 
     } catch (error) {
       log.error('Login controller error', error);
-      
+
       if (error.message.includes('Invalid email or password')) {
         return res.status(401).json({
           success: false,
@@ -101,6 +102,52 @@ export const businessController = {
       res.status(500).json({
         success: false,
         error: 'Login failed'
+      });
+    }
+  },
+
+  // NEW METHOD: Get current business details - FIXED DATABASE IMPORT
+  async getCurrentBusiness(req, res) {
+    try {
+      const { businessId } = req.user;
+
+      // Use businessService to get business details instead of direct db import
+      const business = await businessService.getBusinessProfile(businessId);
+
+      if (!business) {
+        return res.status(404).json({
+          success: false,
+          error: 'Business not found'
+        });
+      }
+      
+      // Map currency codes to symbols
+      const currencySymbolMap = {
+        'UGX': 'Ush',
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+        'KES': 'KSh',
+        'GHS': 'GH₵',
+        'NGN': '₦'
+      };
+
+      res.json({
+        success: true,
+        data: {
+          id: business.id,
+          name: business.name,
+          currency: business.currency,
+          currencySymbol: currencySymbolMap[business.currency] || '$',
+          timezone: business.timezone,
+          createdAt: business.created_at
+        }
+      });
+    } catch (error) {
+      console.error('Get current business error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch business details'
       });
     }
   },

@@ -6,8 +6,9 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { useJob, useJobActions } from '@/hooks/useJobs';
-import { Job } from '@/types/jobs';
+import { Job, JobService } from '@/types/jobs';
 import { apiClient } from '@/lib/api';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface JobDetailPageProps {
   params: Promise<{
@@ -23,6 +24,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [invoiceCreating, setInvoiceCreating] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
 
   // Unwrap the params promise
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
     if (!job) return;
 
     console.log('Creating invoice from job:', job);
-    
+
     setInvoiceCreating(true);
     try {
       const invoiceData = {
@@ -75,21 +77,29 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
         due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         notes: `Invoice for job: ${job.title}`,
         terms: 'Payment due in 30 days',
-        line_items: [
-          {
-            service_id: job.service_id,
-            description: job.service_name || `Service for ${job.title}`,
-            quantity: 1,
-            unit_price: parseFloat(job.service_base_price || '0'),
-            tax_rate: 0
-          }
-        ]
+        line_items: job.is_package_job && job.job_services
+          ? job.job_services.map((service: JobService, index: number) => ({
+              service_id: service.service_id,
+              description: service.service_name || `Service ${index + 1}`,
+              quantity: service.quantity,
+              unit_price: parseFloat(service.unit_price || '0'),
+              tax_rate: 0
+            }))
+          : [
+              {
+                service_id: job.service_id,
+                description: job.service_name || `Service for ${job.title}`,
+                quantity: 1,
+                unit_price: parseFloat(job.service_base_price || '0'),
+                tax_rate: 0
+              }
+            ]
       };
 
       console.log('Invoice data:', invoiceData);
       const result = await apiClient.post('/invoices', invoiceData);
       console.log('Invoice created:', result);
-      
+
       if (result) {
         router.push(`/dashboard/management/invoices/${result.id}`);
       }
@@ -105,6 +115,64 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   const formatDate = (dateData: any) => {
     if (!dateData) return 'Not scheduled';
     return dateData.formatted || new Date(dateData.utc).toLocaleString();
+  };
+
+  // REMOVED: Hardcoded formatCurrency function
+
+  // Calculate total price from services - NEW FUNCTION
+  const calculateTotalPrice = () => {
+    if (job.is_package_job && job.job_services && job.job_services.length > 0) {
+      // Calculate total from individual services
+      return job.job_services.reduce((total: number, service: JobService) => {
+        return total + (parseFloat(service.unit_price || '0') * service.quantity);
+      }, 0);
+    } else {
+      // Single service job
+      return parseFloat(job.service_base_price || '0');
+    }
+  };
+
+  // Render service information based on job type - FIXED PRICE CALCULATION
+  const renderServiceInfo = () => {
+    if (job.is_package_job && job.job_services && job.job_services.length > 0) {
+      // Package job with multiple services
+      const totalPrice = calculateTotalPrice();
+
+      return (
+        <div className="space-y-3">
+          <div className="font-medium text-gray-900">Package: {job.package_name}</div>
+          <div className="space-y-2">
+            {job.job_services.map((service: JobService, index: number) => (
+              <div key={service.id} className="flex justify-between items-start border-b pb-2 last:border-b-0">
+                <div>
+                  <div className="font-medium text-sm">{service.service_name || `Service ${index + 1}`}</div>
+                  <div className="text-xs text-gray-500">
+                    Qty: {service.quantity} • {service.estimated_duration_minutes} min
+                  </div>
+                </div>
+                <div className="text-sm font-medium text-right">
+                  {formatCurrency(parseFloat(service.unit_price || '0') * service.quantity)} {/* FIXED: Dynamic currency */}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="pt-2 border-t">
+            <div className="flex justify-between font-medium">
+              <span>Total:</span>
+              <span>{formatCurrency(totalPrice)}</span> {/* FIXED: Dynamic currency */}
+            </div>
+          </div>
+        </div>
+      );
+    } else {
+      // Single service job
+      return (
+        <div className="space-y-2">
+          <div className="font-medium">{job.service_name || 'No service selected'}</div>
+          <div className="text-sm text-gray-600">{formatCurrency(job.service_base_price || '0')}</div> {/* FIXED: Dynamic currency */}
+        </div>
+      );
+    }
   };
 
   if (!jobId) {
@@ -148,7 +216,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
           <Link href="/dashboard/management/jobs">
             <Button variant="secondary">Back to Jobs</Button>
           </Link>
-          <Button 
+          <Button
             variant="primary"
             onClick={handleCreateInvoice}
             disabled={invoiceCreating || job.status !== 'completed'}
@@ -267,11 +335,10 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
 
           <Card>
             <div className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Service</h2>
-              <div className="space-y-2">
-                <div className="font-medium">{job.service_name}</div>
-                <div className="text-sm text-gray-600">${job.service_base_price}</div>
-              </div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                {job.is_package_job ? 'Package Services' : 'Service'}
+              </h2>
+              {renderServiceInfo()}
             </div>
           </Card>
 

@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Shield, Clock, Users, AlertTriangle } from 'lucide-react';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 interface DeconstructionValidatorProps {
   package: Package;
@@ -18,9 +19,15 @@ export function DeconstructionValidator({
   onSelectionChange
 }: DeconstructionValidatorProps) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   // Safely handle services array
   const services = pkg.services || [];
+
+  // Helper function to get service display name
+  const getServiceDisplayName = (service: any) => {
+    return service.service_name || service.service_id;
+  };
 
   useEffect(() => {
     // Initialize quantities
@@ -86,14 +93,18 @@ export function DeconstructionValidator({
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3 flex-1">
                   <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={() => handleServiceToggle(service.service_id, isRequired)}
+                    checked={isSelected || isRequired}
+                    onChange={(e) => {
+                      if (!isRequired) {
+                        handleServiceToggle(service.service_id, isRequired);
+                      }
+                    }}
                     disabled={isRequired}
                   />
 
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">{service.service_id}</span>
+                      <span className="font-medium">{getServiceDisplayName(service)}</span>
                       {isRequired && (
                         <Badge variant="secondary" className="text-xs">
                           Required
@@ -101,7 +112,7 @@ export function DeconstructionValidator({
                       )}
                       {service.is_price_overridden && (
                         <Badge variant="outline" className="text-xs">
-                          Custom Price: ${service.package_price}
+                          Custom Price: {formatCurrency(service.package_price)} {/* FIXED: Dynamic currency */}
                         </Badge>
                       )}
                     </div>
@@ -150,7 +161,7 @@ export function DeconstructionValidator({
                     value={quantities[service.service_id] || 1}
                     onChange={(e) => handleQuantityChange(service.service_id, parseInt(e.target.value) || 1)}
                     className="w-16"
-                    disabled={!isSelected}
+                    disabled={!isSelected && !isRequired}
                   />
                 </div>
               </div>

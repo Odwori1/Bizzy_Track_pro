@@ -9,12 +9,14 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function EditServicePage() {
   const router = useRouter();
   const params = useParams();
   const serviceId = params.serviceId as string;
-  
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+
   const { actions, selectedService, serviceCategories, loading } = useServiceStore();
   const [formData, setFormData] = useState({
     name: '',
@@ -47,7 +49,7 @@ export default function EditServicePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       await actions.updateService(serviceId, {
         ...formData,
@@ -77,7 +79,7 @@ export default function EditServicePage() {
       <div className="container mx-auto p-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900">Service Not Found</h1>
-          <Button 
+          <Button
             onClick={() => router.push('/dashboard/management/services')}
             className="mt-4"
           >
@@ -95,8 +97,8 @@ export default function EditServicePage() {
           <h1 className="text-2xl font-bold text-gray-900">Edit Service</h1>
           <p className="text-gray-600">Update service information</p>
         </div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={() => router.push('/dashboard/management/services')}
         >
           Back to Services
@@ -134,7 +136,7 @@ export default function EditServicePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="base_price">Base Price (USh) *</Label>
+                <Label htmlFor="base_price">Base Price ({currencySymbol}) *</Label> {/* FIXED: Dynamic currency symbol */}
                 <Input
                   id="base_price"
                   name="base_price"
@@ -195,9 +197,9 @@ export default function EditServicePage() {
               <Button type="submit" disabled={loading}>
                 {loading ? 'Updating...' : 'Update Service'}
               </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => router.push('/dashboard/management/services')}
               >
                 Cancel

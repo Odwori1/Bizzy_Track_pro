@@ -8,9 +8,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function NewServicePage() {
   const router = useRouter();
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
   const { actions, serviceCategories, loading } = useServiceStore();
   const [formData, setFormData] = useState({
     name: '',
@@ -27,7 +29,7 @@ export default function NewServicePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       await actions.createService({
         ...formData,
@@ -55,8 +57,8 @@ export default function NewServicePage() {
           <h1 className="text-2xl font-bold text-gray-900">Add New Service</h1>
           <p className="text-gray-600">Create a new service for your catalog</p>
         </div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={() => router.push('/dashboard/management/services')}
         >
           Back to Services
@@ -96,7 +98,7 @@ export default function NewServicePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="base_price">Base Price (USh) *</Label>
+                <Label htmlFor="base_price">Base Price ({currencySymbol}) *</Label> {/* FIXED: Dynamic currency symbol */}
                 <Input
                   id="base_price"
                   name="base_price"
@@ -159,9 +161,9 @@ export default function NewServicePage() {
               <Button type="submit" disabled={loading}>
                 {loading ? 'Creating...' : 'Create Service'}
               </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => router.push('/dashboard/management/services')}
               >
                 Cancel

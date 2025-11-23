@@ -7,12 +7,14 @@ import { useServiceStore } from '@/store/serviceStore';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function ServiceDetailsPage() {
   const params = useParams();
   const serviceId = params.serviceId as string;
-  
+
   const { selectedService, loading, error, actions } = useServiceStore();
+  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
 
   useEffect(() => {
     if (serviceId) {
@@ -45,9 +47,7 @@ export default function ServiceDetailsPage() {
     );
   }
 
-  const formatCurrency = (amount: string) => {
-    return `USh ${parseFloat(amount).toLocaleString()}`;
-  };
+  // REMOVED: Hardcoded formatCurrency function
 
   return (
     <div className="container mx-auto p-6">
@@ -92,9 +92,9 @@ export default function ServiceDetailsPage() {
               <div className="font-medium">
                 {selectedService.display_category || selectedService.category || 'No category'}
                 {selectedService.category_color && (
-                  <span 
+                  <span
                     className="ml-2 px-2 py-1 rounded-full text-xs"
-                    style={{ 
+                    style={{
                       backgroundColor: `${selectedService.category_color}20`,
                       color: selectedService.category_color
                     }}
@@ -107,8 +107,8 @@ export default function ServiceDetailsPage() {
             <div>
               <label className="text-sm text-gray-500">Status</label>
               <div className={`inline-block px-2 py-1 rounded-full text-xs ${
-                selectedService.is_active 
-                  ? 'bg-green-100 text-green-800' 
+                selectedService.is_active
+                  ? 'bg-green-100 text-green-800'
                   : 'bg-gray-100 text-gray-800'
               }`}>
                 {selectedService.is_active ? 'Active' : 'Inactive'}

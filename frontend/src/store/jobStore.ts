@@ -8,12 +8,12 @@ interface JobState {
   loading: boolean;
   error: string | null;
   filters: JobFilters;
-  
+
   // Actions
   actions: {
     fetchJobs: (filters?: JobFilters) => Promise<void>;
     fetchJobById: (id: string) => Promise<void>;
-    createJob: (jobData: JobCreateRequest) => Promise<void>;
+    createJob: (jobData: JobCreateRequest) => Promise<Job>;
     updateJob: (id: string, jobData: JobUpdateRequest) => Promise<void>;
     updateJobStatus: (id: string, status: Job['status']) => Promise<void>;
     deleteJob: (id: string) => Promise<void>;
@@ -38,13 +38,14 @@ export const useJobStore = create<JobState>()((set, get) => ({
         if (filters.status) params.status = filters.status;
         if (filters.priority) params.priority = filters.priority;
         if (filters.customerId) params.assigned_to = filters.customerId;
+        if (filters.is_package_job !== undefined) params.is_package_job = filters.is_package_job.toString();
 
         const jobs = await apiClient.get<Job[]>('/api/jobs', params);
         set({ jobs, loading: false });
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to fetch jobs' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to fetch jobs'
         });
       }
     },
@@ -55,9 +56,9 @@ export const useJobStore = create<JobState>()((set, get) => ({
         const job = await apiClient.get<Job>(`/api/jobs/${id}`);
         set({ selectedJob: job, loading: false });
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to fetch job' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to fetch job'
         });
       }
     },
@@ -66,15 +67,15 @@ export const useJobStore = create<JobState>()((set, get) => ({
       set({ loading: true, error: null });
       try {
         const newJob = await apiClient.post<Job>('/api/jobs', jobData);
-        set(state => ({ 
+        set(state => ({
           jobs: [...state.jobs, newJob],
-          loading: false 
+          loading: false
         }));
         return newJob;
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to create job' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to create job'
         });
         throw error;
       }
@@ -91,9 +92,9 @@ export const useJobStore = create<JobState>()((set, get) => ({
         }));
         return updatedJob;
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to update job' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to update job'
         });
         throw error;
       }
@@ -104,18 +105,18 @@ export const useJobStore = create<JobState>()((set, get) => ({
       try {
         await apiClient.patch(`/api/jobs/${id}/status`, { status });
         set(state => ({
-          jobs: state.jobs.map(job => 
+          jobs: state.jobs.map(job =>
             job.id === id ? { ...job, status } : job
           ),
-          selectedJob: state.selectedJob?.id === id 
+          selectedJob: state.selectedJob?.id === id
             ? { ...state.selectedJob, status }
             : state.selectedJob,
           loading: false
         }));
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to update job status' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to update job status'
         });
         throw error;
       }
@@ -131,9 +132,9 @@ export const useJobStore = create<JobState>()((set, get) => ({
           loading: false
         }));
       } catch (error) {
-        set({ 
-          loading: false, 
-          error: error instanceof Error ? error.message : 'Failed to delete job' 
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to delete job'
         });
         throw error;
       }

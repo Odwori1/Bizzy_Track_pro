@@ -8,9 +8,11 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
+import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
 
 export default function NewServicePage() {
   const router = useRouter();
+  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
   const { serviceCategories, loading, actions } = useServiceStore();
   const [formData, setFormData] = useState({
     name: '',
@@ -109,7 +111,7 @@ export default function NewServicePage() {
 
               <div>
                 <label htmlFor="base_price" className="block text-sm font-medium text-gray-700 mb-1">
-                  Base Price (USh) *
+                  Base Price ({currencySymbol}) * {/* FIXED: Dynamic currency symbol */}
                 </label>
                 <Input
                   id="base_price"

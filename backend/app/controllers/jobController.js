@@ -11,7 +11,8 @@ export const jobController = {
       log.info('Creating job', {
         jobTitle: jobData.title,
         userId,
-        businessId
+        businessId,
+        isPackageJob: jobData.is_package_job || false
       });
 
       const newJob = await jobService.createJob(
@@ -22,7 +23,7 @@ export const jobController = {
 
       res.status(201).json({
         success: true,
-        message: 'Job created successfully',
+        message: jobData.is_package_job ? 'Package job created successfully' : 'Job created successfully',
         data: newJob
       });
 
@@ -35,16 +36,17 @@ export const jobController = {
   async getAll(req, res, next) {
     try {
       const businessId = req.user.businessId;
-      const { status, assigned_to } = req.query;
+      const { status, assigned_to, is_package_job } = req.query;
 
       log.info('Fetching all jobs', {
         businessId,
-        filters: { status, assigned_to }
+        filters: { status, assigned_to, is_package_job }
       });
 
       const options = {};
       if (status) options.status = status;
       if (assigned_to) options.assigned_to = assigned_to;
+      if (is_package_job !== undefined) options.is_package_job = is_package_job === 'true';
 
       const jobs = await jobService.getAllJobs(businessId, options);
 
