@@ -25,6 +25,10 @@ import pricingRuleRoutes from './routes/pricingRuleRoutes.js';
 import discountApprovalRoutes from './routes/discountApprovalRoutes.js';
 import assetRoutes from './routes/assetRoutes.js';
 import equipmentHireRoutes from './routes/equipmentHireRoutes.js';
+//additional assets and equipment routes
+import maintenanceRoutes from './routes/maintenanceRoutes.js';
+import depreciationRoutes from './routes/depreciationRoutes.js';
+
 import businessValuationRoutes from './routes/businessValuationRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import walletRoutes from './routes/walletRoutes.js';
@@ -163,6 +167,10 @@ app.use('/api/pricing-rules', pricingRuleRoutes);
 app.use('/api/discount-approvals', discountApprovalRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/equipment-hire', equipmentHireRoutes);
+//additional assets and equipment routes
+app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/depreciation', depreciationRoutes);
+
 app.use('/api/business-valuation', businessValuationRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/wallets', walletRoutes);

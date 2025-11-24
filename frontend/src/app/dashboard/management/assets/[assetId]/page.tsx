@@ -1,0 +1,255 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { useAssetsStore } from '@/store/week6/assets-store';
+
+export default function AssetDetailPage() {
+  const params = useParams();
+  const assetId = params.assetId as string;
+  
+  const { assets, fetchAssets } = useAssetsStore();
+  const [currentAsset, setCurrentAsset] = useState<any>(null);
+
+  useEffect(() => {
+    fetchAssets();
+  }, [fetchAssets]);
+
+  useEffect(() => {
+    if (assetId && assets.length > 0) {
+      const foundAsset = assets.find(asset => asset.id === assetId);
+      setCurrentAsset(foundAsset);
+    }
+  }, [assetId, assets]);
+
+  if (!currentAsset) {
+    return (
+      <div className="flex justify-center items-center min-h-64">
+        <div className="text-center">
+          <div className="text-lg text-gray-600">Asset not found</div>
+          <Link href="/dashboard/management/assets" className="text-blue-600 hover:text-blue-800">
+            Back to Assets
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <Link 
+            href="/dashboard/management/assets" 
+            className="text-blue-600 hover:text-blue-800 mb-2 inline-block"
+          >
+            ← Back to Assets
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900">{currentAsset.asset_name}</h1>
+          <p className="text-gray-600">{currentAsset.asset_code}</p>
+        </div>
+        <Link
+          href={`/dashboard/management/assets/${assetId}/edit`}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+        >
+          Edit Asset
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          {/* Asset Details Card */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Asset Details</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Basic Information</h3>
+                <dl className="space-y-2">
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Asset Code</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.asset_code}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Category</dt>
+                    <dd className="text-sm text-gray-900 capitalize">{currentAsset.category}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Serial Number</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.serial_number}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Model</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.model}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Status & Location</h3>
+                <dl className="space-y-2">
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Status</dt>
+                    <dd className="text-sm">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        currentAsset.is_active
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {currentAsset.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Condition</dt>
+                    <dd className="text-sm">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        currentAsset.condition_status === 'excellent' ? 'bg-green-100 text-green-800' :
+                        currentAsset.condition_status === 'good' ? 'bg-blue-100 text-blue-800' :
+                        currentAsset.condition_status === 'fair' ? 'bg-yellow-100 text-yellow-800' :
+                        currentAsset.condition_status === 'poor' ? 'bg-orange-100 text-orange-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {currentAsset.condition_status}
+                      </span>
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Location</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.location}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Maintenance Schedule</dt>
+                    <dd className="text-sm text-gray-900 capitalize">{currentAsset.maintenance_schedule}</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+
+            {currentAsset.description && (
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-500">Description</h3>
+                <p className="mt-1 text-sm text-gray-900">{currentAsset.description}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Financial Information */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Financial Information</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Purchase Details</h3>
+                <dl className="space-y-2">
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Purchase Date</dt>
+                    <dd className="text-sm text-gray-900">
+                      {new Date(currentAsset.purchase_date).toLocaleDateString()}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Purchase Price</dt>
+                    <dd className="text-sm text-gray-900">
+                      ${currentAsset.purchase_price.toLocaleString()}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Supplier</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.supplier}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Invoice Reference</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.invoice_reference}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Depreciation</h3>
+                <dl className="space-y-2">
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Current Value</dt>
+                    <dd className="text-sm text-gray-900">
+                      ${currentAsset.current_value.toLocaleString()}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Depreciation Method</dt>
+                    <dd className="text-sm text-gray-900 capitalize">
+                      {currentAsset.depreciation_method.replace('_', ' ')}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Depreciation Rate</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.depreciation_rate}%</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-600">Useful Life</dt>
+                    <dd className="text-sm text-gray-900">{currentAsset.useful_life_years} years</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Quick Actions */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+            <div className="space-y-2">
+              <Link
+                href={`/dashboard/management/assets/${assetId}/edit`}
+                className="w-full bg-blue-50 text-blue-700 text-sm font-medium py-2 px-3 rounded text-center hover:bg-blue-100 transition-colors block"
+              >
+                Edit Asset
+              </Link>
+              <Link
+                href="/dashboard/management/maintenance/new"
+                className="w-full bg-yellow-50 text-yellow-700 text-sm font-medium py-2 px-3 rounded text-center hover:bg-yellow-100 transition-colors block"
+              >
+                Schedule Maintenance
+              </Link>
+              <Link
+                href="/dashboard/management/depreciation"
+                className="w-full bg-purple-50 text-purple-700 text-sm font-medium py-2 px-3 rounded text-center hover:bg-purple-100 transition-colors block"
+              >
+                View Depreciation
+              </Link>
+            </div>
+          </div>
+
+          {/* Maintenance Info */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Maintenance</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Last Maintenance</span>
+                <span className="text-sm text-gray-900">
+                  {currentAsset.last_maintenance_date 
+                    ? new Date(currentAsset.last_maintenance_date).toLocaleDateString()
+                    : 'Never'
+                  }
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Next Maintenance</span>
+                <span className="text-sm text-gray-900">
+                  {currentAsset.next_maintenance_date 
+                    ? new Date(currentAsset.next_maintenance_date).toLocaleDateString()
+                    : 'Not scheduled'
+                  }
+                </span>
+              </div>
+              <Link
+                href="/dashboard/management/maintenance"
+                className="text-sm text-blue-600 hover:text-blue-800 block text-center"
+              >
+                View Maintenance History
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

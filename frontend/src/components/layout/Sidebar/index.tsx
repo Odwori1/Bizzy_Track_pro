@@ -43,6 +43,31 @@ const navigationItems = {
       icon: '📦',
       permission: 'package:view',
     },
+    // WEEK 6 - ASSET & EQUIPMENT MANAGEMENT
+    {
+      name: 'Asset Management',
+      href: '/dashboard/management/assets',
+      icon: '🏢',
+      permission: 'asset:view',
+    },
+    {
+      name: 'Equipment & Hire',
+      href: '/dashboard/management/equipment',
+      icon: '🔌',
+      permission: 'equipment:view',
+    },
+    {
+      name: 'Maintenance',
+      href: '/dashboard/management/maintenance',
+      icon: '🔧',
+      permission: 'maintenance:view',
+    },
+    {
+      name: 'Depreciation',
+      href: '/dashboard/management/depreciation',
+      icon: '📉',
+      permission: 'depreciation:view',
+    },
   ],
   pricing: [
     {
@@ -95,26 +120,16 @@ const navigationItems = {
       icon: '📈',
       permission: 'analytics:view',
     },
-    {
-      name: 'Security Scans',
-      href: '/dashboard/security/scans',
-      icon: '🔒',
-      permission: 'scan:view',
-    },
   ],
 };
 
 export const Sidebar: React.FC = () => {
   return (
-    <div className="flex flex-col w-64 bg-white border-r border-gray-200 h-full">
-      {/* Logo */}
-      <div className="flex items-center justify-center h-16 px-4 border-b border-gray-200">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">B</span>
-          </div>
-          <span className="font-bold text-gray-900">Bizzy Track Pro</span>
-        </div>
+    <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      {/* Sidebar Header */}
+      <div className="p-4 border-b border-gray-200">
+        <h1 className="text-xl font-bold text-gray-800">Bizzy Track Pro</h1>
+        <p className="text-sm text-gray-600">Business Management</p>
       </div>
 
       {/* Navigation */}
@@ -133,4 +148,4 @@ export const Sidebar: React.FC = () => {
       </div>
     </div>
   );
-}
+};

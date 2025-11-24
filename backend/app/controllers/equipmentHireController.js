@@ -42,6 +42,66 @@ export const equipmentHireController = {
     }
   },
 
+  async getBookingById(req, res, next) {
+    try {
+      const { bookingId } = req.params;
+      const businessId = req.user.businessId;
+
+      const booking = await EquipmentHireService.getHireBookingById(businessId, bookingId);
+
+      res.json({
+        success: true,
+        data: booking,
+        message: 'Hire booking fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Hire booking fetch by ID controller error', error);
+      next(error);
+    }
+  },
+
+  async updateBooking(req, res, next) {
+    try {
+      const { bookingId } = req.params;
+      const updateData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      const updatedBooking = await EquipmentHireService.updateHireBooking(businessId, bookingId, updateData, userId);
+
+      res.json({
+        success: true,
+        message: 'Hire booking updated successfully',
+        data: updatedBooking
+      });
+
+    } catch (error) {
+      log.error('Hire booking update controller error', error);
+      next(error);
+    }
+  },
+
+  async deleteBooking(req, res, next) {
+    try {
+      const { bookingId } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      const result = await EquipmentHireService.deleteHireBooking(businessId, bookingId, userId);
+
+      res.json({
+        success: true,
+        message: 'Hire booking deleted successfully',
+        data: result
+      });
+
+    } catch (error) {
+      log.error('Hire booking deletion controller error', error);
+      next(error);
+    }
+  },
+
   async getAvailableEquipment(req, res, next) {
     try {
       const businessId = req.user.businessId;

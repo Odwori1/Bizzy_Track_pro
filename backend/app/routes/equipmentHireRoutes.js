@@ -1,6 +1,6 @@
 import express from 'express';
 import { equipmentHireController } from '../controllers/equipmentHireController.js';
-import { createEquipmentAssetSchema, createHireBookingSchema } from '../schemas/equipmentHireSchemas.js';
+import { createEquipmentAssetSchema, createHireBookingSchema, updateHireBookingSchema } from '../schemas/equipmentHireSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -37,6 +37,25 @@ router.get(
   '/bookings',
   requirePermission('equipment:hire:read'),
   equipmentHireController.getBookings
+);
+
+router.get(
+  '/bookings/:bookingId',
+  requirePermission('equipment:hire:read'),
+  equipmentHireController.getBookingById
+);
+
+router.put(
+  '/bookings/:bookingId',
+  requirePermission('equipment:hire:update'),
+  validateRequest(updateHireBookingSchema),
+  equipmentHireController.updateBooking
+);
+
+router.delete(
+  '/bookings/:bookingId',
+  requirePermission('equipment:hire:delete'),
+  equipmentHireController.deleteBooking
 );
 
 // Statistics
