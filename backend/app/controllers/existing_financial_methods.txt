@@ -1,0 +1,4 @@
+calculateTithe
+getCashFlowReport
+getFinancialReport
+getProfitAndLoss

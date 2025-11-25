@@ -67,10 +67,10 @@ export class WalletService {
    */
   static async getWallets(businessId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
-        SELECT * FROM money_wallets 
+        SELECT * FROM money_wallets
         WHERE business_id = $1
       `;
       const params = [businessId];
@@ -93,12 +93,12 @@ export class WalletService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getWallets:', {
@@ -133,7 +133,7 @@ export class WalletService {
 
       const currentBalance = parseFloat(walletCheck.rows[0].current_balance);
       const amount = parseFloat(transactionData.amount);
-      
+
       // Calculate new balance
       let newBalance;
       switch (transactionData.transaction_type) {
@@ -309,7 +309,7 @@ export class WalletService {
       });
 
       await client.query('COMMIT');
-      
+
       return {
         transfer: {
           from_transaction: fromTransaction.rows[0],
@@ -334,7 +334,7 @@ export class WalletService {
    */
   static async getWalletTransactions(businessId, walletId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
         SELECT wt.*, mw.name as wallet_name
@@ -370,7 +370,7 @@ export class WalletService {
         paramCount++;
         queryStr += ` LIMIT $${paramCount}`;
         params.push(filters.limit);
-        
+
         paramCount++;
         queryStr += ` OFFSET $${paramCount}`;
         params.push(offset);
@@ -379,12 +379,12 @@ export class WalletService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getWalletTransactions:', {
@@ -400,11 +400,108 @@ export class WalletService {
   }
 
   /**
+   * Get all transactions across all wallets for a business
+   */
+  static async getAllTransactions(businessId, filters = {}) {
+    const client = await getClient();
+    try {
+      const {
+        transaction_type,
+        start_date,
+        end_date,
+        page = 1,
+        limit = 50
+      } = filters;
+
+      let queryStr = `
+        SELECT 
+          wt.*,
+          mw.name as wallet_name,
+          mw.wallet_type
+        FROM wallet_transactions wt
+        INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
+        WHERE mw.business_id = $1
+      `;
+      const params = [businessId];
+      let paramCount = 1;
+
+      if (transaction_type) {
+        paramCount++;
+        queryStr += ` AND wt.transaction_type = $${paramCount}`;
+        params.push(transaction_type);
+      }
+
+      if (start_date) {
+        paramCount++;
+        queryStr += ` AND wt.created_at >= $${paramCount}`;
+        params.push(start_date);
+      }
+
+      if (end_date) {
+        paramCount++;
+        queryStr += ` AND wt.created_at <= $${paramCount}`;
+        params.push(end_date);
+      }
+
+      queryStr += ` ORDER BY wt.created_at DESC`;
+
+      // Add pagination
+      if (limit) {
+        paramCount++;
+        queryStr += ` LIMIT $${paramCount}`;
+        params.push(limit);
+      }
+
+      if (page && limit) {
+        paramCount++;
+        const offset = (page - 1) * limit;
+        queryStr += ` OFFSET $${paramCount}`;
+        params.push(offset);
+      }
+
+      const result = await client.query(queryStr, params);
+
+      // Get total count for pagination info
+      let countQuery = `
+        SELECT COUNT(*) 
+        FROM wallet_transactions wt
+        INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
+        WHERE mw.business_id = $1
+      `;
+      const countParams = [businessId];
+
+      if (transaction_type) {
+        countQuery += ` AND wt.transaction_type = $2`;
+        countParams.push(transaction_type);
+      }
+
+      const countResult = await client.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0].count);
+
+      return {
+        transactions: result.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      };
+
+    } catch (error) {
+      log.error('Error fetching all wallet transactions:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get wallet statistics
    */
   static async getWalletStatistics(businessId) {
     const client = await getClient();
-    
+
     try {
       const result = await client.query(
         `SELECT
@@ -428,11 +525,11 @@ export class WalletService {
         [businessId]
       );
 
-      log.info('✅ Database query successful', { 
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return {
         total_balance: parseFloat(totalStats.rows[0]?.total_balance || 0),
         wallet_types: result.rows

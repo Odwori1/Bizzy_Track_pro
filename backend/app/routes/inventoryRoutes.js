@@ -1,10 +1,10 @@
 import express from 'express';
 import { inventoryController } from '../controllers/inventoryController.js';
-import { 
-  createInventoryCategorySchema, 
-  createInventoryItemSchema, 
+import {
+  createInventoryCategorySchema,
+  createInventoryItemSchema,
   createInventoryMovementSchema,
-  inventoryQuerySchema 
+  inventoryQuerySchema
 } from '../schemas/inventorySchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -15,6 +15,13 @@ const router = express.Router();
 
 // All routes require authentication and RLS context
 router.use(authenticate, setRLSContext);
+
+// NEW: Inventory Overview Dashboard
+router.get(
+  '/',
+  requirePermission('inventory:read'),
+  inventoryController.getOverview
+);
 
 // Inventory Categories
 router.post(

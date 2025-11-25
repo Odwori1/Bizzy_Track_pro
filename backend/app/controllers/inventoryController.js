@@ -2,6 +2,27 @@ import { InventoryService } from '../services/inventoryService.js';
 import { log } from '../utils/logger.js';
 
 export const inventoryController = {
+  // NEW: Inventory Overview Dashboard
+  async getOverview(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      log.info('Fetching inventory overview', { businessId });
+
+      const overview = await InventoryService.getOverview(businessId);
+
+      res.json({
+        success: true,
+        data: overview,
+        message: 'Inventory overview fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Inventory overview fetch controller error', error);
+      next(error);
+    }
+  },
+
   async createCategory(req, res, next) {
     try {
       const categoryData = req.body;
@@ -52,9 +73,9 @@ export const inventoryController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Recording inventory movement', { 
-        businessId, 
-        userId, 
+      log.info('Recording inventory movement', {
+        businessId,
+        userId,
         itemId: movementData.inventory_item_id,
         movementType: movementData.movement_type
       });

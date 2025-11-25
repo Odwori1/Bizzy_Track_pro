@@ -28,6 +28,13 @@ router.get(
   financialReportController.getProfitAndLoss
 );
 
+// NEW: Balance Sheet Report
+router.get(
+  '/balance-sheet',
+  requirePermission('financial:reports:view'),
+  financialReportController.getBalanceSheet
+);
+
 // Tithe Calculation (Optional Feature)
 router.get(
   '/tithe-calculation',

@@ -2,6 +2,35 @@ import { FinancialReportService } from '../services/financialReportService.js';
 import { log } from '../utils/logger.js';
 
 export const financialReportController = {
+  // NEW: Balance Sheet Report
+  async getBalanceSheet(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const { start_date, end_date } = req.query;
+
+      if (!start_date || !end_date) {
+        return res.status(400).json({
+          success: false,
+          error: 'Start date and end date are required for balance sheet report'
+        });
+      }
+
+      log.info('Generating balance sheet', { businessId, start_date, end_date });
+
+      const balanceSheet = await FinancialReportService.getBalanceSheet(businessId, start_date, end_date);
+
+      res.json({
+        success: true,
+        data: balanceSheet,
+        message: 'Balance sheet generated successfully'
+      });
+
+    } catch (error) {
+      log.error('Balance sheet generation controller error', error);
+      next(error);
+    }
+  },
+
   async getFinancialReport(req, res, next) {
     try {
       const businessId = req.user.businessId;

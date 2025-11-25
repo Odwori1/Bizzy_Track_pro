@@ -4,6 +4,92 @@ import { log } from '../utils/logger.js';
 
 export class InventoryService {
   /**
+   * Get inventory overview dashboard data
+   */
+  static async getOverview(businessId) {
+    const client = await getClient();
+
+    try {
+      log.info('Getting inventory overview', { businessId });
+
+      // Get total items count
+      const totalItemsResult = await client.query(
+        'SELECT COUNT(*) as count FROM inventory_items WHERE business_id = $1 AND is_active = true',
+        [businessId]
+      );
+
+      // Get low stock items count
+      const lowStockResult = await client.query(
+        `SELECT COUNT(*) as count FROM inventory_items 
+         WHERE business_id = $1 AND is_active = true 
+         AND current_stock <= min_stock_level AND min_stock_level > 0`,
+        [businessId]
+      );
+
+      // Get out of stock items count
+      const outOfStockResult = await client.query(
+        'SELECT COUNT(*) as count FROM inventory_items WHERE business_id = $1 AND is_active = true AND current_stock <= 0',
+        [businessId]
+      );
+
+      // Get total inventory value
+      const totalValueResult = await client.query(
+        'SELECT SUM(current_stock * cost_price) as total_value FROM inventory_items WHERE business_id = $1 AND is_active = true',
+        [businessId]
+      );
+
+      // Get recent movements
+      const recentMovementsResult = await client.query(
+        `SELECT
+          im.*,
+          ii.name as item_name,
+          ii.sku as item_sku
+         FROM inventory_movements im
+         LEFT JOIN inventory_items ii ON im.inventory_item_id = ii.id
+         WHERE im.business_id = $1
+         ORDER BY im.created_at DESC
+         LIMIT 10`,
+        [businessId]
+      );
+
+      // Get categories summary
+      const categoriesResult = await client.query(
+        `SELECT
+          ic.name as category_name,
+          COUNT(ii.id) as item_count,
+          SUM(ii.current_stock * ii.cost_price) as total_value
+         FROM inventory_categories ic
+         LEFT JOIN inventory_items ii ON ic.id = ii.category_id AND ii.is_active = true
+         WHERE ic.business_id = $1 AND ic.is_active = true
+         GROUP BY ic.id, ic.name
+         ORDER BY ic.name`,
+        [businessId]
+      );
+
+      return {
+        summary: {
+          total_items: parseInt(totalItemsResult.rows[0].count) || 0,
+          low_stock_items: parseInt(lowStockResult.rows[0].count) || 0,
+          out_of_stock_items: parseInt(outOfStockResult.rows[0].count) || 0,
+          total_inventory_value: parseFloat(totalValueResult.rows[0].total_value) || 0
+        },
+        categories: categoriesResult.rows,
+        recent_movements: recentMovementsResult.rows,
+        alerts: {
+          has_low_stock: parseInt(lowStockResult.rows[0].count) > 0,
+          has_out_of_stock: parseInt(outOfStockResult.rows[0].count) > 0
+        }
+      };
+
+    } catch (error) {
+      log.error('Inventory overview service error', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create inventory category
    */
   static async createCategory(businessId, categoryData, userId) {
@@ -51,10 +137,10 @@ export class InventoryService {
    */
   static async getCategories(businessId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
-        SELECT * FROM inventory_categories 
+        SELECT * FROM inventory_categories
         WHERE business_id = $1
       `;
       const params = [businessId];
@@ -71,12 +157,12 @@ export class InventoryService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getCategories:', {
@@ -173,13 +259,13 @@ export class InventoryService {
    */
   static async getItems(businessId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
-        SELECT 
+        SELECT
           ii.*,
           ic.name as category_name,
-          CASE 
+          CASE
             WHEN ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0 THEN 'low'
             WHEN ii.current_stock = 0 THEN 'out_of_stock'
             ELSE 'adequate'
@@ -214,7 +300,7 @@ export class InventoryService {
         paramCount++;
         queryStr += ` LIMIT $${paramCount}`;
         params.push(filters.limit);
-        
+
         paramCount++;
         queryStr += ` OFFSET $${paramCount}`;
         params.push(offset);
@@ -223,12 +309,12 @@ export class InventoryService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getItems:', {
@@ -324,20 +410,20 @@ export class InventoryService {
    */
   static async getLowStockAlerts(businessId) {
     const client = await getClient();
-    
+
     try {
       log.info('🗄️ Database Query: get_low_stock_items function');
-      
+
       const result = await client.query(
         `SELECT * FROM get_low_stock_items($1)`,
         [businessId]
       );
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getLowStockAlerts:', {
@@ -355,7 +441,7 @@ export class InventoryService {
    */
   static async getInventoryStatistics(businessId) {
     const client = await getClient();
-    
+
     try {
       const queryStr = `
         SELECT
@@ -372,12 +458,12 @@ export class InventoryService {
       log.info('🗄️ Database Query:', { query: queryStr, params: [businessId] });
 
       const result = await client.query(queryStr, [businessId]);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows[0];
     } catch (error) {
       log.error('❌ Database query failed in getInventoryStatistics:', {

@@ -1,10 +1,10 @@
 import express from 'express';
 import { walletController } from '../controllers/walletController.js';
-import { 
-  createWalletSchema, 
-  createWalletTransactionSchema, 
+import {
+  createWalletSchema,
+  createWalletTransactionSchema,
   transferBetweenWalletsSchema,
-  walletQuerySchema 
+  walletQuerySchema
 } from '../schemas/walletSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -37,6 +37,13 @@ router.post(
   requirePermission('wallet:update'),
   validateRequest(createWalletTransactionSchema),
   walletController.recordTransaction
+);
+
+// NEW: Get All Wallet Transactions
+router.get(
+  '/transactions',
+  requirePermission('wallet:read'),
+  walletController.getAllTransactions
 );
 
 router.post(

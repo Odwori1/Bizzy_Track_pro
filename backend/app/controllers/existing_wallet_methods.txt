@@ -1,0 +1,6 @@
+createWallet
+getWalletStatistics
+getWalletTransactions
+getWallets
+recordTransaction
+transferBetweenWallets

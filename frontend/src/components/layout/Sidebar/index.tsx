@@ -68,6 +68,40 @@ const navigationItems = {
       icon: '📉',
       permission: 'depreciation:view',
     },
+    // WEEK 7 - INVENTORY MANAGEMENT
+    {
+      name: 'Inventory Management',
+      href: '/dashboard/management/inventory',
+      icon: '📦',
+      permission: 'inventory:view',
+    },
+  ],
+  finances: [
+    // WEEK 7 - FINANCIAL MANAGEMENT
+    {
+      name: 'Financial Overview',
+      href: '/dashboard/management/finances',
+      icon: '💰',
+      permission: 'finance:view',
+    },
+    {
+      name: 'Wallet Management',
+      href: '/dashboard/management/finances/wallets',
+      icon: '💳',
+      permission: 'wallet:view',
+    },
+    {
+      name: 'Expense Management',
+      href: '/dashboard/management/finances/expenses',
+      icon: '📝',
+      permission: 'expense:view',
+    },
+    {
+      name: 'Financial Reports',
+      href: '/dashboard/management/finances/reports',
+      icon: '📊',
+      permission: 'report:view',
+    },
   ],
   pricing: [
     {
@@ -137,6 +171,7 @@ export const Sidebar: React.FC = () => {
         <nav className="space-y-8">
           <NavigationSection title="Overview" items={navigationItems.overview} />
           <NavigationSection title="Management" items={navigationItems.management} />
+          <NavigationSection title="Financial Management" items={navigationItems.finances} />
           <NavigationSection title="Pricing Management" items={navigationItems.pricing} />
           <NavigationSection title="Security" items={navigationItems.security} />
         </nav>
@@ -148,4 +183,4 @@ export const Sidebar: React.FC = () => {
       </div>
     </div>
   );
-};
+}
