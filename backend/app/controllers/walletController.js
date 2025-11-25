@@ -32,6 +32,52 @@ export const walletController = {
     }
   },
 
+  // NEW: Get Wallet by ID
+  async getWalletById(req, res, next) {
+    try {
+      const { id } = req.params;
+      const businessId = req.user.businessId;
+
+      log.info('Fetching wallet details', { businessId, walletId: id });
+
+      const wallet = await WalletService.getWalletById(businessId, id);
+
+      res.json({
+        success: true,
+        data: wallet,
+        message: 'Wallet details fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Wallet details fetch controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Update Wallet
+  async updateWallet(req, res, next) {
+    try {
+      const { id } = req.params;
+      const walletData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating wallet', { businessId, userId, walletId: id });
+
+      const updatedWallet = await WalletService.updateWallet(businessId, id, walletData, userId);
+
+      res.json({
+        success: true,
+        message: 'Wallet updated successfully',
+        data: updatedWallet
+      });
+
+    } catch (error) {
+      log.error('Wallet update controller error', error);
+      next(error);
+    }
+  },
+
   async createWallet(req, res, next) {
     try {
       const walletData = req.body;

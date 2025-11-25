@@ -4,7 +4,8 @@ import {
   createWalletSchema,
   createWalletTransactionSchema,
   transferBetweenWalletsSchema,
-  walletQuerySchema
+  walletQuerySchema,
+  updateWalletSchema
 } from '../schemas/walletSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -29,6 +30,20 @@ router.get(
   requirePermission('wallet:read'),
   validateRequest(walletQuerySchema, 'query'),
   walletController.getWallets
+);
+
+// NEW: Get and Update Individual Wallets
+router.get(
+  '/:id',
+  requirePermission('wallet:read'),
+  walletController.getWalletById
+);
+
+router.put(
+  '/:id',
+  requirePermission('wallet:update'),
+  validateRequest(updateWalletSchema),
+  walletController.updateWallet
 );
 
 // Wallet Transactions

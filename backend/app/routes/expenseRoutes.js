@@ -1,11 +1,11 @@
 import express from 'express';
 import { expenseController } from '../controllers/expenseController.js';
-import { 
-  createExpenseCategorySchema, 
-  createExpenseSchema, 
+import {
+  createExpenseCategorySchema,
+  createExpenseSchema,
   updateExpenseSchema,
   approveExpenseSchema,
-  expenseQuerySchema 
+  expenseQuerySchema
 } from '../schemas/expenseSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -44,6 +44,20 @@ router.get(
   requirePermission('expense:read'),
   validateRequest(expenseQuerySchema, 'query'),
   expenseController.getExpenses
+);
+
+// NEW: Get and Update Individual Expenses
+router.get(
+  '/:id',
+  requirePermission('expense:read'),
+  expenseController.getExpenseById
+);
+
+router.put(
+  '/:id',
+  requirePermission('expense:update'),
+  validateRequest(updateExpenseSchema),
+  expenseController.updateExpense
 );
 
 // Expense Approval

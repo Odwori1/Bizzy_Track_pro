@@ -4,6 +4,134 @@ import { log } from '../utils/logger.js';
 
 export class ExpenseService {
   /**
+   * Get expense by ID
+   */
+  static async getExpenseById(businessId, expenseId) {
+    const client = await getClient();
+
+    try {
+      const result = await client.query(
+        `SELECT
+          e.*,
+          ec.name as category_name,
+          mw.name as wallet_name,
+          u_app.full_name as approved_by_name,
+          u_created.full_name as created_by_name
+         FROM expenses e
+         LEFT JOIN expense_categories ec ON e.category_id = ec.id
+         LEFT JOIN money_wallets mw ON e.wallet_id = mw.id
+         LEFT JOIN users u_app ON e.approved_by = u_app.id
+         LEFT JOIN users u_created ON e.created_by = u_created.id
+         WHERE e.id = $1 AND e.business_id = $2`,
+        [expenseId, businessId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Expense not found or access denied');
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      log.error('Get expense by ID service error', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Update expense
+   */
+  static async updateExpense(businessId, expenseId, expenseData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if expense exists and belongs to business
+      const expenseCheck = await client.query(
+        'SELECT * FROM expenses WHERE id = $1 AND business_id = $2',
+        [expenseId, businessId]
+      );
+
+      if (expenseCheck.rows.length === 0) {
+        throw new Error('Expense not found or access denied');
+      }
+
+      const currentExpense = expenseCheck.rows[0];
+
+      // Verify category belongs to business if being updated
+      if (expenseData.category_id) {
+        const categoryCheck = await client.query(
+          'SELECT id FROM expense_categories WHERE id = $1 AND business_id = $2',
+          [expenseData.category_id, businessId]
+        );
+
+        if (categoryCheck.rows.length === 0) {
+          throw new Error('Expense category not found or access denied');
+        }
+      }
+
+      // Verify wallet belongs to business if being updated
+      if (expenseData.wallet_id) {
+        const walletCheck = await client.query(
+          'SELECT id FROM money_wallets WHERE id = $1 AND business_id = $2',
+          [expenseData.wallet_id, businessId]
+        );
+
+        if (walletCheck.rows.length === 0) {
+          throw new Error('Wallet not found or access denied');
+        }
+      }
+
+      const result = await client.query(
+        `UPDATE expenses
+         SET
+           category_id = COALESCE($1, category_id),
+           wallet_id = COALESCE($2, wallet_id),
+           amount = COALESCE($3, amount),
+           description = COALESCE($4, description),
+           expense_date = COALESCE($5, expense_date),
+           receipt_url = COALESCE($6, receipt_url),
+           status = COALESCE($7, status),
+           updated_at = NOW()
+         WHERE id = $8 AND business_id = $9
+         RETURNING *`,
+        [
+          expenseData.category_id,
+          expenseData.wallet_id,
+          expenseData.amount,
+          expenseData.description,
+          expenseData.expense_date,
+          expenseData.receipt_url,
+          expenseData.status,
+          expenseId,
+          businessId
+        ]
+      );
+
+      const updatedExpense = result.rows[0];
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'expense.updated',
+        resourceType: 'expense',
+        resourceId: expenseId,
+        newValues: expenseData
+      });
+
+      await client.query('COMMIT');
+      return updatedExpense;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create expense category
    */
   static async createCategory(businessId, categoryData, userId) {
@@ -50,10 +178,10 @@ export class ExpenseService {
    */
   static async getCategories(businessId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
-        SELECT * FROM expense_categories 
+        SELECT * FROM expense_categories
         WHERE business_id = $1
       `;
       const params = [businessId];
@@ -70,12 +198,12 @@ export class ExpenseService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getCategories:', {
@@ -169,10 +297,10 @@ export class ExpenseService {
    */
   static async getExpenses(businessId, filters = {}) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
-        SELECT 
+        SELECT
           e.*,
           ec.name as category_name,
           mw.name as wallet_name,
@@ -223,7 +351,7 @@ export class ExpenseService {
         paramCount++;
         queryStr += ` LIMIT $${paramCount}`;
         params.push(filters.limit);
-        
+
         paramCount++;
         queryStr += ` OFFSET $${paramCount}`;
         params.push(offset);
@@ -232,12 +360,12 @@ export class ExpenseService {
       log.info('🗄️ Database Query:', { query: queryStr, params });
 
       const result = await client.query(queryStr, params);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return result.rows;
     } catch (error) {
       log.error('❌ Database query failed in getExpenses:', {
@@ -274,7 +402,7 @@ export class ExpenseService {
 
       // Update expense status
       const updateResult = await client.query(
-        `UPDATE expenses 
+        `UPDATE expenses
          SET status = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
          WHERE id = $3 AND business_id = $4
          RETURNING *`,
@@ -291,7 +419,7 @@ export class ExpenseService {
       // If approved and has wallet, create wallet transaction
       if (approvalData.status === 'approved' && currentExpense.wallet_id) {
         const { WalletService } = await import('./walletService.js');
-        
+
         await WalletService.recordTransaction(
           businessId,
           {
@@ -334,7 +462,7 @@ export class ExpenseService {
    */
   static async getExpenseStatistics(businessId, startDate = null, endDate = null) {
     const client = await getClient();
-    
+
     try {
       let queryStr = `
         SELECT
@@ -394,12 +522,12 @@ export class ExpenseService {
       log.info('🗄️ Database Query (totals):', { query: totalsQuery, params: totalsParams });
 
       const totalsResult = await client.query(totalsQuery, totalsParams);
-      
-      log.info('✅ Database query successful', { 
+
+      log.info('✅ Database query successful', {
         rowCount: result.rows.length,
-        businessId 
+        businessId
       });
-      
+
       return {
         totals: totalsResult.rows[0],
         by_category: result.rows

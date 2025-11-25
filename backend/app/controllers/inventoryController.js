@@ -45,6 +45,52 @@ export const inventoryController = {
     }
   },
 
+  // NEW: Update Inventory Category
+  async updateCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const categoryData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating inventory category', { businessId, userId, categoryId: id });
+
+      const updatedCategory = await InventoryService.updateCategory(businessId, id, categoryData, userId);
+
+      res.json({
+        success: true,
+        message: 'Inventory category updated successfully',
+        data: updatedCategory
+      });
+
+    } catch (error) {
+      log.error('Inventory category update controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Delete Inventory Category
+  async deleteCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Deleting inventory category', { businessId, userId, categoryId: id });
+
+      await InventoryService.deleteCategory(businessId, id, userId);
+
+      res.json({
+        success: true,
+        message: 'Inventory category deleted successfully'
+      });
+
+    } catch (error) {
+      log.error('Inventory category deletion controller error', error);
+      next(error);
+    }
+  },
+
   async createItem(req, res, next) {
     try {
       const itemData = req.body;
@@ -63,6 +109,52 @@ export const inventoryController = {
 
     } catch (error) {
       log.error('Inventory item creation controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Get Inventory Item by ID
+  async getItemById(req, res, next) {
+    try {
+      const { id } = req.params;
+      const businessId = req.user.businessId;
+
+      log.info('Fetching inventory item', { businessId, itemId: id });
+
+      const item = await InventoryService.getItemById(businessId, id);
+
+      res.json({
+        success: true,
+        data: item,
+        message: 'Inventory item fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Inventory item fetch controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Update Inventory Item
+  async updateItem(req, res, next) {
+    try {
+      const { id } = req.params;
+      const itemData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating inventory item', { businessId, userId, itemId: id });
+
+      const updatedItem = await InventoryService.updateItem(businessId, id, itemData, userId);
+
+      res.json({
+        success: true,
+        message: 'Inventory item updated successfully',
+        data: updatedItem
+      });
+
+    } catch (error) {
+      log.error('Inventory item update controller error', error);
       next(error);
     }
   },

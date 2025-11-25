@@ -4,6 +4,126 @@ import { log } from '../utils/logger.js';
 
 export class WalletService {
   /**
+   * Get wallet by ID
+   */
+  static async getWalletById(businessId, walletId) {
+    const client = await getClient();
+
+    try {
+      const result = await client.query(
+        `SELECT
+          mw.*,
+          COUNT(wt.id) as transaction_count,
+          SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) as total_income,
+          SUM(CASE WHEN wt.transaction_type = 'expense' THEN wt.amount ELSE 0 END) as total_expense
+         FROM money_wallets mw
+         LEFT JOIN wallet_transactions wt ON mw.id = wt.wallet_id
+         WHERE mw.id = $1 AND mw.business_id = $2
+         GROUP BY mw.id`,
+        [walletId, businessId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Wallet not found or access denied');
+      }
+
+      // Get recent transactions
+      const transactionsResult = await client.query(
+        `SELECT * FROM wallet_transactions
+         WHERE wallet_id = $1 AND business_id = $2
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [walletId, businessId]
+      );
+
+      const wallet = result.rows[0];
+      wallet.recent_transactions = transactionsResult.rows;
+
+      return wallet;
+    } catch (error) {
+      log.error('Get wallet by ID service error', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Update wallet - FIXED: Handle optional fields properly
+   */
+  static async updateWallet(businessId, walletId, walletData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if wallet exists and belongs to business
+      const walletCheck = await client.query(
+        'SELECT * FROM money_wallets WHERE id = $1 AND business_id = $2',
+        [walletId, businessId]
+      );
+
+      if (walletCheck.rows.length === 0) {
+        throw new Error('Wallet not found or access denied');
+      }
+
+      const currentWallet = walletCheck.rows[0];
+
+      // Check for duplicate wallet name (excluding current wallet)
+      if (walletData.name && walletData.name !== currentWallet.name) {
+        const nameCheck = await client.query(
+          'SELECT id FROM money_wallets WHERE business_id = $1 AND name = $2 AND id != $3',
+          [businessId, walletData.name, walletId]
+        );
+
+        if (nameCheck.rows.length > 0) {
+          throw new Error('Wallet name already exists');
+        }
+      }
+
+      // Use COALESCE to handle optional fields - keep current values if not provided
+      const result = await client.query(
+        `UPDATE money_wallets
+         SET
+           name = COALESCE($1, name),
+           wallet_type = COALESCE($2, wallet_type),
+           description = COALESCE($3, description),
+           is_active = COALESCE($4, is_active),
+           updated_at = NOW()
+         WHERE id = $5 AND business_id = $6
+         RETURNING *`,
+        [
+          walletData.name,
+          walletData.wallet_type,
+          walletData.description,
+          walletData.is_active,
+          walletId,
+          businessId
+        ]
+      );
+
+      const updatedWallet = result.rows[0];
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'wallet.updated',
+        resourceType: 'wallet',
+        resourceId: walletId,
+        newValues: walletData
+      });
+
+      await client.query('COMMIT');
+      return updatedWallet;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create money wallet
    */
   static async createWallet(businessId, walletData, userId) {
@@ -414,7 +534,7 @@ export class WalletService {
       } = filters;
 
       let queryStr = `
-        SELECT 
+        SELECT
           wt.*,
           mw.name as wallet_name,
           mw.wallet_type
@@ -463,7 +583,7 @@ export class WalletService {
 
       // Get total count for pagination info
       let countQuery = `
-        SELECT COUNT(*) 
+        SELECT COUNT(*)
         FROM wallet_transactions wt
         INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
         WHERE mw.business_id = $1

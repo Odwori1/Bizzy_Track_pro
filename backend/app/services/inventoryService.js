@@ -20,8 +20,8 @@ export class InventoryService {
 
       // Get low stock items count
       const lowStockResult = await client.query(
-        `SELECT COUNT(*) as count FROM inventory_items 
-         WHERE business_id = $1 AND is_active = true 
+        `SELECT COUNT(*) as count FROM inventory_items
+         WHERE business_id = $1 AND is_active = true
          AND current_stock <= min_stock_level AND min_stock_level > 0`,
         [businessId]
       );
@@ -133,43 +133,107 @@ export class InventoryService {
   }
 
   /**
-   * Get all inventory categories
+   * Update inventory category
    */
-  static async getCategories(businessId, filters = {}) {
+  static async updateCategory(businessId, categoryId, categoryData, userId) {
     const client = await getClient();
 
     try {
-      let queryStr = `
-        SELECT * FROM inventory_categories
-        WHERE business_id = $1
-      `;
-      const params = [businessId];
-      let paramCount = 1;
+      await client.query('BEGIN');
 
-      if (filters.is_active !== undefined) {
-        paramCount++;
-        queryStr += ` AND is_active = $${paramCount}`;
-        params.push(filters.is_active);
+      // Check if category exists and belongs to business
+      const categoryCheck = await client.query(
+        'SELECT * FROM inventory_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      if (categoryCheck.rows.length === 0) {
+        throw new Error('Category not found or access denied');
       }
 
-      queryStr += ' ORDER BY name';
+      const result = await client.query(
+        `UPDATE inventory_categories
+         SET name = $1, description = $2, category_type = $3, is_active = $4, updated_at = NOW()
+         WHERE id = $5 AND business_id = $6
+         RETURNING *`,
+        [
+          categoryData.name,
+          categoryData.description,
+          categoryData.category_type,
+          categoryData.is_active,
+          categoryId,
+          businessId
+        ]
+      );
 
-      log.info('🗄️ Database Query:', { query: queryStr, params });
+      const updatedCategory = result.rows[0];
 
-      const result = await client.query(queryStr, params);
-
-      log.info('✅ Database query successful', {
-        rowCount: result.rows.length,
-        businessId
-      });
-
-      return result.rows;
-    } catch (error) {
-      log.error('❌ Database query failed in getCategories:', {
-        error: error.message,
+      await auditLogger.logAction({
         businessId,
-        filters
+        userId,
+        action: 'inventory.category.updated',
+        resourceType: 'inventory_category',
+        resourceId: categoryId,
+        newValues: categoryData
       });
+
+      await client.query('COMMIT');
+      return updatedCategory;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete inventory category
+   */
+  static async deleteCategory(businessId, categoryId, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if category exists and belongs to business
+      const categoryCheck = await client.query(
+        'SELECT * FROM inventory_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      if (categoryCheck.rows.length === 0) {
+        throw new Error('Category not found or access denied');
+      }
+
+      // Check if category has items
+      const itemsCheck = await client.query(
+        'SELECT COUNT(*) as item_count FROM inventory_items WHERE category_id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      const itemCount = parseInt(itemsCheck.rows[0].item_count);
+      if (itemCount > 0) {
+        throw new Error(`Cannot delete category with ${itemCount} associated items`);
+      }
+
+      // Delete the category
+      await client.query(
+        'DELETE FROM inventory_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'inventory.category.deleted',
+        resourceType: 'inventory_category',
+        resourceId: categoryId
+      });
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
@@ -248,6 +312,181 @@ export class InventoryService {
       return item;
     } catch (error) {
       await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get inventory item by ID
+   */
+  static async getItemById(businessId, itemId) {
+    const client = await getClient();
+
+    try {
+      const result = await client.query(
+        `SELECT
+          ii.*,
+          ic.name as category_name,
+          CASE
+            WHEN ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0 THEN 'low'
+            WHEN ii.current_stock = 0 THEN 'out_of_stock'
+            ELSE 'adequate'
+          END as stock_status
+         FROM inventory_items ii
+         LEFT JOIN inventory_categories ic ON ii.category_id = ic.id
+         WHERE ii.id = $1 AND ii.business_id = $2`,
+        [itemId, businessId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Item not found or access denied');
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      log.error('Get item by ID service error', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Update inventory item
+   */
+  static async updateItem(businessId, itemId, itemData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if item exists and belongs to business
+      const itemCheck = await client.query(
+        'SELECT * FROM inventory_items WHERE id = $1 AND business_id = $2',
+        [itemId, businessId]
+      );
+
+      if (itemCheck.rows.length === 0) {
+        throw new Error('Item not found or access denied');
+      }
+
+      // If category is being updated, verify it belongs to business
+      if (itemData.category_id) {
+        const categoryCheck = await client.query(
+          'SELECT id FROM inventory_categories WHERE id = $1 AND business_id = $2',
+          [itemData.category_id, businessId]
+        );
+
+        if (categoryCheck.rows.length === 0) {
+          throw new Error('Category not found or access denied');
+        }
+      }
+
+      // If SKU is being updated, check for duplicates
+      if (itemData.sku) {
+        const skuCheck = await client.query(
+          'SELECT id FROM inventory_items WHERE business_id = $1 AND sku = $2 AND id != $3',
+          [businessId, itemData.sku, itemId]
+        );
+
+        if (skuCheck.rows.length > 0) {
+          throw new Error('SKU already exists');
+        }
+      }
+
+      const result = await client.query(
+        `UPDATE inventory_items
+         SET
+           category_id = COALESCE($1, category_id),
+           name = COALESCE($2, name),
+           description = COALESCE($3, description),
+           sku = COALESCE($4, sku),
+           cost_price = COALESCE($5, cost_price),
+           selling_price = COALESCE($6, selling_price),
+           min_stock_level = COALESCE($7, min_stock_level),
+           max_stock_level = COALESCE($8, max_stock_level),
+           unit_of_measure = COALESCE($9, unit_of_measure),
+           is_active = COALESCE($10, is_active),
+           updated_at = NOW()
+         WHERE id = $11 AND business_id = $12
+         RETURNING *`,
+        [
+          itemData.category_id,
+          itemData.name,
+          itemData.description,
+          itemData.sku,
+          itemData.cost_price,
+          itemData.selling_price,
+          itemData.min_stock_level,
+          itemData.max_stock_level,
+          itemData.unit_of_measure,
+          itemData.is_active,
+          itemId,
+          businessId
+        ]
+      );
+
+      const updatedItem = result.rows[0];
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'inventory.item.updated',
+        resourceType: 'inventory_item',
+        resourceId: itemId,
+        newValues: itemData
+      });
+
+      await client.query('COMMIT');
+      return updatedItem;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get all inventory categories
+   */
+  static async getCategories(businessId, filters = {}) {
+    const client = await getClient();
+
+    try {
+      let queryStr = `
+        SELECT * FROM inventory_categories
+        WHERE business_id = $1
+      `;
+      const params = [businessId];
+      let paramCount = 1;
+
+      if (filters.is_active !== undefined) {
+        paramCount++;
+        queryStr += ` AND is_active = $${paramCount}`;
+        params.push(filters.is_active);
+      }
+
+      queryStr += ' ORDER BY name';
+
+      log.info('🗄️ Database Query:', { query: queryStr, params });
+
+      const result = await client.query(queryStr, params);
+
+      log.info('✅ Database query successful', {
+        rowCount: result.rows.length,
+        businessId
+      });
+
+      return result.rows;
+    } catch (error) {
+      log.error('❌ Database query failed in getCategories:', {
+        error: error.message,
+        businessId,
+        filters
+      });
       throw error;
     } finally {
       client.release();

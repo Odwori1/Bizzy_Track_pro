@@ -2,6 +2,52 @@ import { ExpenseService } from '../services/expenseService.js';
 import { log } from '../utils/logger.js';
 
 export const expenseController = {
+  // NEW: Get Expense by ID
+  async getExpenseById(req, res, next) {
+    try {
+      const { id } = req.params;
+      const businessId = req.user.businessId;
+
+      log.info('Fetching expense details', { businessId, expenseId: id });
+
+      const expense = await ExpenseService.getExpenseById(businessId, id);
+
+      res.json({
+        success: true,
+        data: expense,
+        message: 'Expense details fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Expense details fetch controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Update Expense
+  async updateExpense(req, res, next) {
+    try {
+      const { id } = req.params;
+      const expenseData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating expense', { businessId, userId, expenseId: id });
+
+      const updatedExpense = await ExpenseService.updateExpense(businessId, id, expenseData, userId);
+
+      res.json({
+        success: true,
+        message: 'Expense updated successfully',
+        data: updatedExpense
+      });
+
+    } catch (error) {
+      log.error('Expense update controller error', error);
+      next(error);
+    }
+  },
+
   async createCategory(req, res, next) {
     try {
       const categoryData = req.body;
