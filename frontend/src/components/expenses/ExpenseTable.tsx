@@ -23,7 +23,23 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete }: Ex
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
+    try {
+      const date = new Date(dateString);
+
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid date:', dateString);
+        return 'Invalid Date';
+      }
+
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error, dateString);
+      return 'Invalid Date';
+    }
   };
 
   if (loading) {
@@ -63,6 +79,7 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete }: Ex
             </th>
           </tr>
         </thead>
+
         <tbody className="bg-white divide-y divide-gray-200">
           {expenses.map((expense) => (
             <tr key={expense.id} className="hover:bg-gray-50">
@@ -74,24 +91,29 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete }: Ex
                   {expense.wallet_name}
                 </div>
               </td>
+
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm text-gray-900">
                   {expense.category_name || 'Uncategorized'}
                 </div>
               </td>
+
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">
                   ${expense.amount.toLocaleString()}
                 </div>
               </td>
+
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 {formatDate(expense.expense_date)}
               </td>
+
               <td className="px-6 py-4 whitespace-nowrap">
                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(expense.status)}`}>
                   {expense.status.toUpperCase()}
                 </span>
               </td>
+
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                 <Link
                   href={`/dashboard/management/finances/expenses/${expense.id}`}
@@ -99,12 +121,14 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete }: Ex
                 >
                   View
                 </Link>
+
                 <Link
                   href={`/dashboard/management/finances/expenses/${expense.id}/edit`}
                   className="text-indigo-600 hover:text-indigo-900"
                 >
                   Edit
                 </Link>
+
                 {onDelete && (
                   <button
                     onClick={() => onDelete(expense)}
@@ -127,3 +151,4 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete }: Ex
     </div>
   );
 }
+

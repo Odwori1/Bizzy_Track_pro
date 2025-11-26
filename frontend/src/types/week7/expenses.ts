@@ -7,7 +7,13 @@ export interface Expense {
   wallet_id: string;
   amount: number;
   description: string;
-  expense_date: string;
+  expense_date: string | {  // Updated to handle both string and object
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
   receipt_url?: string;
   status: ExpenseStatus;
   approved_by?: string;
@@ -68,3 +74,12 @@ export interface CreateExpenseData {
 }
 
 export interface UpdateExpenseData extends Partial<CreateExpenseData> {}
+
+// NEW: Category CRUD Data Types
+export interface CreateExpenseCategoryData {
+  name: string;
+  description?: string;
+  color?: string;
+}
+
+export interface UpdateExpenseCategoryData extends Partial<CreateExpenseCategoryData> {}

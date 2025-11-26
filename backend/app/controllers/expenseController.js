@@ -48,6 +48,74 @@ export const expenseController = {
     }
   },
 
+  // NEW: Delete Expense
+  async deleteExpense(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Deleting expense', { businessId, userId, expenseId: id });
+
+      await ExpenseService.deleteExpense(businessId, id, userId);
+
+      res.json({
+        success: true,
+        message: 'Expense deleted successfully'
+      });
+
+    } catch (error) {
+      log.error('Expense deletion controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Update Expense Category
+  async updateCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const categoryData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Updating expense category', { businessId, userId, categoryId: id });
+
+      const updatedCategory = await ExpenseService.updateCategory(businessId, id, categoryData, userId);
+
+      res.json({
+        success: true,
+        message: 'Expense category updated successfully',
+        data: updatedCategory
+      });
+
+    } catch (error) {
+      log.error('Expense category update controller error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Delete Expense Category
+  async deleteCategory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Deleting expense category', { businessId, userId, categoryId: id });
+
+      await ExpenseService.deleteCategory(businessId, id, userId);
+
+      res.json({
+        success: true,
+        message: 'Expense category deleted successfully'
+      });
+
+    } catch (error) {
+      log.error('Expense category deletion controller error', error);
+      next(error);
+    }
+  },
+
   async createCategory(req, res, next) {
     try {
       const categoryData = req.body;

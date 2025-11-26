@@ -32,19 +32,7 @@ router.get(
   walletController.getWallets
 );
 
-// NEW: Get and Update Individual Wallets
-router.get(
-  '/:id',
-  requirePermission('wallet:read'),
-  walletController.getWalletById
-);
-
-router.put(
-  '/:id',
-  requirePermission('wallet:update'),
-  validateRequest(updateWalletSchema),
-  walletController.updateWallet
-);
+// ✅ SPECIFIC ROUTES FIRST - FIXED ORDER
 
 // Wallet Transactions
 router.post(
@@ -54,7 +42,7 @@ router.post(
   walletController.recordTransaction
 );
 
-// NEW: Get All Wallet Transactions
+// Get All Wallet Transactions
 router.get(
   '/transactions',
   requirePermission('wallet:read'),
@@ -68,17 +56,34 @@ router.post(
   walletController.transferBetweenWallets
 );
 
-router.get(
-  '/:wallet_id/transactions',
-  requirePermission('wallet:read'),
-  walletController.getWalletTransactions
-);
-
 // Wallet Reports
 router.get(
   '/statistics',
   requirePermission('wallet:read'),
   walletController.getStatistics
+);
+
+// ✅ PARAMETER ROUTES LAST - FIXED ORDER
+
+// Get and Update Individual Wallets
+router.get(
+  '/:id',
+  requirePermission('wallet:read'),
+  walletController.getWalletById
+);
+
+router.put(
+  '/:id',
+  requirePermission('wallet:update'),
+  validateRequest(updateWalletSchema),
+  walletController.updateWallet
+);
+
+// Get transactions for specific wallet
+router.get(
+  '/:wallet_id/transactions',
+  requirePermission('wallet:read'),
+  walletController.getWalletTransactions
 );
 
 export default router;

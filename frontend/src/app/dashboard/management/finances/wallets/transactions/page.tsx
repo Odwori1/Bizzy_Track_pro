@@ -1,17 +1,25 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useWallets } from '@/hooks/week7/useWallets';
 import { Card } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
-import { FilterBar } from '@/components/ui/week7/FilterBar';
+import { Input } from '@/components/ui/Input';
 
 export default function WalletTransactionsPage() {
   const { transactions, loading, error, fetchTransactions } = useWallets();
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
+
+  // Apply Method 1: Client-side search pattern (EXACT PATTERN FROM REPORT)
+  const filteredTransactions = transactions.filter(transaction =>
+    transaction.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    transaction.wallet_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    transaction.transaction_type?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   if (loading) return <Loading />;
 
@@ -30,10 +38,21 @@ export default function WalletTransactionsPage() {
         </div>
       )}
 
-      <FilterBar
-        onSearch={(search) => console.log('Search:', search)}
-        searchPlaceholder="Search transactions..."
-      />
+      {/* Search Input - Client-side filtering only */}
+      <div className="flex items-center space-x-4">
+        <div className="flex-1 max-w-md">
+          <Input
+            type="text"
+            placeholder="Search transactions by description, wallet, or type..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full"
+          />
+        </div>
+        <div className="text-sm text-gray-500">
+          {filteredTransactions.length} of {transactions.length} transactions
+        </div>
+      </div>
 
       <Card>
         <div className="p-6">
@@ -59,7 +78,7 @@ export default function WalletTransactionsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {transactions.map((transaction) => (
+                {filteredTransactions.map((transaction) => (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {new Date(transaction.transaction_date).toLocaleDateString()}
@@ -69,7 +88,7 @@ export default function WalletTransactionsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        transaction.transaction_type === 'income' 
+                        transaction.transaction_type === 'income'
                           ? 'bg-green-100 text-green-800'
                           : 'bg-red-100 text-red-800'
                       }`}>
@@ -78,7 +97,7 @@ export default function WalletTransactionsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       <span className={transaction.transaction_type === 'income' ? 'text-green-600' : 'text-red-600'}>
-                        ${transaction.amount.toFixed(2)}
+                        ${Number(transaction.amount).toFixed(2)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
@@ -90,9 +109,11 @@ export default function WalletTransactionsPage() {
             </table>
           </div>
 
-          {transactions.length === 0 && (
+          {filteredTransactions.length === 0 && (
             <div className="text-center py-8">
-              <div className="text-gray-500">No transactions found</div>
+              <div className="text-gray-500">
+                {searchTerm ? 'No transactions found matching your search.' : 'No transactions found'}
+              </div>
             </div>
           )}
         </div>

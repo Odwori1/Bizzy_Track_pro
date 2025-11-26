@@ -2,6 +2,7 @@ import express from 'express';
 import { expenseController } from '../controllers/expenseController.js';
 import {
   createExpenseCategorySchema,
+  updateExpenseCategorySchema,
   createExpenseSchema,
   updateExpenseSchema,
   approveExpenseSchema,
@@ -17,7 +18,7 @@ const router = express.Router();
 // All routes require authentication and RLS context
 router.use(authenticate, setRLSContext);
 
-// Expense Categories
+// Expense Categories - ADDING MISSING ROUTES
 router.post(
   '/categories',
   requirePermission('expense:create'),
@@ -29,6 +30,21 @@ router.get(
   '/categories',
   requirePermission('expense:read'),
   expenseController.getCategories
+);
+
+// NEW: Category Update Route
+router.put(
+  '/categories/:id',
+  requirePermission('expense:update'),
+  validateRequest(updateExpenseCategorySchema),
+  expenseController.updateCategory
+);
+
+// NEW: Category Delete Route
+router.delete(
+  '/categories/:id',
+  requirePermission('expense:delete'),
+  expenseController.deleteCategory
 );
 
 // Expense Management
@@ -46,7 +62,16 @@ router.get(
   expenseController.getExpenses
 );
 
-// NEW: Get and Update Individual Expenses
+// ✅ EXPENSE REPORTS - MOVED ABOVE PARAMETER ROUTES
+router.get(
+  '/statistics',
+  requirePermission('expense:read'),
+  expenseController.getStatistics
+);
+
+// ✅ PARAMETER ROUTES - MOVED BELOW SPECIFIC ROUTES
+
+// Get and Update Individual Expenses
 router.get(
   '/:id',
   requirePermission('expense:read'),
@@ -68,11 +93,11 @@ router.patch(
   expenseController.approveExpense
 );
 
-// Expense Reports
-router.get(
-  '/statistics',
-  requirePermission('expense:read'),
-  expenseController.getStatistics
+// ✅ DELETE ROUTE - ADD THIS
+router.delete(
+  '/:id',
+  requirePermission('expense:delete'),
+  expenseController.deleteExpense
 );
 
 export default router;

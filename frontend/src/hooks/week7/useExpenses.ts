@@ -1,5 +1,5 @@
 import { useExpenseStore } from '@/store/week7';
-import { CreateExpenseData, UpdateExpenseData } from '@/types/week7';
+import { CreateExpenseData, UpdateExpenseData, CreateExpenseCategoryData, UpdateExpenseCategoryData } from '@/types/week7';
 
 export const useExpenses = () => {
   const store = useExpenseStore();
@@ -18,32 +18,45 @@ export const useExpenses = () => {
     fetchExpenses: store.fetchExpenses,
     fetchCategories: store.fetchCategories,
     fetchStats: store.fetchStats,
-    
-    // CRUD Operations
+
+    // Expense CRUD Operations
     createExpense: async (data: CreateExpenseData) => {
       return await store.createExpense(data);
     },
-    
+
     updateExpense: async (id: string, data: UpdateExpenseData) => {
       return await store.updateExpense(id, data);
     },
-    
+
     deleteExpense: async (id: string) => {
       return await store.deleteExpense(id);
     },
-    
+
+    // Category CRUD Operations - ADDING MISSING METHODS
+    createCategory: async (data: CreateExpenseCategoryData) => {
+      return await store.createCategory(data);
+    },
+
+    updateCategory: async (id: string, data: UpdateExpenseCategoryData) => {
+      return await store.updateCategory(id, data);
+    },
+
+    deleteCategory: async (id: string) => {
+      return await store.deleteCategory(id);
+    },
+
     clearError: store.clearError,
 
     // Derived data
-    pendingExpenses: store.expenses.filter(expense => 
+    pendingExpenses: store.expenses.filter(expense =>
       expense.status === 'submitted' || expense.status === 'draft'
     ),
-    
-    approvedExpenses: store.expenses.filter(expense => 
+
+    approvedExpenses: store.expenses.filter(expense =>
       expense.status === 'approved'
     ),
 
-    totalExpensesAmount: store.expenses.reduce((total, expense) => 
+    totalExpensesAmount: store.expenses.reduce((total, expense) =>
       total + expense.amount, 0
     ),
 

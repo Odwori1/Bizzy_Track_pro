@@ -132,6 +132,54 @@ export class ExpenseService {
   }
 
   /**
+   * Delete expense
+   */
+  static async deleteExpense(businessId, expenseId, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if expense exists and belongs to business
+      const expenseCheck = await client.query(
+        'SELECT * FROM expenses WHERE id = $1 AND business_id = $2',
+        [expenseId, businessId]
+      );
+
+      if (expenseCheck.rows.length === 0) {
+        throw new Error('Expense not found or access denied');
+      }
+
+      // Delete the expense
+      await client.query(
+        'DELETE FROM expenses WHERE id = $1 AND business_id = $2',
+        [expenseId, businessId]
+      );
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'expense.deleted',
+        resourceType: 'expense',
+        resourceId: expenseId,
+        oldValues: {
+          id: expenseId,
+          amount: expenseCheck.rows[0].amount,
+          description: expenseCheck.rows[0].description
+        }
+      });
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create expense category
    */
   static async createCategory(businessId, categoryData, userId) {
@@ -141,14 +189,15 @@ export class ExpenseService {
       await client.query('BEGIN');
 
       const result = await client.query(
-        `INSERT INTO expense_categories (business_id, name, description, is_active)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO expense_categories (business_id, name, description, color, is_active)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [
           businessId,
           categoryData.name,
           categoryData.description || '',
-          categoryData.is_active
+          categoryData.color || '#3B82F6',
+          categoryData.is_active !== undefined ? categoryData.is_active : true
         ]
       );
 
@@ -174,6 +223,123 @@ export class ExpenseService {
   }
 
   /**
+   * Update expense category
+   */
+  static async updateCategory(businessId, categoryId, categoryData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if category exists and belongs to business
+      const categoryCheck = await client.query(
+        'SELECT * FROM expense_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      if (categoryCheck.rows.length === 0) {
+        throw new Error('Expense category not found or access denied');
+      }
+
+      const result = await client.query(
+        `UPDATE expense_categories
+         SET
+           name = COALESCE($1, name),
+           description = COALESCE($2, description),
+           color = COALESCE($3, color),
+           is_active = COALESCE($4, is_active),
+           updated_at = NOW()
+         WHERE id = $5 AND business_id = $6
+         RETURNING *`,
+        [
+          categoryData.name,
+          categoryData.description,
+          categoryData.color,
+          categoryData.is_active,
+          categoryId,
+          businessId
+        ]
+      );
+
+      const updatedCategory = result.rows[0];
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'expense.category.updated',
+        resourceType: 'expense_category',
+        resourceId: categoryId,
+        newValues: categoryData
+      });
+
+      await client.query('COMMIT');
+      return updatedCategory;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete expense category
+   */
+  static async deleteCategory(businessId, categoryId, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if category exists and belongs to business
+      const categoryCheck = await client.query(
+        'SELECT * FROM expense_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      if (categoryCheck.rows.length === 0) {
+        throw new Error('Expense category not found or access denied');
+      }
+
+      // Check if category has expenses
+      const expenseCount = await client.query(
+        'SELECT COUNT(*) as count FROM expenses WHERE category_id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      if (parseInt(expenseCount.rows[0].count) > 0) {
+        throw new Error('Cannot delete category with existing expenses');
+      }
+
+      // Delete the category
+      await client.query(
+        'DELETE FROM expense_categories WHERE id = $1 AND business_id = $2',
+        [categoryId, businessId]
+      );
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'expense.category.deleted',
+        resourceType: 'expense_category',
+        resourceId: categoryId,
+        oldValues: {
+          id: categoryId,
+          name: categoryCheck.rows[0].name
+        }
+      });
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get all expense categories
    */
   static async getCategories(businessId, filters = {}) {
@@ -181,19 +347,24 @@ export class ExpenseService {
 
     try {
       let queryStr = `
-        SELECT * FROM expense_categories
-        WHERE business_id = $1
+        SELECT 
+          ec.*,
+          COUNT(e.id) as expense_count
+        FROM expense_categories ec
+        LEFT JOIN expenses e ON ec.id = e.category_id AND e.business_id = ec.business_id
+        WHERE ec.business_id = $1
       `;
       const params = [businessId];
       let paramCount = 1;
 
       if (filters.is_active !== undefined) {
         paramCount++;
-        queryStr += ` AND is_active = $${paramCount}`;
+        queryStr += ` AND ec.is_active = $${paramCount}`;
         params.push(filters.is_active);
       }
 
-      queryStr += ' ORDER BY name';
+      queryStr += ' GROUP BY ec.id, ec.name, ec.description, ec.color, ec.is_active, ec.created_at, ec.updated_at';
+      queryStr += ' ORDER BY ec.name';
 
       log.info('🗄️ Database Query:', { query: queryStr, params });
 

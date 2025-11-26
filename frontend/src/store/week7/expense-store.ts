@@ -6,7 +6,9 @@ import {
   ExpenseStats,
   ExpenseFilters,
   CreateExpenseData,
-  UpdateExpenseData
+  UpdateExpenseData,
+  CreateExpenseCategoryData,
+  UpdateExpenseCategoryData
 } from '@/types/week7';
 
 interface ExpenseState {
@@ -26,6 +28,12 @@ interface ExpenseState {
   createExpense: (data: CreateExpenseData) => Promise<{ success: boolean; error?: string }>;
   updateExpense: (id: string, data: UpdateExpenseData) => Promise<{ success: boolean; error?: string }>;
   deleteExpense: (id: string) => Promise<{ success: boolean; error?: string }>;
+  
+  // NEW: Category CRUD Methods
+  createCategory: (data: CreateExpenseCategoryData) => Promise<{ success: boolean; error?: string }>;
+  updateCategory: (id: string, data: UpdateExpenseCategoryData) => Promise<{ success: boolean; error?: string }>;
+  deleteCategory: (id: string) => Promise<{ success: boolean; error?: string }>;
+  
   clearError: () => void;
 }
 
@@ -116,6 +124,46 @@ export const useExpenseStore = create<ExpenseState>((set, get) => ({
       await apiClient.delete(`/expenses/${id}`);
       await get().fetchExpenses(); // Refresh the list
       await get().fetchStats(); // Refresh statistics
+      set({ loading: false });
+      return { success: true };
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  // NEW: Category CRUD Methods
+  createCategory: async (data) => {
+    set({ loading: true, error: null });
+    try {
+      await apiClient.post('/expenses/categories', data);
+      await get().fetchCategories(); // Refresh categories list
+      set({ loading: false });
+      return { success: true };
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  updateCategory: async (id, data) => {
+    set({ loading: true, error: null });
+    try {
+      await apiClient.put(`/expenses/categories/${id}`, data);
+      await get().fetchCategories(); // Refresh categories list
+      set({ loading: false });
+      return { success: true };
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  deleteCategory: async (id) => {
+    set({ loading: true, error: null });
+    try {
+      await apiClient.delete(`/expenses/categories/${id}`);
+      await get().fetchCategories(); // Refresh categories list
       set({ loading: false });
       return { success: true };
     } catch (error: any) {

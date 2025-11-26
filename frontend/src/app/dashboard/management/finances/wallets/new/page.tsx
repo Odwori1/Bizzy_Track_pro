@@ -11,13 +11,13 @@ import { FormSelect } from '@/components/ui/week7/FormSelect';
 export default function NewWalletPage() {
   const router = useRouter();
   const { createWallet, loading } = useWallets();
-  
+
   const [formData, setFormData] = useState({
     name: '',
-    type: 'cash',
-    balance: 0,
-    currency: 'USD',
+    wallet_type: 'cash',      // ✅ FIXED FIELD NAME
+    current_balance: 0,       // ✅ FIXED FIELD NAME
     description: '',
+    // ✅ REMOVED currency field - not in backend schema
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,13 +58,16 @@ export default function NewWalletPage() {
 
               <FormSelect
                 label="Wallet Type"
-                value={formData.type}
-                onChange={(value) => handleChange('type', value)}
+                value={formData.wallet_type}  // ✅ FIXED FIELD NAME
+                onChange={(value) => handleChange('wallet_type', value)}  // ✅ FIXED
                 options={[
                   { value: 'cash', label: 'Cash' },
                   { value: 'bank', label: 'Bank Account' },
-                  { value: 'digital', label: 'Digital Wallet' },
-                  { value: 'credit', label: 'Credit Card' },
+                  { value: 'mobile_money', label: 'Mobile Money' },  // ✅ ADDED OPTIONS
+                  { value: 'credit_card', label: 'Credit Card' },
+                  { value: 'savings', label: 'Savings' },
+                  { value: 'petty_cash', label: 'Petty Cash' },
+                  { value: 'tithe', label: 'Tithe' },
                 ]}
                 required
               />
@@ -73,22 +76,12 @@ export default function NewWalletPage() {
                 label="Initial Balance"
                 type="number"
                 step="0.01"
-                value={formData.balance}
-                onChange={(value) => handleChange('balance', parseFloat(value) || 0)}
+                value={formData.current_balance}  // ✅ FIXED FIELD NAME
+                onChange={(value) => handleChange('current_balance', parseFloat(value) || 0)}  // ✅ FIXED
                 required
               />
 
-              <FormSelect
-                label="Currency"
-                value={formData.currency}
-                onChange={(value) => handleChange('currency', value)}
-                options={[
-                  { value: 'USD', label: 'USD' },
-                  { value: 'EUR', label: 'EUR' },
-                  { value: 'GBP', label: 'GBP' },
-                ]}
-                required
-              />
+              {/* ✅ REMOVED Currency field - not in backend schema */}
             </div>
 
             <FormInput

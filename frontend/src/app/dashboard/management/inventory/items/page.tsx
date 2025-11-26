@@ -1,36 +1,62 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useInventory } from '@/hooks/week7/useInventory';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input'; // ADD: Import Input component
 import { FilterBar } from '@/components/ui/week7/FilterBar';
 import { Loading } from '@/components/ui/Loading';
 
 export default function InventoryItemsPage() {
-  const { 
-    items, 
-    categories, 
-    loading, 
-    error, 
+  const {
+    items,
+    categories,
+    loading,
+    error,
     filters,
     setFilters,
     fetchItems,
-    fetchCategories 
+    fetchCategories
   } = useInventory();
+
+  // ADD: search state for client-side filtering
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchItems();
     fetchCategories();
   }, [fetchItems, fetchCategories]);
 
+  // CHANGE: Client-side search only
   const handleSearch = (searchTerm: string) => {
-    setFilters({ ...filters, search: searchTerm });
+    setSearchTerm(searchTerm);
   };
 
   const handleFilterChange = (newFilters: any) => {
-    setFilters({ ...filters, ...newFilters });
+    const updatedFilters = { ...filters, ...newFilters };
+    setFilters(updatedFilters);
+    fetchItems(updatedFilters); // Keep backend filtering for other filters
+  };
+
+  // ADD: Client-side search filtering
+  const filteredItems = items.filter(item => {
+    if (!searchTerm) return true;
+    
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      (item.name?.toLowerCase() || '').includes(searchLower) ||
+      (item.sku?.toLowerCase() || '').includes(searchLower) ||
+      (item.description?.toLowerCase() || '').includes(searchLower) ||
+      (item.category_name?.toLowerCase() || '').includes(searchLower)
+    );
+  });
+
+  // ADD: Handle search form submit (like jobs page)
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Client-side search is already handled by filteredItems
   };
 
   if (loading && items.length === 0) return <Loading />;
@@ -53,33 +79,55 @@ export default function InventoryItemsPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <FilterBar
-        onSearch={handleSearch}
-        onFilterChange={handleFilterChange}
-        filters={filters}
-        filterOptions={{
-          categories: categories
-        }}
-        placeholder="Search items by name, SKU..."
-      />
+      {/* REMOVED: Separate FilterBar component */}
 
-      {/* Items List */}
+      {/* Items List - USE filteredItems INSTEAD OF items */}
       <Card>
         <div className="p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-900">
-              All Items ({items.length})
+              {filters.category_id ? 'Filtered Items' : 'All Items'} ({filteredItems.length})
+              {loading && <span className="text-sm text-gray-500 ml-2">Loading...</span>}
             </h2>
+            
+            {/* ADD: Search and filters in header like jobs page */}
+            <div className="flex space-x-2">
+              {/* Category Filter */}
+              <select
+                className="text-sm border border-gray-300 rounded-md px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={filters.category_id || 'all'}
+                onChange={(e) => handleFilterChange({ 
+                  category_id: e.target.value === 'all' ? undefined : e.target.value 
+                })}
+              >
+                <option value="all">All Categories</option>
+                {categories.map(category => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              
+              {/* Search Input - like jobs page */}
+              <form onSubmit={handleSearchSubmit} className="flex">
+                <Input
+                  type="text"
+                  placeholder="Search items..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="text-sm w-48"
+                />
+              </form>
+            </div>
           </div>
 
-          {items.length === 0 ? (
+          {filteredItems.length === 0 ? (
             <div className="text-center py-8">
               <div className="text-gray-500 text-lg mb-2">No items found</div>
               <p className="text-gray-600 mb-4">
-                {filters.search ? 'Try adjusting your search terms' : 'Get started by adding your first inventory item'}
+                {searchTerm || filters.category_id ? 'Try adjusting your search or filter terms' : 'Get started by adding your first inventory item'}
               </p>
-              {!filters.search && (
+              {!searchTerm && !filters.category_id && (
                 <Link href="/dashboard/management/inventory/items/new">
                   <Button variant="primary">Add Your First Item</Button>
                 </Link>
@@ -87,7 +135,7 @@ export default function InventoryItemsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {items.map((item) => (
+              {filteredItems.map((item) => (
                 <div
                   key={item.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
@@ -112,17 +160,17 @@ export default function InventoryItemsPage() {
                           Stock: {item.current_stock} {item.unit_of_measure}
                         </span>
                         <span className="text-xs text-gray-500">
-                          Cost: ${item.cost_price}
+                          Cost: ${Number(item.cost_price)?.toFixed(2)}
                         </span>
                         <span className="text-xs text-gray-500">
-                          Price: ${item.selling_price}
+                          Price: ${Number(item.selling_price)?.toFixed(2)}
                         </span>
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="font-medium">
-                      ${(item.current_stock * item.cost_price).toLocaleString()}
+                      ${(Number(item.current_stock) * Number(item.cost_price)).toLocaleString()}
                     </div>
                     <div className="text-sm text-gray-600">
                       Stock Value

@@ -12,13 +12,12 @@ export default function InventoryItemDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { getItemById, loading } = useInventory();
-  
+
   const itemId = params.id as string;
   const item = getItemById(itemId);
 
   useEffect(() => {
     if (!item) {
-      // If item not found in store, you might want to fetch it
       console.log('Item not found, would fetch here');
     }
   }, [item, itemId]);
@@ -121,20 +120,20 @@ export default function InventoryItemDetailPage() {
                 <div>
                   <label className="text-sm font-medium text-gray-500">Cost Price</label>
                   <div className="text-lg font-bold text-gray-900 mt-1">
-                    ${item.cost_price?.toFixed(2) || '0.00'}
+                    ${Number(item.cost_price)?.toFixed(2)}
                   </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Selling Price</label>
                   <div className="text-lg font-bold text-green-600 mt-1">
-                    ${item.selling_price?.toFixed(2) || '0.00'}
+                    ${Number(item.selling_price)?.toFixed(2)}
                   </div>
                 </div>
                 {item.cost_price && item.selling_price && (
                   <div>
                     <label className="text-sm font-medium text-gray-500">Profit Margin</label>
                     <div className="text-lg font-bold text-blue-600 mt-1">
-                      ${(item.selling_price - item.cost_price).toFixed(2)}
+                      {(Number(item.selling_price) - Number(item.cost_price)).toFixed(2)}
                     </div>
                   </div>
                 )}
@@ -163,3 +162,4 @@ export default function InventoryItemDetailPage() {
     </div>
   );
 }
+

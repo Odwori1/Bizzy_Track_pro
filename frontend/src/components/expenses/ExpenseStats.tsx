@@ -8,15 +8,37 @@ interface ExpenseStatsProps {
   loading?: boolean;
 }
 
+// Helper function to extract stats from API response
+const extractStats = (stats: ExpenseStatsType | null) => {
+  if (!stats) {
+    return { totalExpenses: 0, totalAmount: 0, pendingExpenses: 0, approvedExpenses: 0 };
+  }
+
+  // Check if we have the new API structure with totals and by_category
+  if (stats.totals && stats.by_category) {
+    const totalExpenses = parseInt(stats.totals.total_count || '0');
+    const totalAmount = parseFloat(stats.totals.total_amount || '0');
+    
+    const pendingExpenses = stats.by_category.reduce((sum, category) => 
+      sum + parseInt(category.pending_expenses || '0'), 0);
+    
+    const approvedExpenses = stats.by_category.reduce((sum, category) => 
+      sum + parseInt(category.approved_expenses || '0'), 0);
+
+    return { totalExpenses, totalAmount, pendingExpenses, approvedExpenses };
+  }
+
+  // Fallback to old structure
+  return {
+    totalExpenses: stats.total_expenses || 0,
+    totalAmount: stats.total_amount || 0,
+    pendingExpenses: stats.pending_expenses || 0,
+    approvedExpenses: stats.approved_expenses || 0
+  };
+};
+
 export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
-  // Safe destructuring with fallbacks
-  const {
-    total_expenses = 0,
-    total_amount = 0,
-    pending_expenses = 0,
-    approved_expenses = 0,
-    categories_breakdown = []
-  } = stats || {};
+  const { totalExpenses, totalAmount, pendingExpenses, approvedExpenses } = extractStats(stats);
 
   if (loading) {
     return (
@@ -41,7 +63,7 @@ export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
       <Card>
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
-          <div className="text-2xl font-bold mt-2">{total_expenses}</div>
+          <div className="text-2xl font-bold mt-2">{totalExpenses}</div>
           <p className="text-sm text-gray-600">All expenses</p>
         </div>
       </Card>
@@ -50,7 +72,7 @@ export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Amount</h3>
           <div className="text-2xl font-bold text-red-600 mt-2">
-            ${total_amount.toLocaleString()}
+            ${totalAmount.toLocaleString()}
           </div>
           <p className="text-sm text-gray-600">Total spent</p>
         </div>
@@ -59,7 +81,7 @@ export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
       <Card>
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Pending</h3>
-          <div className="text-2xl font-bold text-yellow-600 mt-2">{pending_expenses}</div>
+          <div className="text-2xl font-bold text-yellow-600 mt-2">{pendingExpenses}</div>
           <p className="text-sm text-gray-600">Awaiting approval</p>
         </div>
       </Card>
@@ -67,7 +89,7 @@ export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
       <Card>
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Approved</h3>
-          <div className="text-2xl font-bold text-green-600 mt-2">{approved_expenses}</div>
+          <div className="text-2xl font-bold text-green-600 mt-2">{approvedExpenses}</div>
           <p className="text-sm text-gray-600">Ready for payment</p>
         </div>
       </Card>

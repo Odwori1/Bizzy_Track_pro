@@ -12,13 +12,11 @@ export class InventoryService {
     try {
       log.info('Getting inventory overview', { businessId });
 
-      // Get total items count
       const totalItemsResult = await client.query(
         'SELECT COUNT(*) as count FROM inventory_items WHERE business_id = $1 AND is_active = true',
         [businessId]
       );
 
-      // Get low stock items count
       const lowStockResult = await client.query(
         `SELECT COUNT(*) as count FROM inventory_items
          WHERE business_id = $1 AND is_active = true
@@ -26,19 +24,16 @@ export class InventoryService {
         [businessId]
       );
 
-      // Get out of stock items count
       const outOfStockResult = await client.query(
         'SELECT COUNT(*) as count FROM inventory_items WHERE business_id = $1 AND is_active = true AND current_stock <= 0',
         [businessId]
       );
 
-      // Get total inventory value
       const totalValueResult = await client.query(
         'SELECT SUM(current_stock * cost_price) as total_value FROM inventory_items WHERE business_id = $1 AND is_active = true',
         [businessId]
       );
 
-      // Get recent movements
       const recentMovementsResult = await client.query(
         `SELECT
           im.*,
@@ -52,7 +47,6 @@ export class InventoryService {
         [businessId]
       );
 
-      // Get categories summary
       const categoriesResult = await client.query(
         `SELECT
           ic.name as category_name,
@@ -141,7 +135,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Check if category exists and belongs to business
       const categoryCheck = await client.query(
         'SELECT * FROM inventory_categories WHERE id = $1 AND business_id = $2',
         [categoryId, businessId]
@@ -196,7 +189,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Check if category exists and belongs to business
       const categoryCheck = await client.query(
         'SELECT * FROM inventory_categories WHERE id = $1 AND business_id = $2',
         [categoryId, businessId]
@@ -206,7 +198,6 @@ export class InventoryService {
         throw new Error('Category not found or access denied');
       }
 
-      // Check if category has items
       const itemsCheck = await client.query(
         'SELECT COUNT(*) as item_count FROM inventory_items WHERE category_id = $1 AND business_id = $2',
         [categoryId, businessId]
@@ -217,7 +208,6 @@ export class InventoryService {
         throw new Error(`Cannot delete category with ${itemCount} associated items`);
       }
 
-      // Delete the category
       await client.query(
         'DELETE FROM inventory_categories WHERE id = $1 AND business_id = $2',
         [categoryId, businessId]
@@ -249,7 +239,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Verify category belongs to business
       const categoryCheck = await client.query(
         'SELECT id FROM inventory_categories WHERE id = $1 AND business_id = $2',
         [itemData.category_id, businessId]
@@ -259,7 +248,6 @@ export class InventoryService {
         throw new Error('Category not found or access denied');
       }
 
-      // Check for duplicate SKU
       const skuCheck = await client.query(
         'SELECT id FROM inventory_items WHERE business_id = $1 AND sku = $2',
         [businessId, itemData.sku]
@@ -362,7 +350,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Check if item exists and belongs to business
       const itemCheck = await client.query(
         'SELECT * FROM inventory_items WHERE id = $1 AND business_id = $2',
         [itemId, businessId]
@@ -372,7 +359,6 @@ export class InventoryService {
         throw new Error('Item not found or access denied');
       }
 
-      // If category is being updated, verify it belongs to business
       if (itemData.category_id) {
         const categoryCheck = await client.query(
           'SELECT id FROM inventory_categories WHERE id = $1 AND business_id = $2',
@@ -384,7 +370,6 @@ export class InventoryService {
         }
       }
 
-      // If SKU is being updated, check for duplicates
       if (itemData.sku) {
         const skuCheck = await client.query(
           'SELECT id FROM inventory_items WHERE business_id = $1 AND sku = $2 AND id != $3',
@@ -494,7 +479,7 @@ export class InventoryService {
   }
 
   /**
-   * Get all inventory items with optional filters
+   * Get all inventory items with optional filters and SEARCH capability
    */
   static async getItems(businessId, filters = {}) {
     const client = await getClient();
@@ -530,6 +515,18 @@ export class InventoryService {
 
       if (filters.low_stock) {
         queryStr += ` AND ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0`;
+      }
+
+      // ✅ SEARCH FILTER
+      if (filters.search) {
+        paramCount++;
+        queryStr += ` AND (
+          ii.name ILIKE $${paramCount} OR 
+          ii.sku ILIKE $${paramCount} OR 
+          ii.description ILIKE $${paramCount} OR
+          ic.name ILIKE $${paramCount}
+        )`;
+        params.push(`%${filters.search}%`);
       }
 
       queryStr += ' ORDER BY ii.name';
@@ -576,7 +573,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Verify item belongs to business
       const itemCheck = await client.query(
         'SELECT id, current_stock FROM inventory_items WHERE id = $1 AND business_id = $2',
         [movementData.inventory_item_id, businessId]
@@ -591,7 +587,6 @@ export class InventoryService {
       const unitCost = parseFloat(movementData.unit_cost);
       const totalValue = quantity * unitCost;
 
-      // Record the movement
       const movementResult = await client.query(
         `INSERT INTO inventory_movements (
           business_id, inventory_item_id, movement_type, quantity,
@@ -614,7 +609,6 @@ export class InventoryService {
 
       const movement = movementResult.rows[0];
 
-      // Update inventory stock using the helper function
       const newStock = await client.query(
         'SELECT update_inventory_stock($1, $2, $3) as new_stock',
         [movementData.inventory_item_id, quantity, movementData.movement_type]
@@ -651,17 +645,10 @@ export class InventoryService {
     const client = await getClient();
 
     try {
-      log.info('🗄️ Database Query: get_low_stock_items function');
-
       const result = await client.query(
         `SELECT * FROM get_low_stock_items($1)`,
         [businessId]
       );
-
-      log.info('✅ Database query successful', {
-        rowCount: result.rows.length,
-        businessId
-      });
 
       return result.rows;
     } catch (error) {
@@ -694,14 +681,7 @@ export class InventoryService {
          WHERE business_id = $1
       `;
 
-      log.info('🗄️ Database Query:', { query: queryStr, params: [businessId] });
-
       const result = await client.query(queryStr, [businessId]);
-
-      log.info('✅ Database query successful', {
-        rowCount: result.rows.length,
-        businessId
-      });
 
       return result.rows[0];
     } catch (error) {
@@ -715,3 +695,4 @@ export class InventoryService {
     }
   }
 }
+
