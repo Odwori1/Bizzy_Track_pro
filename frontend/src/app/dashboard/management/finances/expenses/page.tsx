@@ -22,7 +22,8 @@ export default function ExpensesPage() {
     fetchExpenses,
     fetchCategories,
     fetchStats,
-    deleteExpense
+    deleteExpense,
+    updateExpenseStatus
   } = useExpenses();
 
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -79,6 +80,16 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleStatusUpdate = async (expenseId: string, newStatus: string) => {
+    try {
+      await updateExpenseStatus(expenseId, newStatus);
+      // The expenses list will automatically refresh via the store
+    } catch (error) {
+      console.error('Failed to update expense status:', error);
+      alert('Failed to update status. Please try again.');
+    }
+  };
+
   const isLoading = loading && isInitialLoad;
 
   if (isLoading && expenses.length === 0) return <Loading />;
@@ -127,8 +138,7 @@ export default function ExpensesPage() {
                 })}
               >
                 <option value="all">All Status</option>
-                <option value="draft">Draft</option>
-                <option value="submitted">Submitted</option>
+                <option value="pending">Pending</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
                 <option value="paid">Paid</option>
@@ -165,6 +175,7 @@ export default function ExpensesPage() {
             expenses={filteredExpenses}
             loading={loading}
             onDelete={handleDeleteExpense}
+            onStatusUpdate={handleStatusUpdate}
           />
 
           {filteredExpenses.length === 0 && !loading && (

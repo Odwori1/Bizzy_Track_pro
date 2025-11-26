@@ -32,6 +32,11 @@ export const useExpenses = () => {
       return await store.deleteExpense(id);
     },
 
+    // NEW: Status update function
+    updateExpenseStatus: async (expenseId: string, newStatus: string) => {
+      return await store.updateExpense(expenseId, { status: newStatus });
+    },
+
     // Category CRUD Operations - ADDING MISSING METHODS
     createCategory: async (data: CreateExpenseCategoryData) => {
       return await store.createCategory(data);
@@ -49,7 +54,7 @@ export const useExpenses = () => {
 
     // Derived data
     pendingExpenses: store.expenses.filter(expense =>
-      expense.status === 'submitted' || expense.status === 'draft'
+      expense.status === 'pending'
     ),
 
     approvedExpenses: store.expenses.filter(expense =>
