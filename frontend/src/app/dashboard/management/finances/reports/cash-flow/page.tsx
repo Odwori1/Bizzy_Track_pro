@@ -26,7 +26,10 @@ export default function CashFlowPage() {
     fetchCashFlow(dateRange);
   };
 
-  const netCashFlow = (cashFlow?.net_cash_flow || 0);
+  // Calculate totals from cash flow data
+  const totalIncome = cashFlow?.reduce((sum, item) => sum + Number(item.total_income), 0) || 0;
+  const totalExpenses = cashFlow?.reduce((sum, item) => sum + Number(item.total_expenses), 0) || 0;
+  const netCashFlow = cashFlow?.reduce((sum, item) => sum + Number(item.net_cash_flow), 0) || 0;
 
   if (loading) return <Loading />;
 
@@ -66,39 +69,24 @@ export default function CashFlowPage() {
         </div>
       </Card>
 
-      {cashFlow && (
+      {cashFlow && cashFlow.length > 0 ? (
         <div className="grid grid-cols-1 gap-6">
           {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card>
               <div className="p-6 text-center">
-                <h3 className="text-sm font-medium text-gray-600">Operating Cash</h3>
-                <div className={`text-2xl font-bold mt-2 ${
-                  (cashFlow.operating_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  ${(cashFlow.operating_activities?.net_cash_flow || 0).toFixed(2)}
+                <h3 className="text-sm font-medium text-gray-600">Total Income</h3>
+                <div className="text-2xl font-bold text-green-600 mt-2">
+                  ${totalIncome.toFixed(2)}
                 </div>
               </div>
             </Card>
 
             <Card>
               <div className="p-6 text-center">
-                <h3 className="text-sm font-medium text-gray-600">Investing Cash</h3>
-                <div className={`text-2xl font-bold mt-2 ${
-                  (cashFlow.investing_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  ${(cashFlow.investing_activities?.net_cash_flow || 0).toFixed(2)}
-                </div>
-              </div>
-            </Card>
-
-            <Card>
-              <div className="p-6 text-center">
-                <h3 className="text-sm font-medium text-gray-600">Financing Cash</h3>
-                <div className={`text-2xl font-bold mt-2 ${
-                  (cashFlow.financing_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  ${(cashFlow.financing_activities?.net_cash_flow || 0).toFixed(2)}
+                <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
+                <div className="text-2xl font-bold text-red-600 mt-2">
+                  ${totalExpenses.toFixed(2)}
                 </div>
               </div>
             </Card>
@@ -115,113 +103,55 @@ export default function CashFlowPage() {
             </Card>
           </div>
 
-          {/* Detailed Breakdown */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Operating Activities */}
-            <Card>
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Operating Activities</h3>
-                <div className="space-y-3">
-                  {cashFlow.operating_activities?.inflows?.map((inflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{inflow.category}</span>
-                      <span className="text-sm font-medium text-green-600">
-                        ${inflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  {cashFlow.operating_activities?.outflows?.map((outflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{outflow.category}</span>
-                      <span className="text-sm font-medium text-red-600">
-                        ${outflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t pt-2 mt-2">
-                    <div className="flex justify-between items-center font-semibold">
-                      <span className="text-gray-900">Net Cash Flow</span>
-                      <span className={
-                        (cashFlow.operating_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }>
-                        ${(cashFlow.operating_activities?.net_cash_flow || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+          {/* Monthly Breakdown */}
+          <Card>
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Cash Flow</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Period
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Income
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Expenses
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Net Cash Flow
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {cashFlow.map((item, index) => (
+                      <tr key={index}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {new Date(item.period).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'long' 
+                          })}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">
+                          ${Number(item.total_income).toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">
+                          ${Number(item.total_expenses).toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <span className={Number(item.net_cash_flow) >= 0 ? 'text-green-600' : 'text-red-600'}>
+                            ${Number(item.net_cash_flow).toFixed(2)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </Card>
-
-            {/* Investing Activities */}
-            <Card>
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Investing Activities</h3>
-                <div className="space-y-3">
-                  {cashFlow.investing_activities?.inflows?.map((inflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{inflow.category}</span>
-                      <span className="text-sm font-medium text-green-600">
-                        ${inflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  {cashFlow.investing_activities?.outflows?.map((outflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{outflow.category}</span>
-                      <span className="text-sm font-medium text-red-600">
-                        ${outflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t pt-2 mt-2">
-                    <div className="flex justify-between items-center font-semibold">
-                      <span className="text-gray-900">Net Cash Flow</span>
-                      <span className={
-                        (cashFlow.investing_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }>
-                        ${(cashFlow.investing_activities?.net_cash_flow || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            {/* Financing Activities */}
-            <Card>
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Financing Activities</h3>
-                <div className="space-y-3">
-                  {cashFlow.financing_activities?.inflows?.map((inflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{inflow.category}</span>
-                      <span className="text-sm font-medium text-green-600">
-                        ${inflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  {cashFlow.financing_activities?.outflows?.map((outflow, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{outflow.category}</span>
-                      <span className="text-sm font-medium text-red-600">
-                        ${outflow.amount.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t pt-2 mt-2">
-                    <div className="flex justify-between items-center font-semibold">
-                      <span className="text-gray-900">Net Cash Flow</span>
-                      <span className={
-                        (cashFlow.financing_activities?.net_cash_flow || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }>
-                        ${(cashFlow.financing_activities?.net_cash_flow || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
+            </div>
+          </Card>
 
           {/* Net Cash Flow Summary */}
           <Card className={netCashFlow >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}>
@@ -238,7 +168,7 @@ export default function CashFlowPage() {
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-600">
-                {netCashFlow >= 0 
+                {netCashFlow >= 0
                   ? 'Positive cash flow indicates more cash coming in than going out'
                   : 'Negative cash flow indicates more cash going out than coming in'
                 }
@@ -246,9 +176,16 @@ export default function CashFlowPage() {
             </div>
           </Card>
         </div>
-      )}
-
-      {!cashFlow && !loading && (
+      ) : cashFlow && cashFlow.length === 0 ? (
+        <Card>
+          <div className="text-center py-8">
+            <div className="text-gray-500">No cash flow data available for the selected period</div>
+            <Button onClick={handleGenerateReport} variant="primary" className="mt-2">
+              Try Different Dates
+            </Button>
+          </div>
+        </Card>
+      ) : (
         <Card>
           <div className="text-center py-8">
             <div className="text-gray-500">No cash flow data available</div>

@@ -12,8 +12,8 @@ import {
 interface FinancialState {
   // State
   financialReport: FinancialReport | null;
-  profitLossReport: ProfitLossReport | null;
-  cashFlowReport: CashFlowReport[] | null;
+  profitLoss: ProfitLossReport | null;
+  cashFlow: CashFlowReport[] | null;
   balanceSheet: BalanceSheet | null;
   titheCalculation: TitheCalculation | null;
   loading: boolean;
@@ -33,8 +33,8 @@ interface FinancialState {
 export const useFinancialStore = create<FinancialState>((set, get) => ({
   // Initial state
   financialReport: null,
-  profitLossReport: null,
-  cashFlowReport: null,
+  profitLoss: null,
+  cashFlow: null,
   balanceSheet: null,
   titheCalculation: null,
   loading: false,
@@ -57,55 +57,49 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
       if (filters.start_date) queryParams.start_date = filters.start_date;
       if (filters.end_date) queryParams.end_date = filters.end_date;
 
-      const financialReport = await apiClient.get<FinancialReport>('/financial-reports/financial-report', queryParams);
-      set({ financialReport, loading: false });
+      const response = await apiClient.get('/financial-reports/profit-loss', queryParams);
+      set({ financialReport: response.data, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      set({ error: error.response?.data?.error || error.message, loading: false });
     }
   },
 
   fetchProfitLoss: async (filters) => {
     set({ loading: true, error: null });
     try {
-      const queryParams: Record<string, string> = {
+      const response = await apiClient.get('/financial-reports/profit-loss', {
         start_date: filters.start_date,
         end_date: filters.end_date
-      };
-
-      const profitLossReport = await apiClient.get<ProfitLossReport>('/financial-reports/profit-loss', queryParams);
-      set({ profitLossReport, loading: false });
+      });
+      set({ profitLoss: response, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message || 'Failed to fetch profit loss data', loading: false });
     }
   },
 
   fetchCashFlow: async (filters) => {
     set({ loading: true, error: null });
     try {
-      const queryParams: Record<string, string> = {
+      const response = await apiClient.get('/financial-reports/cash-flow', {
         start_date: filters.start_date,
         end_date: filters.end_date
-      };
-
-      const cashFlowReport = await apiClient.get<CashFlowReport[]>('/financial-reports/cash-flow', queryParams);
-      set({ cashFlowReport, loading: false });
+      });
+      set({ cashFlow: response, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message || 'Failed to fetch cash flow data', loading: false });
     }
   },
 
   fetchBalanceSheet: async (filters) => {
     set({ loading: true, error: null });
     try {
-      const queryParams: Record<string, string> = {
+      const response = await apiClient.get('/financial-reports/balance-sheet', {
         start_date: filters.start_date,
         end_date: filters.end_date
-      };
-
-      const balanceSheet = await apiClient.get<BalanceSheet>('/financial-reports/balance-sheet', queryParams);
-      set({ balanceSheet, loading: false });
+      });
+      set({ balanceSheet: response, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message || 'Failed to fetch balance sheet data', loading: false });
     }
   },
 
@@ -116,10 +110,10 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
       if (filters.start_date) queryParams.start_date = filters.start_date;
       if (filters.end_date) queryParams.end_date = filters.end_date;
 
-      const titheCalculation = await apiClient.get<TitheCalculation>('/financial-reports/tithe-calculation', queryParams);
-      set({ titheCalculation, loading: false });
+      const response = await apiClient.get('/financial-reports/tithe-calculation', queryParams);
+      set({ titheCalculation: response.data, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      set({ error: error.response?.data?.error || error.message, loading: false });
     }
   },
 

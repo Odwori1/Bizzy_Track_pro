@@ -3,12 +3,12 @@ import { log } from '../utils/logger.js';
 
 export class FinancialReportService {
   /**
-   * Get comprehensive financial report
+   * Get comprehensive financial report - SIMPLIFIED & GUARANTEED
    */
   static async getFinancialReport(businessId, startDate = null, endDate = null) {
     const client = await getClient();
     try {
-      // Get income data from wallet transactions
+      // DIRECT QUERIES - No complex filtering
       const incomeResult = await client.query(
         `SELECT
           SUM(amount) as total_income,
@@ -27,7 +27,6 @@ export class FinancialReportService {
         [businessId, ...(startDate ? [startDate] : []), ...(endDate ? [endDate] : [])]
       );
 
-      // Get expense data
       const expenseResult = await client.query(
         `SELECT
           SUM(amount) as total_expenses,
@@ -38,7 +37,6 @@ export class FinancialReportService {
          FROM expenses e
          INNER JOIN expense_categories ec ON e.category_id = ec.id
          WHERE e.business_id = $1
-           AND e.status = 'approved'
            ${startDate ? ' AND e.expense_date >= $2' : ''}
            ${endDate ? ' AND e.expense_date <= $3' : ''}
          GROUP BY ec.name, month, year
@@ -58,7 +56,7 @@ export class FinancialReportService {
         [businessId]
       );
 
-      // Calculate net profit
+      // Calculate totals
       const totalIncome = incomeResult.rows.reduce((sum, row) => sum + parseFloat(row.total_income || 0), 0);
       const totalExpenses = expenseResult.rows.reduce((sum, row) => sum + parseFloat(row.total_expenses || 0), 0);
       const netProfit = totalIncome - totalExpenses;
@@ -87,71 +85,106 @@ export class FinancialReportService {
   }
 
   /**
-   * Calculate tithe amount (optional feature)
-   */
-  static async calculateTithe(businessId, options = {}) {
-    try {
-      const {
-        start_date = null,
-        end_date = null,
-        percentage = 10, // Default 10%, user can change
-        enabled = true // User can disable tithe calculation
-      } = options;
-
-      if (!enabled) {
-        return {
-          enabled: false,
-          message: 'Tithe calculation is disabled'
-        };
-      }
-
-      // Calculate net profit for the period
-      const financialReport = await this.getFinancialReport(businessId, start_date, end_date);
-      const netProfit = financialReport.summary.net_profit;
-
-      // Calculate tithe amount
-      const titheAmount = netProfit * (percentage / 100);
-
-      return {
-        enabled: true,
-        calculation_basis: 'net_profit',
-        net_profit: netProfit,
-        tithe_percentage: percentage,
-        tithe_amount: titheAmount,
-        period: {
-          start_date: start_date,
-          end_date: end_date
-        },
-        financial_summary: financialReport.summary
-      };
-    } catch (error) {
-      log.error('Error calculating tithe:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get cash flow report
+   * Get cash flow report - SIMPLIFIED & GUARANTEED
    */
   static async getCashFlowReport(businessId, startDate, endDate) {
     const client = await getClient();
     try {
-      const cashFlowResult = await client.query(
+      // DIRECT QUERIES - No complex filtering or union logic
+      const incomeResult = await client.query(
         `SELECT
-          DATE_TRUNC('month', wt.created_at) as period,
-          SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) as total_income,
-          SUM(CASE WHEN wt.transaction_type = 'expense' THEN wt.amount ELSE 0 END) as total_expenses,
-          (SUM(CASE WHEN wt.transaction_type = 'income' THEN wt.amount ELSE 0 END) -
-           SUM(CASE WHEN wt.transaction_type = 'expense' THEN wt.amount ELSE 0 END)) as net_cash_flow
-         FROM wallet_transactions wt
-         WHERE wt.business_id = $1
-           AND wt.created_at BETWEEN $2 AND $3
-         GROUP BY DATE_TRUNC('month', wt.created_at)
+          DATE_TRUNC('month', created_at) as period,
+          SUM(amount) as total_income
+         FROM wallet_transactions
+         WHERE business_id = $1
+           AND transaction_type = 'income'
+           AND created_at BETWEEN $2 AND $3
+         GROUP BY DATE_TRUNC('month', created_at)
          ORDER BY period`,
         [businessId, startDate, endDate]
       );
 
-      return cashFlowResult.rows;
+      const expenseResult = await client.query(
+        `SELECT
+          DATE_TRUNC('month', expense_date) as period,
+          SUM(amount) as total_expenses
+         FROM expenses
+         WHERE business_id = $1
+           AND expense_date BETWEEN $2 AND $3
+         GROUP BY DATE_TRUNC('month', expense_date)
+         ORDER BY period`,
+        [businessId, startDate, endDate]
+      );
+
+      // Combine income and expense data by period
+      const cashFlowMap = new Map();
+
+      // Process income data
+      incomeResult.rows.forEach(row => {
+        if (row.period) {
+          const period = row.period.toISOString();
+          const periodDisplay = new Date(row.period).toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric'
+          });
+          
+          cashFlowMap.set(period, {
+            period: period,
+            period_display: periodDisplay,
+            total_income: parseFloat(row.total_income) || 0,
+            total_expenses: 0,
+            net_cash_flow: parseFloat(row.total_income) || 0
+          });
+        }
+      });
+
+      // Process expense data
+      expenseResult.rows.forEach(row => {
+        if (row.period) {
+          const period = row.period.toISOString();
+          const periodDisplay = new Date(row.period).toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric'
+          });
+          const expenses = parseFloat(row.total_expenses) || 0;
+          
+          if (cashFlowMap.has(period)) {
+            const existing = cashFlowMap.get(period);
+            existing.total_expenses = expenses;
+            existing.net_cash_flow = existing.total_income - expenses;
+          } else {
+            cashFlowMap.set(period, {
+              period: period,
+              period_display: periodDisplay,
+              total_income: 0,
+              total_expenses: expenses,
+              net_cash_flow: -expenses
+            });
+          }
+        }
+      });
+
+      // Convert to array and sort
+      const cashFlowData = Array.from(cashFlowMap.values()).sort((a, b) => 
+        new Date(a.period) - new Date(b.period)
+      );
+
+      // If no monthly data, return summary data
+      if (cashFlowData.length === 0) {
+        const totalIncome = incomeResult.rows.reduce((sum, row) => sum + parseFloat(row.total_income || 0), 0);
+        const totalExpenses = expenseResult.rows.reduce((sum, row) => sum + parseFloat(row.total_expenses || 0), 0);
+        
+        return [{
+          period: new Date().toISOString(),
+          period_display: 'Current Period',
+          total_income: totalIncome,
+          total_expenses: totalExpenses,
+          net_cash_flow: totalIncome - totalExpenses
+        }];
+      }
+
+      return cashFlowData;
+
     } catch (error) {
       log.error('Error generating cash flow report:', error);
       throw error;
@@ -161,10 +194,11 @@ export class FinancialReportService {
   }
 
   /**
-   * Get profit and loss statement
+   * Get profit and loss - SIMPLIFIED & GUARANTEED
    */
   static async getProfitAndLoss(businessId, startDate, endDate) {
     try {
+      // Use the same logic as getFinancialReport for consistency
       const financialReport = await this.getFinancialReport(businessId, startDate, endDate);
 
       return {
@@ -190,64 +224,74 @@ export class FinancialReportService {
   }
 
   /**
-   * Get balance sheet report
+   * Get balance sheet - SIMPLIFIED & GUARANTEED
    */
   static async getBalanceSheet(businessId, startDate, endDate) {
     const client = await getClient();
     try {
       // Get total assets (sum of all wallet balances)
       const assetsResult = await client.query(
-        `SELECT SUM(current_balance) as total_assets 
-         FROM money_wallets 
+        `SELECT SUM(current_balance) as total_assets
+         FROM money_wallets
          WHERE business_id = $1 AND is_active = true`,
         [businessId]
       );
 
       const totalAssets = parseFloat(assetsResult.rows[0].total_assets) || 0;
 
+      // Get inventory valuation
+      const inventoryResult = await client.query(
+        `SELECT SUM(current_stock * cost_price) as total_inventory_value
+         FROM inventory_items
+         WHERE business_id = $1 AND is_active = true AND current_stock > 0`,
+        [businessId]
+      );
+
+      const totalInventoryValue = parseFloat(inventoryResult.rows[0].total_inventory_value) || 0;
+
       // Get total liabilities (sum of unpaid expenses)
       const liabilitiesResult = await client.query(
-        `SELECT SUM(amount) as total_liabilities 
-         FROM expenses 
+        `SELECT SUM(amount) as total_liabilities
+         FROM expenses
          WHERE business_id = $1 AND status != 'paid'`,
         [businessId]
       );
 
       const totalLiabilities = parseFloat(liabilitiesResult.rows[0].total_liabilities) || 0;
 
-      // Calculate equity (Assets - Liabilities)
-      const totalEquity = totalAssets - totalLiabilities;
-
-      // Get net income for the period for retained earnings calculation
+      // Get net income for the period
       const incomeResult = await client.query(
-        `SELECT 
+        `SELECT
           COALESCE(SUM(
-            CASE WHEN wt.transaction_type = 'income' THEN wt.amount 
-                 WHEN wt.transaction_type = 'expense' THEN -wt.amount 
+            CASE WHEN wt.transaction_type = 'income' THEN wt.amount
+                 WHEN wt.transaction_type = 'expense' THEN -wt.amount
                  ELSE 0 END
           ), 0) as net_income
          FROM wallet_transactions wt
          INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
-         WHERE mw.business_id = $1 
+         WHERE mw.business_id = $1
            AND wt.created_at BETWEEN $2 AND $3`,
         [businessId, startDate, endDate]
       );
 
       const netIncome = parseFloat(incomeResult.rows[0].net_income) || 0;
 
+      // Calculate equity
+      const totalEquity = totalAssets + totalInventoryValue - totalLiabilities;
+
       const balanceSheet = {
         assets: {
           current_assets: {
             cash_and_equivalents: totalAssets,
-            accounts_receivable: 0, // Would need invoice data
-            inventory: 0, // Would need inventory valuation
-            total_current_assets: totalAssets
+            accounts_receivable: 0,
+            inventory: totalInventoryValue,
+            total_current_assets: totalAssets + totalInventoryValue
           },
           fixed_assets: {
             property_equipment: 0,
             total_fixed_assets: 0
           },
-          total_assets: totalAssets
+          total_assets: totalAssets + totalInventoryValue
         },
         liabilities: {
           current_liabilities: {
@@ -267,9 +311,10 @@ export class FinancialReportService {
           total_equity: totalEquity
         },
         verification: {
-          total_assets: totalAssets,
+          total_assets: totalAssets + totalInventoryValue,
           total_liabilities_and_equity: totalLiabilities + totalEquity,
-          balanced: totalAssets === (totalLiabilities + totalEquity)
+          balanced: Math.abs((totalAssets + totalInventoryValue) - (totalLiabilities + totalEquity)) < 0.01,
+          difference: Math.abs((totalAssets + totalInventoryValue) - (totalLiabilities + totalEquity))
         },
         period: {
           start_date: startDate,
@@ -285,6 +330,47 @@ export class FinancialReportService {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Calculate tithe amount
+   */
+  static async calculateTithe(businessId, options = {}) {
+    try {
+      const {
+        start_date = null,
+        end_date = null,
+        percentage = 10,
+        enabled = true
+      } = options;
+
+      if (!enabled) {
+        return {
+          enabled: false,
+          message: 'Tithe calculation is disabled'
+        };
+      }
+
+      const financialReport = await this.getFinancialReport(businessId, start_date, end_date);
+      const netProfit = financialReport.summary.net_profit;
+      const titheAmount = netProfit * (percentage / 100);
+
+      return {
+        enabled: true,
+        calculation_basis: 'net_profit',
+        net_profit: netProfit,
+        tithe_percentage: percentage,
+        tithe_amount: titheAmount,
+        period: {
+          start_date: start_date,
+          end_date: end_date
+        },
+        financial_summary: financialReport.summary
+      };
+    } catch (error) {
+      log.error('Error calculating tithe:', error);
+      throw error;
     }
   }
 }

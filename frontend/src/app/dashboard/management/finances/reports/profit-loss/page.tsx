@@ -10,8 +10,8 @@ import { FormInput } from '@/components/ui/week7/FormInput';
 export default function ProfitLossPage() {
   const { profitLoss, loading, fetchProfitLoss } = useFinancialReports();
   const [dateRange, setDateRange] = useState({
-    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0],
+    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // Jan 1 current year
+    end_date: new Date().toISOString().split('T')[0], // Today
   });
 
   useEffect(() => {
@@ -26,7 +26,11 @@ export default function ProfitLossPage() {
     fetchProfitLoss(dateRange);
   };
 
-  const netProfit = (profitLoss?.total_revenue || 0) - (profitLoss?.total_expenses || 0);
+  // Use actual backend data structure
+  const totalRevenue = profitLoss?.revenue?.total_income || 0;
+  const totalExpenses = profitLoss?.expenses?.total_expenses || 0;
+  const netProfit = profitLoss?.net_profit || 0;
+  const profitMargin = profitLoss?.profit_margin || 0;
 
   if (loading) return <Loading />;
 
@@ -74,7 +78,7 @@ export default function ProfitLossPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Revenue</h3>
                 <div className="text-2xl font-bold text-green-600 mt-2">
-                  ${profitLoss.total_revenue?.toFixed(2) || '0.00'}
+                  ${totalRevenue.toFixed(2)}
                 </div>
               </div>
             </Card>
@@ -83,7 +87,7 @@ export default function ProfitLossPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
                 <div className="text-2xl font-bold text-red-600 mt-2">
-                  ${profitLoss.total_expenses?.toFixed(2) || '0.00'}
+                  ${totalExpenses.toFixed(2)}
                 </div>
               </div>
             </Card>
@@ -105,7 +109,7 @@ export default function ProfitLossPage() {
                 <div className={`text-2xl font-bold mt-2 ${
                   netProfit >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  {profitLoss.total_revenue ? ((netProfit / profitLoss.total_revenue) * 100).toFixed(1) : '0'}%
+                  {profitMargin.toFixed(1)}%
                 </div>
               </div>
             </Card>
@@ -118,19 +122,24 @@ export default function ProfitLossPage() {
               <div className="p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Revenue Breakdown</h3>
                 <div className="space-y-3">
-                  {profitLoss.revenue_breakdown?.map((revenue, index) => (
+                  {profitLoss.revenue?.breakdown?.map((revenue, index) => (
                     <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{revenue.category}</span>
+                      <span className="text-sm text-gray-600">{revenue.wallet_type}</span>
                       <span className="text-sm font-medium text-green-600">
-                        ${revenue.amount.toFixed(2)}
+                        ${Number(revenue.total_income).toFixed(2)}
                       </span>
                     </div>
                   ))}
+                  {(!profitLoss.revenue?.breakdown || profitLoss.revenue.breakdown.length === 0) && (
+                    <div className="text-center text-gray-500 py-4">
+                      No revenue data available
+                    </div>
+                  )}
                   <div className="border-t pt-2 mt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Revenue</span>
                       <span className="text-green-600">
-                        ${profitLoss.total_revenue?.toFixed(2) || '0.00'}
+                        ${totalRevenue.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -143,19 +152,24 @@ export default function ProfitLossPage() {
               <div className="p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Expense Breakdown</h3>
                 <div className="space-y-3">
-                  {profitLoss.expense_breakdown?.map((expense, index) => (
+                  {profitLoss.expenses?.breakdown?.map((expense, index) => (
                     <div key={index} className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600">{expense.category}</span>
+                      <span className="text-sm text-gray-600">{expense.category_name}</span>
                       <span className="text-sm font-medium text-red-600">
-                        ${expense.amount.toFixed(2)}
+                        ${Number(expense.total_expenses).toFixed(2)}
                       </span>
                     </div>
                   ))}
+                  {(!profitLoss.expenses?.breakdown || profitLoss.expenses.breakdown.length === 0) && (
+                    <div className="text-center text-gray-500 py-4">
+                      No expense data available
+                    </div>
+                  )}
                   <div className="border-t pt-2 mt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Expenses</span>
                       <span className="text-red-600">
-                        ${profitLoss.total_expenses?.toFixed(2) || '0.00'}
+                        ${totalExpenses.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -178,16 +192,6 @@ export default function ProfitLossPage() {
                   ${netProfit.toFixed(2)}
                 </div>
               </div>
-              {profitLoss.tithe_amount && (
-                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-blue-700">Recommended Tithe (10%):</span>
-                    <span className="font-semibold text-blue-700">
-                      ${profitLoss.tithe_amount.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              )}
             </div>
           </Card>
         </div>
