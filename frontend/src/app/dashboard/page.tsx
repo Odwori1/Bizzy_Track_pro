@@ -3,6 +3,10 @@
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import Link from 'next/link';
+import { CurrencyTest } from '@/components/test/CurrencyTest';
+
+
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
@@ -17,6 +21,17 @@ export default function DashboardPage() {
           Logout
         </Button>
       </div>
+      
+      <CurrencyTest />
+      <div className="mt-6 p-4 border rounded-lg">
+        <h3 className="text-lg font-semibold mb-2">Week 8 Test Links</h3>
+        <div className="flex space-x-2">
+          <Link href="/dashboard/management/products">
+            <Button variant="outline" size="sm">Test Products Page</Button>
+          </Link>
+        </div>
+      </div>
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Security Overview Card - Week 16 Features */}

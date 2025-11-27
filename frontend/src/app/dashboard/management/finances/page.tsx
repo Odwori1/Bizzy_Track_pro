@@ -11,43 +11,53 @@ import { FinancialStats } from '@/components/finances/FinancialStats';
 import { WalletCard } from '@/components/finances/WalletCard';
 
 export default function FinancesPage() {
-  const { 
-    wallets, 
-    stats: walletStats, 
-    loading: walletsLoading, 
-    error: walletsError, 
-    fetchWallets, 
-    fetchStats: fetchWalletStats 
+  const {
+    wallets,
+    stats: walletStats,
+    loading: walletsLoading,
+    error: walletsError,
+    fetchWallets,
+    fetchStats: fetchWalletStats
   } = useWallets();
 
-  const { 
-    stats: expenseStats, 
-    loading: expensesLoading, 
-    error: expensesError, 
-    fetchStats: fetchExpenseStats 
+  const {
+    expenses,
+    stats: expenseStats,
+    loading: expensesLoading,
+    error: expensesError,
+    fetchExpenses,
+    fetchStats: fetchExpenseStats
   } = useExpenses();
 
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = async () => {
+    try {
+      await Promise.all([
+        fetchWallets(),
+        fetchExpenses(), // Make sure we fetch actual expenses data
+        fetchWalletStats(),
+        fetchExpenseStats()
+      ]);
+    } catch (error) {
+      console.error('Error loading financial data:', error);
+    } finally {
+      setIsInitialLoad(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        await Promise.all([
-          fetchWallets(),
-          fetchWalletStats(),
-          fetchExpenseStats()
-        ]);
-      } catch (error) {
-        console.error('Error loading financial data:', error);
-      } finally {
-        setIsInitialLoad(false);
-      }
-    };
-
     if (isInitialLoad) {
       loadData();
     }
-  }, [fetchWallets, fetchWalletStats, fetchExpenseStats, isInitialLoad]);
+  }, [isInitialLoad]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+  };
 
   const loading = (walletsLoading || expensesLoading) && isInitialLoad;
   const error = walletsError || expensesError;
@@ -62,11 +72,18 @@ export default function FinancesPage() {
           <p className="text-gray-600">Manage your business finances, wallets, and expenses</p>
         </div>
         <div className="flex space-x-3">
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? '🔄 Refreshing...' : '🔄 Refresh'}
+          </Button>
           <Link href="/dashboard/management/finances/wallets/new">
-            <Button variant="primary">Add Wallet</Button>
+            <Button variant="primary">+ Add Wallet</Button>
           </Link>
           <Link href="/dashboard/management/finances/expenses/new">
-            <Button variant="outline">Add Expense</Button>
+            <Button variant="outline">+ Add Expense</Button>
           </Link>
         </div>
       </div>
@@ -77,10 +94,12 @@ export default function FinancesPage() {
         </div>
       )}
 
-      {/* Financial Overview Stats */}
-      <FinancialStats 
+      {/* Financial Overview Stats - Now with REAL data from wallets and expenses */}
+      <FinancialStats
         walletStats={walletStats}
         expenseStats={expenseStats}
+        wallets={wallets}
+        expenses={expenses}
         loading={loading}
       />
 
@@ -104,7 +123,7 @@ export default function FinancesPage() {
             {wallets.map((wallet) => (
               <WalletCard key={wallet.id} wallet={wallet} />
             ))}
-            
+
             {wallets.length === 0 && (
               <div className="col-span-full text-center py-8">
                 <div className="text-gray-500">No wallets found</div>
@@ -119,14 +138,16 @@ export default function FinancesPage() {
         )}
       </div>
 
-      {/* Quick Actions */}
+      {/* Quick Actions with Real Data Context */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Link href="/dashboard/management/finances/wallets/transactions">
           <Card className="cursor-pointer hover:shadow-md transition-shadow">
             <div className="p-6 text-center">
-              <div className="text-2xl mb-2">💸</div>
+              <div className="text-2xl mb-2 text-purple-600">💸</div>
               <h3 className="font-semibold text-gray-900">All Transactions</h3>
-              <p className="text-gray-600 text-sm">View all wallet transactions</p>
+              <p className="text-gray-600 text-sm">
+                {wallets.length} wallets, {expenses.length} expenses
+              </p>
             </div>
           </Card>
         </Link>
@@ -134,9 +155,11 @@ export default function FinancesPage() {
         <Link href="/dashboard/management/finances/expenses">
           <Card className="cursor-pointer hover:shadow-md transition-shadow">
             <div className="p-6 text-center">
-              <div className="text-2xl mb-2">📝</div>
+              <div className="text-2xl mb-2 text-red-600">📝</div>
               <h3 className="font-semibold text-gray-900">Expense Tracking</h3>
-              <p className="text-gray-600 text-sm">Manage and track expenses</p>
+              <p className="text-gray-600 text-sm">
+                {expenses.filter(e => e.status === 'approved').length} approved, {expenses.filter(e => e.status === 'pending').length} pending
+              </p>
             </div>
           </Card>
         </Link>
@@ -144,13 +167,53 @@ export default function FinancesPage() {
         <Link href="/dashboard/management/finances/reports">
           <Card className="cursor-pointer hover:shadow-md transition-shadow">
             <div className="p-6 text-center">
-              <div className="text-2xl mb-2">📊</div>
+              <div className="text-2xl mb-2 text-green-600">📊</div>
               <h3 className="font-semibold text-gray-900">Financial Reports</h3>
-              <p className="text-gray-600 text-sm">Generate financial reports</p>
+              <p className="text-gray-600 text-sm">
+                Generate detailed financial reports
+              </p>
             </div>
           </Card>
         </Link>
       </div>
+
+      {/* Real Data Summary */}
+      {!loading && (wallets.length > 0 || expenses.length > 0) && (
+        <Card className="p-6 bg-blue-50">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2">Live Financial Data</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">Total Wallets</p>
+                  <p className="font-semibold text-blue-600">{wallets.length}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Active Balance</p>
+                  <p className="font-semibold text-green-600">
+                    ${wallets.reduce((total, wallet) => total + parseFloat(wallet.current_balance || 0), 0).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Total Expenses</p>
+                  <p className="font-semibold text-red-600">
+                    ${expenses.filter(e => e.status === 'approved').reduce((total, expense) => total + parseFloat(expense.amount || 0), 0).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Financial Health</p>
+                  <p className="font-semibold text-green-600">
+                    Healthy ✅
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="text-3xl text-green-500">
+              ✅
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

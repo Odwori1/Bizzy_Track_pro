@@ -38,6 +38,11 @@ import productRoutes from './routes/productRoutes.js';
 import supplierRoutes from './routes/supplierRoutes.js';
 import posRoutes from './routes/posRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
+//additional pos routes
+import categoriesRoutes from './routes/categories.js';
+import barcodeRoutes from './routes/barcode.js';
+import salesAnalyticsRoutes from './routes/salesAnalytics.js';
+
 import departmentRoutes from './routes/departmentRoutes.js';
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
 import workforceRoutes from './routes/workforceRoutes.js';
@@ -180,6 +185,11 @@ app.use('/api/products', productRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+//additional pos routes
+app.use('/api/categories', categoriesRoutes);
+app.use('/api/barcode', barcodeRoutes);
+app.use('/api/analytics/sales', salesAnalyticsRoutes);
+
 app.use('/api/departments', departmentRoutes);
 app.use('/api/job-assignments', jobAssignmentRoutes);
 app.use('/api/workforce', workforceRoutes);

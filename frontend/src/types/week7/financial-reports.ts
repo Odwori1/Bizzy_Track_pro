@@ -119,3 +119,86 @@ export interface ReportFilters {
   start_date: string;
   end_date: string;
 }
+
+// NEW: Quick Reports Types
+export interface MonthlySummary {
+  current_month: {
+    income: number;
+    expenses: number;
+    net_profit: number;
+    profit_margin: number;
+  };
+  previous_month: {
+    income: number;
+    expenses: number;
+    net_profit: number;
+    profit_margin: number;
+  };
+  trends: {
+    income: number;
+    expenses: number;
+    profit: number;
+  };
+  period: {
+    current_month: string;
+    previous_month: string;
+  };
+}
+
+export interface ExpenseCategory {
+  category: string;
+  amount: number;
+  count: number;
+  average: number;
+  percentage: number;
+}
+
+export interface MonthlyTrend {
+  month: string;
+  amount: number;
+}
+
+export interface ExpenseAnalysis {
+  categories: ExpenseCategory[];
+  summary: {
+    total_expenses: number;
+    category_count: number;
+    average_per_category: number;
+  };
+  trends: {
+    monthly: MonthlyTrend[];
+  };
+  period: {
+    start_date: string;
+    end_date: string;
+  };
+}
+
+export interface RevenueSource {
+  source: string;
+  amount: number;
+  count: number;
+  average: number;
+  percentage: number;
+}
+
+export interface RevenueTrend {
+  month: string;
+  revenue: number;
+}
+
+export interface RevenueReport {
+  sources: RevenueSource[];
+  summary: {
+    total_revenue: number;
+    source_count: number;
+    average_per_source: number;
+  };
+  trends: {
+    monthly: RevenueTrend[];
+  };
+  period: {
+    start_date: string;
+    end_date: string;
+  };
+}

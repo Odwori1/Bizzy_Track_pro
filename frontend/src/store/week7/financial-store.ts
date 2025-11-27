@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import { apiClient } from '@/lib/api';
+import { exportAsPDF, exportAsExcel } from '@/lib/export-utils';
 import {
   FinancialReport,
   ProfitLossReport,
   CashFlowReport,
   BalanceSheet,
   TitheCalculation,
-  ReportFilters
+  ReportFilters,
+  MonthlySummary,
+  ExpenseAnalysis,
+  RevenueReport
 } from '@/types/week7';
 
 interface FinancialState {
@@ -16,17 +20,33 @@ interface FinancialState {
   cashFlow: CashFlowReport[] | null;
   balanceSheet: BalanceSheet | null;
   titheCalculation: TitheCalculation | null;
+  monthlySummary: MonthlySummary | null;
+  expenseAnalysis: ExpenseAnalysis | null;
+  revenueReport: RevenueReport | null;
   loading: boolean;
   error: string | null;
   reportFilters: ReportFilters;
+  exportLoading: boolean;
+  currentDateRange: { startDate: string; endDate: string };
 
   // Actions
   setReportFilters: (filters: ReportFilters) => void;
+  setDateRange: (startDate: string, endDate: string) => void;
   fetchFinancialReport: (filters?: Partial<ReportFilters>) => Promise<void>;
   fetchProfitLoss: (filters: ReportFilters) => Promise<void>;
   fetchCashFlow: (filters: ReportFilters) => Promise<void>;
   fetchBalanceSheet: (filters: ReportFilters) => Promise<void>;
   fetchTitheCalculation: (filters?: Partial<ReportFilters>) => Promise<void>;
+  
+  // Quick Reports Actions
+  fetchMonthlySummary: () => Promise<void>;
+  fetchExpenseAnalysis: (filters: ReportFilters) => Promise<void>;
+  fetchRevenueReport: (filters: ReportFilters) => Promise<void>;
+  
+  // Export Actions
+  exportPDF: (reportType: string, filters?: Partial<ReportFilters>) => Promise<{ success: boolean; error?: string }>;
+  exportExcel: (reportType: string, filters?: Partial<ReportFilters>) => Promise<{ success: boolean; error?: string }>;
+  
   clearError: () => void;
 }
 
@@ -37,17 +57,31 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
   cashFlow: null,
   balanceSheet: null,
   titheCalculation: null,
+  monthlySummary: null,
+  expenseAnalysis: null,
+  revenueReport: null,
   loading: false,
   error: null,
+  exportLoading: false,
   reportFilters: {
-    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // Jan 1 current year
-    end_date: new Date().toISOString().split('T')[0] // Today
+    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
+    end_date: new Date().toISOString().split('T')[0]
+  },
+  currentDateRange: {
+    startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0]
   },
 
-  // Actions - SEPARATED: setReportFilters only updates filters, doesn't fetch
+  // Actions
   setReportFilters: (filters) => {
     set({ reportFilters: filters });
-    // REMOVED: No automatic fetch calls
+  },
+
+  setDateRange: (startDate, endDate) => {
+    set({ 
+      currentDateRange: { startDate, endDate },
+      reportFilters: { start_date: startDate, end_date: endDate }
+    });
   },
 
   fetchFinancialReport: async (filters = {}) => {
@@ -114,6 +148,68 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
       set({ titheCalculation: response.data, loading: false });
     } catch (error: any) {
       set({ error: error.response?.data?.error || error.message, loading: false });
+    }
+  },
+
+  // Quick Reports Actions
+  fetchMonthlySummary: async () => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get('/financial-reports/monthly-summary');
+      set({ monthlySummary: response, loading: false });
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch monthly summary', loading: false });
+    }
+  },
+
+  fetchExpenseAnalysis: async (filters) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get('/financial-reports/expense-analysis', {
+        start_date: filters.start_date,
+        end_date: filters.end_date
+      });
+      set({ expenseAnalysis: response, loading: false });
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch expense analysis', loading: false });
+    }
+  },
+
+  fetchRevenueReport: async (filters) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get('/financial-reports/revenue-report', {
+        start_date: filters.start_date,
+        end_date: filters.end_date
+      });
+      set({ revenueReport: response, loading: false });
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch revenue report', loading: false });
+    }
+  },
+
+  // Export Actions
+  exportPDF: async (reportType: string, filters = {}) => {
+    set({ exportLoading: true, error: null });
+    try {
+      const result = await exportAsPDF(reportType, filters);
+      set({ exportLoading: false });
+      return result;
+    } catch (error: any) {
+      set({ error: error.message || 'PDF export failed', exportLoading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  exportExcel: async (reportType: string, filters = {}) => {
+    set({ exportLoading: true, error: null });
+    try {
+      const result = await exportAsExcel(reportType, filters);
+      set({ exportLoading: false });
+      return result;
+    } catch (error: any) {
+      set({ error: error.message || 'Excel export failed', exportLoading: false });
+      return { success: false, error: error.message };
     }
   },
 

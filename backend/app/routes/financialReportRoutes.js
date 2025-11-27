@@ -35,6 +35,38 @@ router.get(
   financialReportController.getBalanceSheet
 );
 
+// NEW: Quick Reports
+router.get(
+  '/monthly-summary',
+  requirePermission('financial:reports:view'),
+  financialReportController.getMonthlySummary
+);
+
+router.get(
+  '/expense-analysis',
+  requirePermission('financial:reports:view'),
+  financialReportController.getExpenseAnalysis
+);
+
+router.get(
+  '/revenue-report',
+  requirePermission('financial:reports:view'),
+  financialReportController.getRevenueReport
+);
+
+// NEW: Export Routes
+router.post(
+  '/export/pdf',
+  requirePermission('financial:reports:export'),
+  financialReportController.exportPDF
+);
+
+router.post(
+  '/export/excel',
+  requirePermission('financial:reports:export'),
+  financialReportController.exportExcel
+);
+
 // Tithe Calculation (Optional Feature)
 router.get(
   '/tithe-calculation',

@@ -21,6 +21,17 @@ export default function WalletTransactionsPage() {
     transaction.transaction_type?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Fix date formatting - use created_at instead of transaction_date
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Invalid Date';
+    try {
+      const date = new Date(dateString);
+      return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleDateString();
+    } catch {
+      return 'Invalid Date';
+    }
+  };
+
   if (loading) return <Loading />;
 
   return (
@@ -81,7 +92,7 @@ export default function WalletTransactionsPage() {
                 {filteredTransactions.map((transaction) => (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(transaction.transaction_date).toLocaleDateString()}
+                      {formatDate(transaction.created_at || transaction.transaction_date)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {transaction.wallet_name}

@@ -9,13 +9,13 @@ import { WalletCard } from '@/components/finances/WalletCard';
 import { Loading } from '@/components/ui/Loading';
 
 export default function WalletsPage() {
-  const { 
-    wallets, 
-    stats, 
-    loading, 
-    error, 
-    fetchWallets, 
-    fetchStats 
+  const {
+    wallets,
+    stats,
+    loading,
+    error,
+    fetchWallets,
+    fetchStats
   } = useWallets();
 
   useEffect(() => {
@@ -32,9 +32,14 @@ export default function WalletsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Money Wallets</h1>
           <p className="text-gray-600">Manage your business money wallets</p>
         </div>
-        <Link href="/dashboard/management/finances/wallets/new">
-          <Button variant="primary">Add New Wallet</Button>
-        </Link>
+        <div className="flex space-x-3">
+          <Link href="/dashboard/management/finances/wallets/transfer">
+            <Button variant="outline">Transfer Funds</Button>
+          </Link>
+          <Link href="/dashboard/management/finances/wallets/new">
+            <Button variant="primary">Add New Wallet</Button>
+          </Link>
+        </div>
       </div>
 
       {error && (
@@ -79,6 +84,11 @@ export default function WalletsPage() {
         <Link href="/dashboard/management/finances/wallets/transactions">
           <Button variant="secondary">
             View All Transactions
+          </Button>
+        </Link>
+        <Link href="/dashboard/management/finances/wallets/transfer">
+          <Button variant="secondary">
+            Transfer Between Wallets
           </Button>
         </Link>
       </div>

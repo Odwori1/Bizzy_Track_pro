@@ -3,12 +3,12 @@ import { log } from '../utils/logger.js';
 
 export class FinancialReportService {
   /**
-   * Get comprehensive financial report - SIMPLIFIED & GUARANTEED
+   * Get comprehensive financial report - FIXED: Excludes internal transfers
    */
   static async getFinancialReport(businessId, startDate = null, endDate = null) {
     const client = await getClient();
     try {
-      // DIRECT QUERIES - No complex filtering
+      // FIXED: Exclude wallet transfers from income
       const incomeResult = await client.query(
         `SELECT
           SUM(amount) as total_income,
@@ -20,6 +20,7 @@ export class FinancialReportService {
          INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
          WHERE wt.business_id = $1
            AND wt.transaction_type = 'income'
+           AND (wt.reference_type IS NULL OR wt.reference_type != 'wallet_transfer')
            ${startDate ? ' AND wt.created_at >= $2' : ''}
            ${endDate ? ' AND wt.created_at <= $3' : ''}
          GROUP BY wallet_type, month, year
@@ -85,12 +86,12 @@ export class FinancialReportService {
   }
 
   /**
-   * Get cash flow report - SIMPLIFIED & GUARANTEED
+   * Get cash flow report - FIXED: Excludes internal transfers
    */
   static async getCashFlowReport(businessId, startDate, endDate) {
     const client = await getClient();
     try {
-      // DIRECT QUERIES - No complex filtering or union logic
+      // FIXED: Exclude wallet transfers from income
       const incomeResult = await client.query(
         `SELECT
           DATE_TRUNC('month', created_at) as period,
@@ -98,6 +99,7 @@ export class FinancialReportService {
          FROM wallet_transactions
          WHERE business_id = $1
            AND transaction_type = 'income'
+           AND (reference_type IS NULL OR reference_type != 'wallet_transfer')
            AND created_at BETWEEN $2 AND $3
          GROUP BY DATE_TRUNC('month', created_at)
          ORDER BY period`,
@@ -127,7 +129,7 @@ export class FinancialReportService {
             month: 'long',
             year: 'numeric'
           });
-          
+
           cashFlowMap.set(period, {
             period: period,
             period_display: periodDisplay,
@@ -147,7 +149,7 @@ export class FinancialReportService {
             year: 'numeric'
           });
           const expenses = parseFloat(row.total_expenses) || 0;
-          
+
           if (cashFlowMap.has(period)) {
             const existing = cashFlowMap.get(period);
             existing.total_expenses = expenses;
@@ -165,7 +167,7 @@ export class FinancialReportService {
       });
 
       // Convert to array and sort
-      const cashFlowData = Array.from(cashFlowMap.values()).sort((a, b) => 
+      const cashFlowData = Array.from(cashFlowMap.values()).sort((a, b) =>
         new Date(a.period) - new Date(b.period)
       );
 
@@ -173,7 +175,7 @@ export class FinancialReportService {
       if (cashFlowData.length === 0) {
         const totalIncome = incomeResult.rows.reduce((sum, row) => sum + parseFloat(row.total_income || 0), 0);
         const totalExpenses = expenseResult.rows.reduce((sum, row) => sum + parseFloat(row.total_expenses || 0), 0);
-        
+
         return [{
           period: new Date().toISOString(),
           period_display: 'Current Period',
@@ -194,7 +196,7 @@ export class FinancialReportService {
   }
 
   /**
-   * Get profit and loss - SIMPLIFIED & GUARANTEED
+   * Get profit and loss - FIXED: Uses corrected financial report
    */
   static async getProfitAndLoss(businessId, startDate, endDate) {
     try {
@@ -224,7 +226,7 @@ export class FinancialReportService {
   }
 
   /**
-   * Get balance sheet - SIMPLIFIED & GUARANTEED
+   * Get balance sheet - FIXED: Includes assets
    */
   static async getBalanceSheet(businessId, startDate, endDate) {
     const client = await getClient();
@@ -249,6 +251,16 @@ export class FinancialReportService {
 
       const totalInventoryValue = parseFloat(inventoryResult.rows[0].total_inventory_value) || 0;
 
+      // NEW: Get fixed assets total
+      const fixedAssetsResult = await client.query(
+        `SELECT SUM(current_value) as total_fixed_assets
+         FROM fixed_assets
+         WHERE business_id = $1 AND is_active = true`,
+        [businessId]
+      );
+
+      const totalFixedAssets = parseFloat(fixedAssetsResult.rows[0].total_fixed_assets) || 0;
+
       // Get total liabilities (sum of unpaid expenses)
       const liabilitiesResult = await client.query(
         `SELECT SUM(amount) as total_liabilities
@@ -259,11 +271,11 @@ export class FinancialReportService {
 
       const totalLiabilities = parseFloat(liabilitiesResult.rows[0].total_liabilities) || 0;
 
-      // Get net income for the period
+      // Get net income for the period (FIXED: exclude internal transfers)
       const incomeResult = await client.query(
         `SELECT
           COALESCE(SUM(
-            CASE WHEN wt.transaction_type = 'income' THEN wt.amount
+            CASE WHEN wt.transaction_type = 'income' AND (wt.reference_type IS NULL OR wt.reference_type != 'wallet_transfer') THEN wt.amount
                  WHEN wt.transaction_type = 'expense' THEN -wt.amount
                  ELSE 0 END
           ), 0) as net_income
@@ -277,7 +289,9 @@ export class FinancialReportService {
       const netIncome = parseFloat(incomeResult.rows[0].net_income) || 0;
 
       // Calculate equity
-      const totalEquity = totalAssets + totalInventoryValue - totalLiabilities;
+      const totalCurrentAssets = totalAssets + totalInventoryValue;
+      const totalAllAssets = totalCurrentAssets + totalFixedAssets;
+      const totalEquity = totalAllAssets - totalLiabilities;
 
       const balanceSheet = {
         assets: {
@@ -285,13 +299,13 @@ export class FinancialReportService {
             cash_and_equivalents: totalAssets,
             accounts_receivable: 0,
             inventory: totalInventoryValue,
-            total_current_assets: totalAssets + totalInventoryValue
+            total_current_assets: totalCurrentAssets
           },
           fixed_assets: {
-            property_equipment: 0,
-            total_fixed_assets: 0
+            property_equipment: totalFixedAssets,
+            total_fixed_assets: totalFixedAssets
           },
-          total_assets: totalAssets + totalInventoryValue
+          total_assets: totalAllAssets
         },
         liabilities: {
           current_liabilities: {
@@ -311,10 +325,10 @@ export class FinancialReportService {
           total_equity: totalEquity
         },
         verification: {
-          total_assets: totalAssets + totalInventoryValue,
+          total_assets: totalAllAssets,
           total_liabilities_and_equity: totalLiabilities + totalEquity,
-          balanced: Math.abs((totalAssets + totalInventoryValue) - (totalLiabilities + totalEquity)) < 0.01,
-          difference: Math.abs((totalAssets + totalInventoryValue) - (totalLiabilities + totalEquity))
+          balanced: Math.abs(totalAllAssets - (totalLiabilities + totalEquity)) < 0.01,
+          difference: Math.abs(totalAllAssets - (totalLiabilities + totalEquity))
         },
         period: {
           start_date: startDate,
@@ -334,7 +348,7 @@ export class FinancialReportService {
   }
 
   /**
-   * Calculate tithe amount
+   * Calculate tithe amount - FIXED: Uses corrected financial data
    */
   static async calculateTithe(businessId, options = {}) {
     try {
@@ -371,6 +385,240 @@ export class FinancialReportService {
     } catch (error) {
       log.error('Error calculating tithe:', error);
       throw error;
+    }
+  }
+
+  /**
+   * NEW: Get monthly summary for quick reports
+   */
+  static async getMonthlySummary(businessId) {
+    const client = await getClient();
+    try {
+      const currentDate = new Date();
+      const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const currentMonthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+      const previousMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+      const previousMonthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0);
+
+      // Get current month data
+      const currentMonthIncome = await client.query(
+        `SELECT SUM(amount) as total_income
+         FROM wallet_transactions
+         WHERE business_id = $1
+           AND transaction_type = 'income'
+           AND (reference_type IS NULL OR reference_type != 'wallet_transfer')
+           AND created_at BETWEEN $2 AND $3`,
+        [businessId, currentMonthStart, currentMonthEnd]
+      );
+
+      const currentMonthExpenses = await client.query(
+        `SELECT SUM(amount) as total_expenses
+         FROM expenses
+         WHERE business_id = $1
+           AND expense_date BETWEEN $2 AND $3`,
+        [businessId, currentMonthStart, currentMonthEnd]
+      );
+
+      // Get previous month data
+      const previousMonthIncome = await client.query(
+        `SELECT SUM(amount) as total_income
+         FROM wallet_transactions
+         WHERE business_id = $1
+           AND transaction_type = 'income'
+           AND (reference_type IS NULL OR reference_type != 'wallet_transfer')
+           AND created_at BETWEEN $2 AND $3`,
+        [businessId, previousMonthStart, previousMonthEnd]
+      );
+
+      const previousMonthExpenses = await client.query(
+        `SELECT SUM(amount) as total_expenses
+         FROM expenses
+         WHERE business_id = $1
+           AND expense_date BETWEEN $2 AND $3`,
+        [businessId, previousMonthStart, previousMonthEnd]
+      );
+
+      const currentIncome = parseFloat(currentMonthIncome.rows[0].total_income) || 0;
+      const currentExpenses = parseFloat(currentMonthExpenses.rows[0].total_expenses) || 0;
+      const currentNetProfit = currentIncome - currentExpenses;
+
+      const previousIncome = parseFloat(previousMonthIncome.rows[0].total_income) || 0;
+      const previousExpenses = parseFloat(previousMonthExpenses.rows[0].total_expenses) || 0;
+      const previousNetProfit = previousIncome - previousExpenses;
+
+      // Calculate trends
+      const incomeTrend = previousIncome > 0 ? ((currentIncome - previousIncome) / previousIncome) * 100 : 0;
+      const expenseTrend = previousExpenses > 0 ? ((currentExpenses - previousExpenses) / previousExpenses) * 100 : 0;
+      const profitTrend = previousNetProfit > 0 ? ((currentNetProfit - previousNetProfit) / previousNetProfit) * 100 : 0;
+
+      return {
+        current_month: {
+          income: currentIncome,
+          expenses: currentExpenses,
+          net_profit: currentNetProfit,
+          profit_margin: currentIncome > 0 ? (currentNetProfit / currentIncome) * 100 : 0
+        },
+        previous_month: {
+          income: previousIncome,
+          expenses: previousExpenses,
+          net_profit: previousNetProfit,
+          profit_margin: previousIncome > 0 ? (previousNetProfit / previousIncome) * 100 : 0
+        },
+        trends: {
+          income: incomeTrend,
+          expenses: expenseTrend,
+          profit: profitTrend
+        },
+        period: {
+          current_month: currentMonthStart.toISOString().split('T')[0],
+          previous_month: previousMonthStart.toISOString().split('T')[0]
+        }
+      };
+    } catch (error) {
+      log.error('Error generating monthly summary:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * NEW: Get expense analysis for quick reports
+   */
+  static async getExpenseAnalysis(businessId, startDate, endDate) {
+    const client = await getClient();
+    try {
+      const expenseResult = await client.query(
+        `SELECT
+          ec.name as category_name,
+          SUM(e.amount) as total_amount,
+          COUNT(*) as expense_count,
+          AVG(e.amount) as average_amount
+         FROM expenses e
+         INNER JOIN expense_categories ec ON e.category_id = ec.id
+         WHERE e.business_id = $1
+           AND e.expense_date BETWEEN $2 AND $3
+         GROUP BY ec.name
+         ORDER BY total_amount DESC`,
+        [businessId, startDate, endDate]
+      );
+
+      // Get monthly trend
+      const monthlyTrend = await client.query(
+        `SELECT
+          DATE_TRUNC('month', expense_date) as month,
+          SUM(amount) as monthly_total
+         FROM expenses
+         WHERE business_id = $1
+           AND expense_date BETWEEN $2 AND $3
+         GROUP BY DATE_TRUNC('month', expense_date)
+         ORDER BY month`,
+        [businessId, startDate, endDate]
+      );
+
+      const totalExpenses = expenseResult.rows.reduce((sum, row) => sum + parseFloat(row.total_amount || 0), 0);
+
+      return {
+        categories: expenseResult.rows.map(row => ({
+          category: row.category_name,
+          amount: parseFloat(row.total_amount) || 0,
+          count: parseInt(row.expense_count) || 0,
+          average: parseFloat(row.average_amount) || 0,
+          percentage: totalExpenses > 0 ? (parseFloat(row.total_amount) / totalExpenses) * 100 : 0
+        })),
+        summary: {
+          total_expenses: totalExpenses,
+          category_count: expenseResult.rows.length,
+          average_per_category: totalExpenses > 0 ? totalExpenses / expenseResult.rows.length : 0
+        },
+        trends: {
+          monthly: monthlyTrend.rows.map(row => ({
+            month: row.month.toISOString().split('T')[0],
+            amount: parseFloat(row.monthly_total) || 0
+          }))
+        },
+        period: {
+          start_date: startDate,
+          end_date: endDate
+        }
+      };
+    } catch (error) {
+      log.error('Error generating expense analysis:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * NEW: Get revenue report for quick reports
+   */
+  static async getRevenueReport(businessId, startDate, endDate) {
+    const client = await getClient();
+    try {
+      const revenueResult = await client.query(
+        `SELECT
+          wallet_type,
+          SUM(amount) as total_revenue,
+          COUNT(*) as transaction_count,
+          AVG(amount) as average_transaction
+         FROM wallet_transactions wt
+         INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
+         WHERE wt.business_id = $1
+           AND wt.transaction_type = 'income'
+           AND (wt.reference_type IS NULL OR wt.reference_type != 'wallet_transfer')
+           AND wt.created_at BETWEEN $2 AND $3
+         GROUP BY wallet_type
+         ORDER BY total_revenue DESC`,
+        [businessId, startDate, endDate]
+      );
+
+      // Get monthly trend
+      const monthlyTrend = await client.query(
+        `SELECT
+          DATE_TRUNC('month', created_at) as month,
+          SUM(amount) as monthly_revenue
+         FROM wallet_transactions
+         WHERE business_id = $1
+           AND transaction_type = 'income'
+           AND (reference_type IS NULL OR reference_type != 'wallet_transfer')
+           AND created_at BETWEEN $2 AND $3
+         GROUP BY DATE_TRUNC('month', created_at)
+         ORDER BY month`,
+        [businessId, startDate, endDate]
+      );
+
+      const totalRevenue = revenueResult.rows.reduce((sum, row) => sum + parseFloat(row.total_revenue || 0), 0);
+
+      return {
+        sources: revenueResult.rows.map(row => ({
+          source: row.wallet_type,
+          amount: parseFloat(row.total_revenue) || 0,
+          count: parseInt(row.transaction_count) || 0,
+          average: parseFloat(row.average_transaction) || 0,
+          percentage: totalRevenue > 0 ? (parseFloat(row.total_revenue) / totalRevenue) * 100 : 0
+        })),
+        summary: {
+          total_revenue: totalRevenue,
+          source_count: revenueResult.rows.length,
+          average_per_source: totalRevenue > 0 ? totalRevenue / revenueResult.rows.length : 0
+        },
+        trends: {
+          monthly: monthlyTrend.rows.map(row => ({
+            month: row.month.toISOString().split('T')[0],
+            revenue: parseFloat(row.monthly_revenue) || 0
+          }))
+        },
+        period: {
+          start_date: startDate,
+          end_date: endDate
+        }
+      };
+    } catch (error) {
+      log.error('Error generating revenue report:', error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }
