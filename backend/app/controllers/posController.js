@@ -8,13 +8,17 @@ export const posController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Creating POS transaction', { 
-        businessId, 
-        userId, 
-        itemCount: transactionData.items?.length || 0 
+      log.info('Creating POS transaction', {
+        businessId,
+        userId,
+        itemCount: transactionData.items?.length || 0
       });
 
-      const newTransaction = await POSService.createTransaction(businessId, transactionData, userId);
+      const newTransaction = await POSService.createTransaction(
+        businessId,
+        transactionData,
+        userId
+      );
 
       res.status(201).json({
         success: true,
@@ -31,15 +35,15 @@ export const posController = {
   async getTransactions(req, res, next) {
     try {
       const businessId = req.user.businessId;
-      const { 
-        customer_id, 
-        payment_method, 
-        payment_status, 
-        status, 
-        start_date, 
-        end_date, 
-        page, 
-        limit 
+      const {
+        customer_id,
+        payment_method,
+        payment_status,
+        status,
+        start_date,
+        end_date,
+        page,
+        limit
       } = req.query;
 
       const filters = {};
@@ -93,9 +97,18 @@ export const posController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Updating POS transaction', { businessId, userId, transactionId: id });
+      log.info('Updating POS transaction', {
+        businessId,
+        userId,
+        transactionId: id
+      });
 
-      const updatedTransaction = await POSService.updateTransaction(businessId, id, updateData, userId);
+      const updatedTransaction = await POSService.updateTransaction(
+        businessId,
+        id,
+        updateData,
+        userId
+      );
 
       res.json({
         success: true,
@@ -109,12 +122,42 @@ export const posController = {
     }
   },
 
+  async deleteTransaction(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Deleting POS transaction', {
+        businessId,
+        userId,
+        transactionId: id
+      });
+
+      const result = await POSService.deleteTransaction(businessId, id, userId);
+
+      res.json({
+        success: true,
+        message: result.message,
+        data: result
+      });
+
+    } catch (error) {
+      log.error('POS transaction deletion controller error', error);
+      next(error);
+    }
+  },
+
   async getSalesAnalytics(req, res, next) {
     try {
       const businessId = req.user.businessId;
       const { start_date, end_date } = req.query;
 
-      const analytics = await POSService.getSalesAnalytics(businessId, start_date, end_date);
+      const analytics = await POSService.getSalesAnalytics(
+        businessId,
+        start_date,
+        end_date
+      );
 
       res.json({
         success: true,
@@ -146,3 +189,4 @@ export const posController = {
     }
   }
 };
+

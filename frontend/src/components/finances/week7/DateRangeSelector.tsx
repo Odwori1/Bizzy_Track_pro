@@ -11,51 +11,84 @@ interface DateRangeSelectorProps {
   className?: string;
 }
 
-export default function DateRangeSelector({ 
-  onDateRangeChange, 
-  defaultStartDate, 
+export default function DateRangeSelector({
+  onDateRangeChange,
+  defaultStartDate,
   defaultEndDate,
-  className = '' 
+  className = ''
 }: DateRangeSelectorProps) {
   const [startDate, setStartDate] = useState(defaultStartDate || '');
   const [endDate, setEndDate] = useState(defaultEndDate || '');
   const [isCustom, setIsCustom] = useState(false);
 
   const quickRanges = [
-    { label: 'Today', getRange: () => {
-      const today = new Date().toISOString().split('T')[0];
-      return { start: today, end: today };
-    }},
-    { label: 'This Week', getRange: () => {
-      const today = new Date();
-      const start = new Date(today.setDate(today.getDate() - today.getDay())).toISOString().split('T')[0];
-      const end = new Date().toISOString().split('T')[0];
-      return { start, end };
-    }},
-    { label: 'This Month', getRange: () => {
-      const today = new Date();
-      const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      const end = new Date().toISOString().split('T')[0];
-      return { start, end };
-    }},
-    { label: 'Last Month', getRange: () => {
-      const today = new Date();
-      const start = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
-      const end = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().split('T')[0];
-      return { start, end };
-    }},
-    { label: 'This Year', getRange: () => {
-      const today = new Date();
-      const start = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
-      const end = new Date().toISOString().split('T')[0];
-      return { start, end };
-    }},
-    { label: 'Last Year', getRange: () => {
-      const today = new Date();
-      const start = new Date(today.getFullYear() - 1, 0, 1).toISOString().split('T')[0];
-      const end = new Date(today.getFullYear() - 1, 11, 31).toISOString().split('T')[0];
-      return { start, end };
-    }},
+    { 
+      label: 'Today', 
+      getRange: () => {
+        const today = new Date().toISOString().split('T')[0];
+        return { start: today, end: today };
+      }
+    },
+    { 
+      label: 'Last 7 Days', 
+      getRange: () => {
+        const end = new Date();
+        const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+      }
+    },
+    { 
+      label: 'Last 30 Days', 
+      getRange: () => {
+        const end = new Date();
+        const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+      }
+    },
+    { 
+      label: 'Last 90 Days', 
+      getRange: () => {
+        const end = new Date();
+        const start = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+      }
+    },
+    { 
+      label: 'This Month', 
+      getRange: () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+        const end = new Date().toISOString().split('T')[0];
+        return { start, end };
+      }
+    },
+    { 
+      label: 'Last Month', 
+      getRange: () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
+        const end = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().split('T')[0];
+        return { start, end };
+      }
+    },
+    { 
+      label: 'Year to Date', 
+      getRange: () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
+        const end = new Date().toISOString().split('T')[0];
+        return { start, end };
+      }
+    },
+    { 
+      label: 'Last Year', 
+      getRange: () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear() - 1, 0, 1).toISOString().split('T')[0];
+        const end = new Date(today.getFullYear() - 1, 11, 31).toISOString().split('T')[0];
+        return { start, end };
+      }
+    },
   ];
 
   const handleQuickRange = (getRange: () => { start: string; end: string }) => {
@@ -78,9 +111,9 @@ export default function DateRangeSelector({
   return (
     <Card className={`p-4 ${className}`}>
       <h3 className="font-semibold text-gray-900 mb-3">Select Date Range</h3>
-      
+
       {/* Quick Range Buttons */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         {quickRanges.map((range, index) => (
           <Button
             key={index}

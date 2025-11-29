@@ -56,4 +56,10 @@ router.get(
   posController.getTodaySales
 );
 
+router.delete(
+  '/transactions/:id',
+  requirePermission('pos:delete'),
+  posController.deleteTransaction
+);
+
 export default router;

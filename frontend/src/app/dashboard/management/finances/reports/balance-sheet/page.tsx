@@ -10,8 +10,8 @@ import { FormInput } from '@/components/ui/week7/FormInput';
 export default function BalanceSheetPage() {
   const { balanceSheet, loading, fetchBalanceSheet } = useFinancialReports();
   const [dateRange, setDateRange] = useState({
-    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0],
+    start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 30 days
+    end_date: new Date().toISOString().split('T')[0], // Today
   });
 
   useEffect(() => {
@@ -24,6 +24,16 @@ export default function BalanceSheetPage() {
 
   const handleGenerateReport = () => {
     fetchBalanceSheet(dateRange);
+  };
+
+  // Quick date range presets
+  const applyQuickRange = (days: number) => {
+    const end = new Date();
+    const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    setDateRange({
+      start_date: start.toISOString().split('T')[0],
+      end_date: end.toISOString().split('T')[0]
+    });
   };
 
   if (loading) return <Loading />;
@@ -44,6 +54,27 @@ export default function BalanceSheetPage() {
       <Card>
         <div className="p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Report Period</h3>
+          
+          {/* Quick Range Buttons */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Button variant="outline" size="sm" onClick={() => applyQuickRange(7)}>
+              Last 7 Days
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => applyQuickRange(30)}>
+              Last 30 Days
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => applyQuickRange(90)}>
+              Last 90 Days
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => {
+              const today = new Date();
+              const start = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
+              setDateRange({ start_date: start, end_date: today.toISOString().split('T')[0] });
+            }}>
+              Year to Date
+            </Button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <FormInput
               label="Start Date"

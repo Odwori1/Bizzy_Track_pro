@@ -107,9 +107,7 @@ export class POSService {
 
       await client.query('COMMIT');
 
-      // Get the complete transaction with items
       const completeTransaction = await this.getTransactionById(businessId, transaction.id);
-
       return completeTransaction;
     } catch (error) {
       await client.query('ROLLBACK');
@@ -127,9 +125,9 @@ export class POSService {
 
     try {
       let queryStr = `
-        SELECT 
+        SELECT
           pt.*,
-          CONCAT(c.first_name, ' ', c.last_name) as customer_name, -- FIXED: Use CONCAT
+          CONCAT(c.first_name, ' ', c.last_name) as customer_name,
           c.phone as customer_phone,
           u.full_name as created_by_name,
           COUNT(pti.id) as item_count
@@ -184,7 +182,7 @@ export class POSService {
         params.push(filters.end_date);
       }
 
-      queryStr += ' GROUP BY pt.id, c.first_name, c.last_name, c.phone, u.full_name ORDER BY pt.transaction_date DESC'; // FIXED: Group by first_name, last_name
+      queryStr += ' GROUP BY pt.id, c.first_name, c.last_name, c.phone, u.full_name ORDER BY pt.transaction_date DESC';
 
       if (filters.page && filters.limit) {
         const offset = (filters.page - 1) * filters.limit;
@@ -226,9 +224,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      // Get transaction details - FIXED: Use CONCAT for customer_name
       const transactionQuery = `
-        SELECT 
+        SELECT
           pt.*,
           CONCAT(c.first_name, ' ', c.last_name) as customer_name,
           c.phone as customer_phone,
@@ -248,9 +245,8 @@ export class POSService {
 
       const transaction = transactionResult.rows[0];
 
-      // Get transaction items - FIXED: Use COALESCE for item_display_name
       const itemsQuery = `
-        SELECT 
+        SELECT
           pti.*,
           COALESCE(p.name, ii.name, s.name, pti.item_name) as item_display_name
         FROM pos_transaction_items pti
@@ -292,7 +288,7 @@ export class POSService {
     try {
       await client.query('BEGIN');
 
-      // Verify transaction belongs to business and get current values
+      // Verify transaction belongs to business
       const currentTransaction = await client.query(
         'SELECT * FROM pos_transactions WHERE id = $1 AND business_id = $2',
         [transactionId, businessId]
@@ -302,7 +298,6 @@ export class POSService {
         throw new Error('POS transaction not found or access denied');
       }
 
-      // Build dynamic update query
       const updateFields = [];
       const updateValues = [];
       let paramCount = 0;
@@ -354,6 +349,75 @@ export class POSService {
       return updatedTransaction;
     } catch (error) {
       await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete POS transaction
+   */
+  static async deleteTransaction(businessId, transactionId, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Verify transaction belongs to business and get current values for audit
+      const currentTransaction = await client.query(
+        'SELECT * FROM pos_transactions WHERE id = $1 AND business_id = $2',
+        [transactionId, businessId]
+      );
+
+      if (currentTransaction.rows.length === 0) {
+        throw new Error('POS transaction not found or access denied');
+      }
+
+      const transaction = currentTransaction.rows[0];
+
+      // Delete transaction items first (due to foreign key constraint)
+      await client.query(
+        'DELETE FROM pos_transaction_items WHERE business_id = $1 AND pos_transaction_id = $2',
+        [businessId, transactionId]
+      );
+
+      // Delete the transaction
+      await client.query(
+        'DELETE FROM pos_transactions WHERE id = $1 AND business_id = $2',
+        [transactionId, businessId]
+      );
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'pos.transaction.deleted',
+        resourceType: 'pos_transaction',
+        resourceId: transactionId,
+        oldValues: {
+          transaction_number: transaction.transaction_number,
+          final_amount: transaction.final_amount,
+          payment_method: transaction.payment_method,
+          customer_name: transaction.customer_name
+        }
+      });
+
+      await client.query('COMMIT');
+
+      log.info('✅ POS transaction deleted successfully', {
+        transactionId,
+        businessId,
+        userId
+      });
+
+      return { success: true, message: 'Transaction deleted successfully' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      log.error('❌ POS transaction deletion failed:', {
+        error: error.message,
+        businessId,
+        transactionId
+      });
       throw error;
     } finally {
       client.release();
