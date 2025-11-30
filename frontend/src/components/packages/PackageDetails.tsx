@@ -2,7 +2,7 @@ import { Package } from '@/types/packages';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { DollarSign, Clock, Settings, Users } from 'lucide-react';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface PackageDetailsProps {
   package: Package;
@@ -12,7 +12,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
   // Safely handle all possible undefined values
   const services = pkg.services || [];
   const rules = pkg.deconstruction_rules || [];
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   // Helper function to get service display name
   const getServiceDisplayName = (service: any) => {
@@ -31,7 +31,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
             <DollarSign className="text-green-600" size={20} />
             <div>
               <p className="text-sm text-gray-600">Base Price</p>
-              <p className="font-semibold">{formatCurrency(pkg.base_price)}</p> {/* FIXED: Dynamic currency */}
+              <p className="font-semibold">{format(pkg.base_price)}</p> {/* ✅ CORRECT: Using format function */}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -109,7 +109,7 @@ export function PackageDetails({ package: pkg }: PackageDetailsProps) {
                       )}
                       {service.is_price_overridden && (
                         <Badge variant="outline" className="text-xs">
-                          {formatCurrency(service.package_price)} {/* FIXED: Dynamic currency */}
+                          {format(service.package_price)} {/* ✅ CORRECT: Using format function */}
                         </Badge>
                       )}
                     </div>

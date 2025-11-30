@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { apiClient } from '@/lib/api';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface PriceHistoryItem {
   id: string;
@@ -27,7 +27,7 @@ export default function PriceHistoryPage() {
   const [entityFilter, setEntityFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   // Load price history directly from API (bypassing store issues)
   const loadPriceHistory = async () => {
@@ -256,8 +256,8 @@ export default function PriceHistoryPage() {
                   <div>
                     <span className="text-gray-600">Price Change:</span>
                     <div className="font-medium">
-                      {item.old_price ? `${formatCurrency(parseFloat(item.old_price))} → ` : 'Initial: '} {/* FIXED: Dynamic currency */}
-                      <span className="text-green-600">{formatCurrency(parseFloat(item.new_price))}</span> {/* FIXED: Dynamic currency */}
+                      {item.old_price ? `${format(parseFloat(item.old_price))} → ` : 'Initial: '}  {/* ✅ CORRECT CURRENCY USAGE */}
+                      <span className="text-green-600">{format(parseFloat(item.new_price))}</span>  {/* ✅ CORRECT CURRENCY USAGE */}
                     </div>
                   </div>
 

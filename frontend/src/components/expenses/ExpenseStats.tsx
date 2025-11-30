@@ -2,6 +2,7 @@
 
 import { Card } from '@/components/ui/Card';
 import { ExpenseStats as ExpenseStatsType } from '@/types/week7';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface ExpenseStatsProps {
   stats: ExpenseStatsType | null;
@@ -18,11 +19,11 @@ const extractStats = (stats: ExpenseStatsType | null) => {
   if (stats.totals && stats.by_category) {
     const totalExpenses = parseInt(stats.totals.total_count || '0');
     const totalAmount = parseFloat(stats.totals.total_amount || '0');
-    
-    const pendingExpenses = stats.by_category.reduce((sum, category) => 
+
+    const pendingExpenses = stats.by_category.reduce((sum, category) =>
       sum + parseInt(category.pending_expenses || '0'), 0);
-    
-    const approvedExpenses = stats.by_category.reduce((sum, category) => 
+
+    const approvedExpenses = stats.by_category.reduce((sum, category) =>
       sum + parseInt(category.approved_expenses || '0'), 0);
 
     return { totalExpenses, totalAmount, pendingExpenses, approvedExpenses };
@@ -39,6 +40,7 @@ const extractStats = (stats: ExpenseStatsType | null) => {
 
 export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
   const { totalExpenses, totalAmount, pendingExpenses, approvedExpenses } = extractStats(stats);
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   if (loading) {
     return (
@@ -72,7 +74,7 @@ export function ExpenseStats({ stats, loading = false }: ExpenseStatsProps) {
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Amount</h3>
           <div className="text-2xl font-bold text-red-600 mt-2">
-            ${totalAmount.toLocaleString()}
+            {format(totalAmount)} {/* ✅ CORRECT: Using format function */}
           </div>
           <p className="text-sm text-gray-600">Total spent</p>
         </div>

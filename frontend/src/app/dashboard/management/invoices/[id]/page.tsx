@@ -7,7 +7,7 @@ import { useInvoices } from '@/hooks/useInvoices';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 const statusColors = {
   draft: 'bg-gray-100 text-gray-800',
@@ -29,7 +29,7 @@ export default function InvoiceDetailPage() {
     recordPayment,
     clearError
   } = useInvoices();
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -80,8 +80,6 @@ export default function InvoiceDetailPage() {
       setUpdating(false);
     }
   };
-
-  // REMOVED: Hardcoded formatCurrency function
 
   if (loading) return <Loading />;
   if (error) return <div className="p-4 text-red-700 bg-red-50 rounded-lg">{error}</div>;
@@ -182,7 +180,7 @@ export default function InvoiceDetailPage() {
               <div>
                 <label className="text-sm font-medium text-gray-700">Total Amount</label>
                 <p className="text-gray-900 font-semibold">
-                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.total_amount)} {/* ✅ CORRECT: Using format function */}
                 </p>
               </div>
             </div>
@@ -213,19 +211,19 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between">
                 <span className="text-gray-700">Total Amount:</span>
                 <span className="font-semibold">
-                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.total_amount)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-700">Amount Paid:</span>
                 <span className="font-semibold text-green-600">
-                  {formatCurrency(invoice.amount_paid)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.amount_paid)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
               <div className="flex justify-between border-t pt-2">
                 <span className="text-gray-700 font-medium">Balance Due:</span>
                 <span className="font-semibold text-red-600">
-                  {formatCurrency(invoice.balance_due)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.balance_due)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
             </div>
@@ -301,10 +299,10 @@ export default function InvoiceDetailPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-gray-900">
-                    {item.quantity} × {formatCurrency(item.unit_price.toString())} {/* FIXED: Dynamic currency */}
+                    {item.quantity} × {format(item.unit_price.toString())} {/* ✅ CORRECT: Using format function */}
                   </p>
                   <p className="font-semibold text-gray-900">
-                    {formatCurrency((item.quantity * item.unit_price).toString())} {/* FIXED: Dynamic currency */}
+                    {format((item.quantity * item.unit_price).toString())} {/* ✅ CORRECT: Using format function */}
                   </p>
                   {item.tax_rate > 0 && (
                     <p className="text-sm text-gray-600">Tax: {item.tax_rate}%</p>

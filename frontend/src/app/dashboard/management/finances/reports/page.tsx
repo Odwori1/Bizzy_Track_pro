@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { useFinancialReports } from '@/hooks/week7/useFinancialReports';
 import { printReport } from '@/lib/export-utils';
 import DateRangeSelector from '@/components/finances/week7/DateRangeSelector';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function FinancialReportsPage() {
   const {
@@ -23,6 +24,7 @@ export default function FinancialReportsPage() {
     exportExcel,
     setDateRange
   } = useFinancialReports();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [activeQuickReport, setActiveQuickReport] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<{ type: string; success: boolean; message: string } | null>(null);
@@ -51,7 +53,7 @@ export default function FinancialReportsPage() {
   // Export handlers with current date range - FIXED PROPERTY NAMES
   const handleExportPDF = async (reportType: string) => {
     setExportStatus({ type: 'pdf', success: false, message: 'Exporting PDF...' });
-    
+
     let filters = {};
     // Only include date filters for reports that need them
     if (reportType !== 'monthly-summary') {
@@ -65,7 +67,7 @@ export default function FinancialReportsPage() {
     console.log(`Exporting ${reportType} as PDF with filters:`, filters);
 
     const result = await exportPDF(reportType, filters);
-    
+
     if (result.success) {
       setExportStatus({ type: 'pdf', success: true, message: 'PDF exported successfully!' });
     } else {
@@ -77,7 +79,7 @@ export default function FinancialReportsPage() {
 
   const handleExportExcel = async (reportType: string) => {
     setExportStatus({ type: 'excel', success: false, message: 'Exporting Excel...' });
-    
+
     let filters = {};
     // Only include date filters for reports that need them
     if (reportType !== 'monthly-summary') {
@@ -91,7 +93,7 @@ export default function FinancialReportsPage() {
     console.log(`Exporting ${reportType} as Excel with filters:`, filters);
 
     const result = await exportExcel(reportType, filters);
-    
+
     if (result.success) {
       setExportStatus({ type: 'excel', success: true, message: 'Excel exported successfully!' });
     } else {
@@ -105,13 +107,7 @@ export default function FinancialReportsPage() {
     printReport();
   };
 
-  // Format currency
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
+  // ✅ REMOVED hardcoded formatCurrency function
 
   // Format percentage
   const formatPercentage = (value: number) => {
@@ -250,7 +246,7 @@ export default function FinancialReportsPage() {
                     <div>
                       <p className="text-gray-600">Current Month Income</p>
                       <p className="font-semibold text-green-600">
-                        {formatCurrency(monthlySummary.current_month.income)}
+                        {format(monthlySummary.current_month.income)} {/* ✅ CORRECT: Using format function */}
                       </p>
                       <p className={`text-xs ${getTrendColor(monthlySummary.trends.income)}`}>
                         {formatPercentage(monthlySummary.trends.income)} vs last month
@@ -259,7 +255,7 @@ export default function FinancialReportsPage() {
                     <div>
                       <p className="text-gray-600">Current Month Expenses</p>
                       <p className="font-semibold text-red-600">
-                        {formatCurrency(monthlySummary.current_month.expenses)}
+                        {format(monthlySummary.current_month.expenses)} {/* ✅ CORRECT: Using format function */}
                       </p>
                       <p className={`text-xs ${getTrendColor(monthlySummary.trends.expenses)}`}>
                         {formatPercentage(monthlySummary.trends.expenses)} vs last month
@@ -268,7 +264,7 @@ export default function FinancialReportsPage() {
                     <div className="col-span-2">
                       <p className="text-gray-600">Net Profit</p>
                       <p className={`font-semibold ${monthlySummary.current_month.net_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(monthlySummary.current_month.net_profit)}
+                        {format(monthlySummary.current_month.net_profit)} {/* ✅ CORRECT: Using format function */}
                       </p>
                       <p className={`text-xs ${getTrendColor(monthlySummary.trends.profit)}`}>
                         {formatPercentage(monthlySummary.trends.profit)} vs last month
@@ -286,14 +282,14 @@ export default function FinancialReportsPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-gray-600">Total Expenses:</span>
                       <span className="font-semibold text-red-600">
-                        {formatCurrency(expenseAnalysis.summary.total_expenses)}
+                        {format(expenseAnalysis.summary.total_expenses)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                     {expenseAnalysis.categories.slice(0, 3).map((category, index) => (
                       <div key={index} className="flex justify-between items-center">
                         <span className="text-gray-600">{category.category}:</span>
                         <div className="text-right">
-                          <span className="font-semibold">{formatCurrency(category.amount)}</span>
+                          <span className="font-semibold">{format(category.amount)}</span> {/* ✅ CORRECT: Using format function */}
                           <span className="text-xs text-gray-500 ml-2">({category.percentage.toFixed(1)}%)</span>
                         </div>
                       </div>
@@ -310,14 +306,14 @@ export default function FinancialReportsPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-gray-600">Total Revenue:</span>
                       <span className="font-semibold text-green-600">
-                        {formatCurrency(revenueReport.summary.total_revenue)}
+                        {format(revenueReport.summary.total_revenue)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                     {revenueReport.sources.slice(0, 3).map((source, index) => (
                       <div key={index} className="flex justify-between items-center">
                         <span className="text-gray-600 capitalize">{source.source}:</span>
                         <div className="text-right">
-                          <span className="font-semibold">{formatCurrency(source.amount)}</span>
+                          <span className="font-semibold">{format(source.amount)}</span> {/* ✅ CORRECT: Using format function */}
                           <span className="text-xs text-gray-500 ml-2">({source.percentage.toFixed(1)}%)</span>
                         </div>
                       </div>
@@ -340,67 +336,67 @@ export default function FinancialReportsPage() {
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportPDF('profit-loss')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📄'} P&L PDF
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportExcel('profit-loss')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📊'} P&L Excel
                 </Button>
-                
-                <Button 
-                  variant="outline" 
+
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportPDF('balance-sheet')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📄'} Balance PDF
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportExcel('balance-sheet')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📊'} Balance Excel
                 </Button>
-                
-                <Button 
-                  variant="outline" 
+
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportPDF('cash-flow')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📄'} Cash Flow PDF
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportExcel('cash-flow')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📊'} Cash Flow Excel
                 </Button>
-                
-                <Button 
-                  variant="outline" 
+
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportPDF('monthly-summary')}
                   disabled={exportLoading}
                 >
                   {exportLoading ? '🔄' : '📄'} Monthly PDF
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => handleExportExcel('monthly-summary')}
                   disabled={exportLoading}
@@ -408,9 +404,9 @@ export default function FinancialReportsPage() {
                   {exportLoading ? '🔄' : '📊'} Monthly Excel
                 </Button>
               </div>
-              
-              <Button 
-                variant="outline" 
+
+              <Button
+                variant="outline"
                 className="w-full justify-start"
                 onClick={handlePrint}
               >

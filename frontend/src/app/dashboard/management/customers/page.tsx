@@ -7,14 +7,14 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 export default function CustomersPage() {
   const { customers, customerCategories, loading, error, filters, actions } = useCustomerStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   useEffect(() => {
     actions.fetchCustomers();
@@ -51,8 +51,6 @@ export default function CustomersPage() {
       setDeletingId(null);
     }
   };
-
-  // REMOVED: Hardcoded formatCurrency function
 
   if (loading && customers.length === 0) {
     return <Loading />;
@@ -157,7 +155,7 @@ export default function CustomersPage() {
                   <div>
                     <strong>Business:</strong>
                     <div>{customer.company_name || 'Individual'}</div>
-                    <div>Spent: {formatCurrency(customer.total_spent)}</div>
+                    <div>Spent: {format(customer.total_spent)}</div>  {/* ✅ CORRECT CURRENCY USAGE */}
                   </div>
                   <div>
                     <strong>Member Since:</strong>

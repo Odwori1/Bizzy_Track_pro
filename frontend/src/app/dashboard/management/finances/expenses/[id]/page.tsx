@@ -7,12 +7,14 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import Link from 'next/link';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function ExpenseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { getExpenseById } = useExpenses();
-  
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const [expense, setExpense] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -44,7 +46,7 @@ export default function ExpenseDetailPage() {
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return 'Invalid Date';
-      
+
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
@@ -123,7 +125,7 @@ export default function ExpenseDetailPage() {
                   <div>
                     <label className="text-sm font-medium text-gray-600">Amount</label>
                     <p className="text-lg font-semibold text-red-600">
-                      ${Number(expense.amount).toLocaleString()}
+                      {format(Number(expense.amount))} {/* ✅ CORRECT: Using format function */}
                     </p>
                   </div>
                 </div>
@@ -156,9 +158,9 @@ export default function ExpenseDetailPage() {
                   <div>
                     <label className="text-sm font-medium text-gray-600">Receipt URL</label>
                     <p className="text-gray-900">
-                      <a 
-                        href={expense.receipt_url} 
-                        target="_blank" 
+                      <a
+                        href={expense.receipt_url}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-600 hover:text-blue-800"
                       >
@@ -184,14 +186,14 @@ export default function ExpenseDetailPage() {
                     {expense.created_at ? formatDate(expense.created_at.utc || expense.created_at) : 'Unknown'}
                   </p>
                 </div>
-                
+
                 {expense.approved_by && (
                   <div>
                     <label className="text-sm font-medium text-gray-600">Approved By</label>
                     <p className="text-gray-900">{expense.approved_by_name || expense.approved_by}</p>
                   </div>
                 )}
-                
+
                 {expense.approved_at && (
                   <div>
                     <label className="text-sm font-medium text-gray-600">Approved At</label>

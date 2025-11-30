@@ -12,6 +12,7 @@ import {
   Legend,
   ChartOptions
 } from 'chart.js';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 ChartJS.register(
   CategoryScale,
@@ -39,6 +40,8 @@ interface LineChartProps {
 }
 
 export const LineChart: React.FC<LineChartProps> = ({ data, title, height = 300 }) => {
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const options: ChartOptions<'line'> = {
     responsive: true,
     maintainAspectRatio: false,
@@ -56,7 +59,7 @@ export const LineChart: React.FC<LineChartProps> = ({ data, title, height = 300 
         beginAtZero: true,
         ticks: {
           callback: function(value) {
-            return 'USh ' + value;
+            return format(Number(value)); // ✅ CORRECT: Using format function
           }
         }
       },

@@ -3,18 +3,22 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useServiceStore } from '@/store/serviceStore';
+import { useUniversalCartStore } from '@/store/universal-cart-store';
+import { posEngine } from '@/lib/pos-engine';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function ServicesPage() {
   const { services, serviceCategories, loading, error, actions } = useServiceStore();
+  const { addItem } = useUniversalCartStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const [addingToCart, setAddingToCart] = useState<string | null>(null);
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   useEffect(() => {
     actions.fetchServices();
@@ -37,7 +41,6 @@ export default function ServicesPage() {
     setDeletingId(serviceId);
     try {
       await actions.deleteService(serviceId);
-      // Service list will automatically update via store
     } catch (error) {
       console.error('Failed to delete service:', error);
       alert('Failed to delete service. Please try again.');
@@ -46,7 +49,44 @@ export default function ServicesPage() {
     }
   };
 
-  // REMOVED: Hardcoded formatCurrency function
+  const handleAddToCart = async (service: any) => {
+    setAddingToCart(service.id);
+
+    try {
+      // Create universal sellable item
+      const sellableItem = {
+        id: service.id,
+        type: 'service' as const,
+        sourceModule: 'services' as const,
+        name: service.name,
+        description: service.description,
+        unitPrice: parseFloat(service.base_price) || 0,
+        quantity: 1,
+        category: service.category_name || service.category,
+        metadata: {
+          service_id: service.id,
+          duration_minutes: service.duration_minutes,
+          service_category_id: service.service_category_id
+        },
+        business_id: '' // Will be set by backend based on auth
+      };
+
+      // Add to universal cart using POS engine
+      posEngine.addItem(sellableItem);
+
+      // Show success feedback
+      console.log(`✅ Added "${service.name}" to cart`);
+
+      // Optional: Show toast notification here
+      // toast.success(`Added ${service.name} to cart`);
+
+    } catch (error: any) {
+      console.error('❌ Failed to add service to cart:', error);
+      alert(`Failed to add service to cart: ${error.message}`);
+    } finally {
+      setAddingToCart(null);
+    }
+  };
 
   if (loading && services.length === 0) {
     return <Loading />;
@@ -57,9 +97,14 @@ export default function ServicesPage() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Services</h1>
-          <p className="text-gray-600">Manage your service catalog and pricing</p>
+          <p className="text-gray-600">Browse and book professional services</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/dashboard/management/pos/cart">
+            <Button variant="outline">
+              View Cart
+            </Button>
+          </Link>
           <Link href="/dashboard/management/services/categories">
             <Button variant="outline">
               Manage Categories
@@ -106,50 +151,86 @@ export default function ServicesPage() {
       </Card>
 
       {/* Services Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {services.map((service) => (
-          <Card key={service.id} className="p-4">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="font-semibold text-lg">{service.name}</h3>
-              <span className={`px-2 py-1 rounded-full text-xs ${
-                service.is_active
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-gray-100 text-gray-800'
-              }`}>
-                {service.is_active ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-
-            <p className="text-gray-600 text-sm mb-3">{service.description}</p>
-
-            <div className="flex justify-between items-center text-sm">
-              <div>
-                <div className="font-semibold">{formatCurrency(service.base_price)}</div>
-                <div className="text-gray-500">{service.duration_minutes} mins</div>
+          <Card key={service.id} className="p-6 hover:shadow-lg transition-shadow duration-200">
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex-1">
+                <h3 className="font-semibold text-lg mb-2">{service.name}</h3>
+                <div className="flex items-center space-x-2">
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    service.is_active
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {service.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                  {service.display_category && (
+                    <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
+                      {service.display_category}
+                    </span>
+                  )}
+                </div>
               </div>
-              {service.display_category && (
-                <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
-                  {service.display_category}
-                </span>
-              )}
             </div>
 
-            <div className="flex gap-2 mt-4">
+            <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+              {service.description}
+            </p>
+
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <div className="text-2xl font-bold text-green-600">
+                  {format(service.base_price)} {/* ✅ CORRECT: Using format function */}
+                </div>
+                <div className="text-gray-500 text-sm">
+                  {service.duration_minutes} minutes
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
               <Link href={`/dashboard/management/services/${service.id}`} className="flex-1">
-                <Button variant="outline" size="sm" className="w-full">View</Button>
+                <Button variant="outline" size="sm" className="w-full">Details</Button>
               </Link>
               <Link href={`/dashboard/management/services/${service.id}/edit`} className="flex-1">
                 <Button variant="outline" size="sm" className="w-full">Edit</Button>
               </Link>
               <Button
-                variant="outline"
+                onClick={() => handleAddToCart(service)}
+                size="sm"
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                disabled={!service.is_active || addingToCart === service.id}
+              >
+                {addingToCart === service.id ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Adding...
+                  </span>
+                ) : (
+                  service.is_active ? 'Add to Cart' : 'Unavailable'
+                )}
+              </Button>
+            </div>
+
+            <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-100">
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => handleDeleteService(service.id, service.name)}
                 disabled={deletingId === service.id}
-                className="text-red-600 border-red-200 hover:bg-red-50 flex-1"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
               >
-                {deletingId === service.id ? '...' : 'Delete'}
+                {deletingId === service.id ? 'Deleting...' : 'Delete'}
               </Button>
+
+              {/* Quick cart info */}
+              <div className="text-xs text-gray-500">
+                Click "Add to Cart" to book this service
+              </div>
             </div>
           </Card>
         ))}
@@ -157,9 +238,11 @@ export default function ServicesPage() {
 
       {services.length === 0 && !loading && (
         <Card className="p-8 text-center">
-          <p className="text-gray-500">No services found</p>
+          <div className="text-6xl mb-4">🔧</div>
+          <h3 className="text-xl font-semibold mb-2">No services found</h3>
+          <p className="text-gray-600 mb-6">Get started by creating your first service offering</p>
           <Link href="/dashboard/management/services/new">
-            <Button className="mt-4">Add Your First Service</Button>
+            <Button>Add Your First Service</Button>
           </Link>
         </Card>
       )}

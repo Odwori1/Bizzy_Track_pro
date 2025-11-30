@@ -1,34 +1,25 @@
-// Unified date handling utilities - Follows Jobs system pattern
-
-export interface DateData {
-  utc: string;
-  local: string;
-  iso_local: string;
-  formatted: string;
-  timestamp: number;
-}
-
+// Unified date handling following backend format
 export const formatDate = (dateData: any): string => {
   if (!dateData) return 'Not scheduled';
   
-  // Handle backend date format (like in Jobs system)
+  // Use backend's formatted string if available
   if (typeof dateData === 'object' && dateData.formatted) {
     return dateData.formatted;
   }
   
-  // Handle raw date string
-  if (typeof dateData === 'string') {
+  // Fallback: parse UTC string
+  if (dateData?.utc) {
     try {
-      return new Date(dateData).toLocaleString();
+      return new Date(dateData.utc).toLocaleDateString();
     } catch {
       return 'Invalid Date';
     }
   }
   
-  // Handle UTC timestamp from backend
-  if (dateData.utc) {
+  // Fallback: parse string directly
+  if (typeof dateData === 'string') {
     try {
-      return new Date(dateData.utc).toLocaleString();
+      return new Date(dateData).toLocaleDateString();
     } catch {
       return 'Invalid Date';
     }
@@ -37,35 +28,51 @@ export const formatDate = (dateData: any): string => {
   return 'Invalid Date';
 };
 
-export const formatDateShort = (dateData: any): string => {
-  if (!dateData) return 'N/A';
+// For chart labels - simplified date format
+export const formatDateForChart = (dateData: any): string => {
+  if (!dateData) return '';
   
+  // Use backend's formatted string if available
   if (typeof dateData === 'object' && dateData.formatted) {
     const date = new Date(dateData.utc || dateData.local);
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  
+  // Fallback: parse string directly
+  if (typeof dateData === 'string') {
+    try {
+      const date = new Date(dateData);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  }
+  
+  return '';
+};
+
+// Get date object from backend format
+export const getDateFromBackendFormat = (dateData: any): Date | null => {
+  if (!dateData) return null;
+  
+  if (typeof dateData === 'object' && dateData.utc) {
+    try {
+      return new Date(dateData.utc);
+    } catch {
+      return null;
+    }
   }
   
   if (typeof dateData === 'string') {
-    return new Date(dateData).toLocaleDateString();
+    try {
+      return new Date(dateData);
+    } catch {
+      return null;
+    }
   }
   
-  return 'N/A';
+  return null;
 };
 
-export const parseBackendDate = (dateObj: any): Date => {
-  if (!dateObj) return new Date();
-  
-  if (dateObj.utc) {
-    return new Date(dateObj.utc);
-  }
-  
-  if (dateObj.local) {
-    return new Date(dateObj.local);
-  }
-  
-  if (typeof dateObj === 'string') {
-    return new Date(dateObj);
-  }
-  
-  return new Date();
-};
+// Alternative name for backward compatibility
+export const formatDateShort = formatDateForChart;

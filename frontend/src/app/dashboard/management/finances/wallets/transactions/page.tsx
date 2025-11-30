@@ -5,9 +5,11 @@ import { useWallets } from '@/hooks/week7/useWallets';
 import { Card } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { Input } from '@/components/ui/Input';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function WalletTransactionsPage() {
   const { transactions, loading, error, fetchTransactions } = useWallets();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export default function WalletTransactionsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       <span className={transaction.transaction_type === 'income' ? 'text-green-600' : 'text-red-600'}>
-                        ${Number(transaction.amount).toFixed(2)}
+                        {format(Number(transaction.amount))} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">

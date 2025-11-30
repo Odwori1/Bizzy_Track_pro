@@ -54,7 +54,7 @@ export default function SupplierDetailsPage() {
     const fetchSupplierData = async () => {
       try {
         setLoading(true);
-        
+
         // Fetch supplier details
         const supplierData = await apiClient.get<Supplier>(`/suppliers/${supplierId}`);
         setSupplier(supplierData);
@@ -263,7 +263,7 @@ export default function SupplierDetailsPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {purchaseOrders.map((order) => (
-                  <tr 
+                  <tr
                     key={order.id}
                     className="hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.push(`/dashboard/management/purchase-orders/${order.id}`)}

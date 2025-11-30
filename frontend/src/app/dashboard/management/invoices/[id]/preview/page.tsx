@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { apiClient } from '@/lib/api';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface Invoice {
   id: string;
@@ -38,7 +38,7 @@ export default function InvoicePreviewPage() {
   const params = useParams();
   const router = useRouter();
   const invoiceId = params.id as string;
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,8 +99,6 @@ export default function InvoicePreviewPage() {
       setPdfLoading(false);
     }
   };
-
-  // REMOVED: Hardcoded formatCurrency function
 
   const calculateLineTotal = (item: any) => {
     const subtotal = item.quantity * item.unit_price;
@@ -244,11 +242,11 @@ export default function InvoicePreviewPage() {
                     </td>
                     <td className="py-3 text-right text-gray-700">{item.quantity}</td>
                     <td className="py-3 text-right text-gray-700">
-                      {formatCurrency(item.unit_price.toString())} {/* FIXED: Dynamic currency */}
+                      {format(item.unit_price.toString())} {/* ✅ CORRECT: Using format function */}
                     </td>
                     <td className="py-3 text-right text-gray-700">{item.tax_rate}%</td>
                     <td className="py-3 text-right font-semibold text-gray-900">
-                      {formatCurrency(calculateLineTotal(item).toString())} {/* FIXED: Dynamic currency */}
+                      {format(calculateLineTotal(item).toString())} {/* ✅ CORRECT: Using format function */}
                     </td>
                   </tr>
                 ))}
@@ -262,19 +260,19 @@ export default function InvoicePreviewPage() {
               <div className="flex justify-between py-2">
                 <span className="text-gray-700">Subtotal:</span>
                 <span className="font-semibold">
-                  {formatCurrency(invoice.total_amount)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.total_amount)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
               <div className="flex justify-between py-2">
                 <span className="text-gray-700">Amount Paid:</span>
                 <span className="font-semibold text-green-600">
-                  {formatCurrency(invoice.amount_paid)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.amount_paid)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
               <div className="flex justify-between py-3 border-t border-gray-300">
                 <span className="font-semibold text-gray-900">Balance Due:</span>
                 <span className="font-semibold text-red-600">
-                  {formatCurrency(invoice.balance_due)} {/* FIXED: Dynamic currency */}
+                  {format(invoice.balance_due)} {/* ✅ CORRECT: Using format function */}
                 </span>
               </div>
             </div>

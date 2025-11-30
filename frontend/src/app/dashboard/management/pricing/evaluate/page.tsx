@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePricingActions } from '@/hooks/usePricing';
 import { apiClient } from '@/lib/api';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface CustomerCategory {
   id: string;
@@ -63,7 +63,7 @@ export default function PricingEvaluationPage() {
   const [loading, setLoading] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   const { evaluatePricingWithABAC } = usePricingActions();
 
@@ -153,8 +153,6 @@ export default function PricingEvaluationPage() {
     }
   };
 
-  // REMOVED: Hardcoded formatCurrency function
-
   const formatPercentage = (value: number | undefined | null): string => {
     if (value === undefined || value === null || isNaN(value)) {
       return '0.0%';
@@ -222,7 +220,7 @@ export default function PricingEvaluationPage() {
                 <option value="">Select Service</option>
                 {services.map(service => (
                   <option key={service.id} value={service.id}>
-                    {service.name} ({formatCurrency(parseFloat(service.base_price))}) {/* FIXED: Dynamic currency */}
+                    {service.name} ({format(parseFloat(service.base_price))})  {/* ✅ CORRECT CURRENCY USAGE */}
                   </option>
                 ))}
               </select>
@@ -230,7 +228,7 @@ export default function PricingEvaluationPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Base Price ({currencySymbol}) * {/* FIXED: Dynamic currency symbol */}
+                Base Price *
               </label>
               <Input
                 type="number"
@@ -298,22 +296,22 @@ export default function PricingEvaluationPage() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-600">Original Price:</span>
-                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.original_price)}</div> {/* FIXED: Dynamic currency */}
+                      <div className="font-medium text-lg">{format(evaluationResult.original_price)}</div>  {/* ✅ CORRECT CURRENCY USAGE */}
                     </div>
                     <div>
                       <span className="text-gray-600">Final Price:</span>
-                      <div className="font-medium text-lg text-green-600">{formatCurrency(evaluationResult.final_price)}</div> {/* FIXED: Dynamic currency */}
+                      <div className="font-medium text-lg text-green-600">{format(evaluationResult.final_price)}</div>  {/* ✅ CORRECT CURRENCY USAGE */}
                     </div>
                     <div>
                       <span className="text-gray-600">Total Discount:</span>
                       <div className="font-medium text-red-600">
-                        {formatCurrency(evaluationResult.summary.total_discount)} {/* FIXED: Dynamic currency */}
+                        {format(evaluationResult.summary.total_discount)}  {/* ✅ CORRECT CURRENCY USAGE */}
                         <span className="text-xs ml-1">({formatPercentage(evaluationResult.summary.total_discount_percentage)})</span>
                       </div>
                     </div>
                     <div>
                       <span className="text-gray-600">Total Amount:</span>
-                      <div className="font-medium text-lg">{formatCurrency(evaluationResult.total_amount)}</div> {/* FIXED: Dynamic currency */}
+                      <div className="font-medium text-lg">{format(evaluationResult.total_amount)}</div>  {/* ✅ CORRECT CURRENCY USAGE */}
                     </div>
                   </div>
                 </div>
@@ -329,11 +327,11 @@ export default function PricingEvaluationPage() {
                             <div className="font-medium text-gray-900">{rule.rule_name}</div>
                             <div className="text-sm text-gray-600">
                               {rule.rule_type} • {rule.adjustment_type} • {rule.adjustment_value}
-                              {rule.adjustment_type === 'percentage' ? '%' : currencySymbol} {/* FIXED: Dynamic currency symbol */}
+                              {rule.adjustment_type === 'percentage' ? '%' : ''}
                             </div>
                           </div>
                           <div className="text-sm font-medium text-green-600">
-                            {formatCurrency(rule.new_price)} {/* FIXED: Dynamic currency */}
+                            {format(rule.new_price)}  {/* ✅ CORRECT CURRENCY USAGE */}
                           </div>
                         </div>
                       ))}
@@ -386,11 +384,11 @@ export default function PricingEvaluationPage() {
                             <div className="text-sm font-medium">{adjustment.rule_name || adjustment.type}</div>
                             <div className="text-xs text-gray-600">
                               {adjustment.adjustment_type} • {adjustment.value}
-                              {adjustment.adjustment_type === 'percentage' ? '%' : currencySymbol} {/* FIXED: Dynamic currency symbol */}
+                              {adjustment.adjustment_type === 'percentage' ? '%' : ''}
                             </div>
                           </div>
                           <div className={`text-sm font-medium ${(adjustment.amount || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(adjustment.amount)} {/* FIXED: Dynamic currency */}
+                            {format(adjustment.amount)}  {/* ✅ CORRECT CURRENCY USAGE */}
                           </div>
                         </div>
                       ))}

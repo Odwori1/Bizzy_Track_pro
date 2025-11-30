@@ -6,13 +6,13 @@ import { DeconstructionValidator } from '@/components/packages/DeconstructionVal
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
 import Link from 'next/link';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function DeconstructPackagePage() {
   const params = useParams();
   const router = useRouter();
   const { currentPackage, validationResult, loading, error, actions } = usePackageStore();
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const packageId = params.packageId as string;
   const [selectedServices, setSelectedServices] = useState<Array<{service_id: string; quantity: number}>>([]);
@@ -184,7 +184,7 @@ export default function DeconstructPackagePage() {
                     </div>
                     <div className="flex justify-between text-sm mb-2">
                       <span>Total Price:</span>
-                      <span className="font-semibold">{formatCurrency(validationResult.totalPrice)}</span> {/* FIXED: Dynamic currency */}
+                      <span className="font-semibold">{format(validationResult.totalPrice)}</span> {/* ✅ CORRECT: Using format function */}
                     </div>
                     <div className="flex justify-between text-sm">
                       <span>Total Duration:</span>
@@ -203,7 +203,7 @@ export default function DeconstructPackagePage() {
                               <span className="font-medium">{service.service_name}</span>
                               <span className="text-gray-500 ml-2">(Qty: {service.quantity})</span>
                             </div>
-                            <span className="font-medium">{formatCurrency(service.package_price || service.service_base_price)}</span> {/* FIXED: Dynamic currency */}
+                            <span className="font-medium">{format(service.package_price || service.service_base_price)}</span> {/* ✅ CORRECT: Using format function */}
                           </li>
                         ))}
                       </ul>

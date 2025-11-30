@@ -7,11 +7,13 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function WalletTransferPage() {
   const router = useRouter();
   const { wallets, loading, createTransaction, fetchWallets } = useWallets();
-  
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const [formData, setFormData] = useState({
     fromWalletId: '',
     toWalletId: '',
@@ -77,7 +79,7 @@ export default function WalletTransferPage() {
 
       // Redirect to transactions page
       router.push('/dashboard/management/finances/wallets/transactions');
-      
+
     } catch (err: any) {
       setError(err.message || 'Transfer failed');
     } finally {
@@ -101,8 +103,8 @@ export default function WalletTransferPage() {
           <h1 className="text-2xl font-bold text-gray-900">Transfer Between Wallets</h1>
           <p className="text-gray-600">Move funds between your business wallets</p>
         </div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={() => router.push('/dashboard/management/finances/wallets/transactions')}
         >
           View Transactions
@@ -134,7 +136,7 @@ export default function WalletTransferPage() {
                   <option value="">Select source wallet</option>
                   {wallets.filter(w => w.is_active).map(wallet => (
                     <option key={wallet.id} value={wallet.id}>
-                      {wallet.name} - ${parseFloat(wallet.current_balance).toLocaleString()}
+                      {wallet.name} - {format(parseFloat(wallet.current_balance))} {/* ✅ CORRECT: Using format function */}
                     </option>
                   ))}
                 </select>
@@ -157,7 +159,7 @@ export default function WalletTransferPage() {
                     .filter(w => w.is_active && w.id !== formData.fromWalletId)
                     .map(wallet => (
                     <option key={wallet.id} value={wallet.id}>
-                      {wallet.name} - ${parseFloat(wallet.current_balance).toLocaleString()}
+                      {wallet.name} - {format(parseFloat(wallet.current_balance))} {/* ✅ CORRECT: Using format function */}
                     </option>
                   ))}
                 </select>
@@ -204,15 +206,15 @@ export default function WalletTransferPage() {
                   {formData.fromWalletId && (
                     <div>
                       <span className="font-medium">From:</span>{' '}
-                      {wallets.find(w => w.id === formData.fromWalletId)?.name} - $
-                      {wallets.find(w => w.id === formData.fromWalletId)?.current_balance}
+                      {wallets.find(w => w.id === formData.fromWalletId)?.name} - 
+                      {format(parseFloat(wallets.find(w => w.id === formData.fromWalletId)?.current_balance || '0'))} {/* ✅ CORRECT: Using format function */}
                     </div>
                   )}
                   {formData.toWalletId && (
                     <div>
                       <span className="font-medium">To:</span>{' '}
-                      {wallets.find(w => w.id === formData.toWalletId)?.name} - $
-                      {wallets.find(w => w.id === formData.toWalletId)?.current_balance}
+                      {wallets.find(w => w.id === formData.toWalletId)?.name} - 
+                      {format(parseFloat(wallets.find(w => w.id === formData.toWalletId)?.current_balance || '0'))} {/* ✅ CORRECT: Using format function */}
                     </div>
                   )}
                 </div>

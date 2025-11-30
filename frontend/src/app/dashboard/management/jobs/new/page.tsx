@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { useJobActions } from '@/hooks/useJobs';
 import { apiClient } from '@/lib/api';
 import { CheckCircle, AlertCircle } from 'lucide-react';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';   // ✅ FIXED IMPORT
 
 interface Customer {
   id: string;
@@ -62,7 +62,7 @@ export default function NewJobPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { createJob } = useJobActions();
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ USING CORRECT HOOK
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,6 @@ export default function NewJobPage() {
     location: ''
   });
 
-  // Check for package deconstruction data on component mount
   useEffect(() => {
     const source = searchParams.get('source');
 
@@ -97,7 +96,6 @@ export default function NewJobPage() {
           const packageData: PackageJobData = JSON.parse(storedData);
           setPackageJobData(packageData);
 
-          // Auto-fill form with package data
           setFormData(prev => ({
             ...prev,
             title: `${packageData.packageName} (Customized)`,
@@ -118,7 +116,6 @@ export default function NewJobPage() {
             estimated_duration_minutes: packageData.totalDuration.toString()
           }));
 
-          // Clear the stored data after use
           sessionStorage.removeItem('customizedPackage');
         } catch (err) {
           console.error('Failed to parse package data:', err);
@@ -127,13 +124,11 @@ export default function NewJobPage() {
     }
   }, [searchParams]);
 
-  // Fetch customers and services on component mount
   useEffect(() => {
     const fetchData = async () => {
       try {
         setDataLoading(true);
 
-        // Fetch customers and services in parallel
         const [customersData, servicesData] = await Promise.all([
           apiClient.get<Customer[]>('/api/customers'),
           apiClient.get<Service[]>('/api/services')
@@ -158,11 +153,9 @@ export default function NewJobPage() {
     setError(null);
 
     try {
-      // Prepare the data for API
       let jobData: any;
 
       if (formData.is_package_job) {
-        // Package job data
         jobData = {
           title: formData.title,
           description: formData.description || undefined,
@@ -178,7 +171,6 @@ export default function NewJobPage() {
           location: formData.location
         };
       } else {
-        // Single service job data
         jobData = {
           title: formData.title,
           description: formData.description || undefined,
@@ -197,7 +189,6 @@ export default function NewJobPage() {
       const result = await createJob(jobData);
 
       if (result.success) {
-        // Redirect to jobs list on success
         router.push('/dashboard/management/jobs');
         router.refresh();
       } else {
@@ -218,7 +209,6 @@ export default function NewJobPage() {
     });
   };
 
-  // Update estimated duration when service is selected (for single service jobs)
   const handleServiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const serviceId = e.target.value;
     const selectedService = services.find(s => s.id === serviceId);
@@ -226,11 +216,12 @@ export default function NewJobPage() {
     setFormData({
       ...formData,
       service_id: serviceId,
-      estimated_duration_minutes: selectedService ? selectedService.duration_minutes.toString() : formData.estimated_duration_minutes
+      estimated_duration_minutes: selectedService
+        ? selectedService.duration_minutes.toString()
+        : formData.estimated_duration_minutes
     });
   };
 
-  // Get service names for display in package job info
   const getServiceNames = () => {
     if (!packageJobData) return [];
     return packageJobData.selectedServices.map(selected => {
@@ -253,7 +244,6 @@ export default function NewJobPage() {
         </Link>
       </div>
 
-      {/* Package Job Indicator */}
       {packageJobData && (
         <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -263,7 +253,9 @@ export default function NewJobPage() {
           <div className="text-blue-700 text-sm">
             <p>This job is created from package: <strong>{packageJobData.packageName}</strong></p>
             <p className="mt-1">Selected services: {getServiceNames().join(', ')}</p>
-            <p>Total: {formatCurrency(packageJobData.totalPrice)} • {packageJobData.totalDuration} minutes</p> {/* FIXED: Dynamic currency */}
+            <p>
+              {format(packageJobData.totalPrice)} • {packageJobData.totalDuration} minutes
+            </p>
           </div>
         </div>
       )}
@@ -289,6 +281,7 @@ export default function NewJobPage() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
                 <div className="space-y-2">
                   <label htmlFor="title" className="block text-sm font-medium text-gray-700">
                     Job Title *
@@ -313,7 +306,7 @@ export default function NewJobPage() {
                     name="priority"
                     value={formData.priority}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     required
                     disabled={loading}
                   >
@@ -333,7 +326,7 @@ export default function NewJobPage() {
                     name="customer_id"
                     value={formData.customer_id}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     required
                     disabled={loading || customers.length === 0}
                   >
@@ -344,12 +337,8 @@ export default function NewJobPage() {
                       </option>
                     ))}
                   </select>
-                  {customers.length === 0 && !dataLoading && (
-                    <p className="text-sm text-yellow-600">No customers found. Please create customers first.</p>
-                  )}
                 </div>
 
-                {/* Service selection (only for single service jobs) */}
                 {!formData.is_package_job && (
                   <div className="space-y-2">
                     <label htmlFor="service_id" className="block text-sm font-medium text-gray-700">
@@ -360,20 +349,17 @@ export default function NewJobPage() {
                       name="service_id"
                       value={formData.service_id}
                       onChange={handleServiceChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       required
                       disabled={loading || services.length === 0}
                     >
                       <option value="">Select a service</option>
                       {services.map((service) => (
                         <option key={service.id} value={service.id}>
-                          {service.name} ({formatCurrency(parseFloat(service.base_price))}) {/* FIXED: Dynamic currency */}
+                          {service.name} ({format(parseFloat(service.base_price))})
                         </option>
                       ))}
                     </select>
-                    {services.length === 0 && !dataLoading && (
-                      <p className="text-sm text-yellow-600">No services found. Please create services first.</p>
-                    )}
                   </div>
                 )}
 
@@ -406,11 +392,13 @@ export default function NewJobPage() {
                     disabled={loading || packageJobData !== null}
                     min="1"
                   />
+
                   {formData.service_id && !formData.is_package_job && (
                     <p className="text-xs text-gray-500">
                       Default duration: {services.find(s => s.id === formData.service_id)?.duration_minutes} minutes
                     </p>
                   )}
+
                   {formData.is_package_job && packageJobData && (
                     <p className="text-xs text-blue-600">
                       Package duration: {packageJobData.totalDuration} minutes
@@ -427,7 +415,7 @@ export default function NewJobPage() {
                     name="location"
                     value={formData.location}
                     onChange={handleChange}
-                    placeholder="Enter location (e.g., Main Salon, Customer Site, etc.)"
+                    placeholder="Enter location"
                     required
                     disabled={loading}
                   />
@@ -443,8 +431,8 @@ export default function NewJobPage() {
                     value={formData.description}
                     onChange={handleChange}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                    placeholder="Enter job description, special instructions, or customer requirements..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Enter job description"
                     disabled={loading || packageJobData !== null}
                   />
                 </div>
@@ -456,6 +444,7 @@ export default function NewJobPage() {
                     Cancel
                   </Button>
                 </Link>
+
                 <Button
                   type="submit"
                   variant="primary"

@@ -6,9 +6,11 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { FormInput } from '@/components/ui/week7/FormInput';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function BalanceSheetPage() {
   const { balanceSheet, loading, fetchBalanceSheet } = useFinancialReports();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
   const [dateRange, setDateRange] = useState({
     start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 30 days
     end_date: new Date().toISOString().split('T')[0], // Today
@@ -54,7 +56,7 @@ export default function BalanceSheetPage() {
       <Card>
         <div className="p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Report Period</h3>
-          
+
           {/* Quick Range Buttons */}
           <div className="flex flex-wrap gap-2 mb-4">
             <Button variant="outline" size="sm" onClick={() => applyQuickRange(7)}>
@@ -107,26 +109,26 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Cash & Equivalents</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.assets.current_assets.cash_and_equivalents.toFixed(2)}
+                      {format(balanceSheet.assets.current_assets.cash_and_equivalents)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Accounts Receivable</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.assets.current_assets.accounts_receivable.toFixed(2)}
+                      {format(balanceSheet.assets.current_assets.accounts_receivable)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Inventory</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.assets.current_assets.inventory.toFixed(2)}
+                      {format(balanceSheet.assets.current_assets.inventory)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="border-t pt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Current Assets</span>
                       <span className="text-green-600">
-                        ${balanceSheet.assets.current_assets.total_current_assets.toFixed(2)}
+                        {format(balanceSheet.assets.current_assets.total_current_assets)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -137,14 +139,14 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Property & Equipment</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.assets.fixed_assets.property_equipment.toFixed(2)}
+                      {format(balanceSheet.assets.fixed_assets.property_equipment)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="border-t pt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Fixed Assets</span>
                       <span className="text-green-600">
-                        ${balanceSheet.assets.fixed_assets.total_fixed_assets.toFixed(2)}
+                        {format(balanceSheet.assets.fixed_assets.total_fixed_assets)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -154,7 +156,7 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center font-bold text-lg">
                     <span className="text-gray-900">Total Assets</span>
                     <span className="text-green-600">
-                      ${balanceSheet.assets.total_assets.toFixed(2)}
+                      {format(balanceSheet.assets.total_assets)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                 </div>
@@ -172,20 +174,20 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Accounts Payable</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.liabilities.current_liabilities.accounts_payable.toFixed(2)}
+                      {format(balanceSheet.liabilities.current_liabilities.accounts_payable)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Short-term Debt</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.liabilities.current_liabilities.short_term_debt.toFixed(2)}
+                      {format(balanceSheet.liabilities.current_liabilities.short_term_debt)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="border-t pt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Current Liabilities</span>
                       <span className="text-red-600">
-                        ${balanceSheet.liabilities.current_liabilities.total_current_liabilities.toFixed(2)}
+                        {format(balanceSheet.liabilities.current_liabilities.total_current_liabilities)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -196,14 +198,14 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Long-term Debt</span>
                     <span className="text-sm font-medium text-gray-900">
-                      ${balanceSheet.liabilities.long_term_liabilities.long_term_debt.toFixed(2)}
+                      {format(balanceSheet.liabilities.long_term_liabilities.long_term_debt)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="border-t pt-2">
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Long-term Liabilities</span>
                       <span className="text-red-600">
-                        ${balanceSheet.liabilities.long_term_liabilities.total_long_term_liabilities.toFixed(2)}
+                        {format(balanceSheet.liabilities.long_term_liabilities.total_long_term_liabilities)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -213,7 +215,7 @@ export default function BalanceSheetPage() {
                   <div className="flex justify-between items-center font-bold text-lg">
                     <span className="text-gray-900">Total Liabilities</span>
                     <span className="text-red-600">
-                      ${balanceSheet.liabilities.total_liabilities.toFixed(2)}
+                      {format(balanceSheet.liabilities.total_liabilities)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                 </div>
@@ -229,20 +231,20 @@ export default function BalanceSheetPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Retained Earnings</span>
                   <span className="text-sm font-medium text-gray-900">
-                    ${balanceSheet.equity.retained_earnings.toFixed(2)}
+                    {format(balanceSheet.equity.retained_earnings)} {/* ✅ CORRECT: Using format function */}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Common Stock</span>
                   <span className="text-sm font-medium text-gray-900">
-                    ${balanceSheet.equity.common_stock.toFixed(2)}
+                    {format(balanceSheet.equity.common_stock)} {/* ✅ CORRECT: Using format function */}
                   </span>
                 </div>
                 <div className="border-t pt-2 mt-2">
                   <div className="flex justify-between items-center font-semibold">
                     <span className="text-gray-900">Total Equity</span>
                     <span className="text-blue-600">
-                      ${balanceSheet.equity.total_equity.toFixed(2)}
+                      {format(balanceSheet.equity.total_equity)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                 </div>
@@ -256,8 +258,8 @@ export default function BalanceSheetPage() {
                   }`}>
                     <span>Assets = Liabilities + Equity</span>
                     <span>
-                      ${balanceSheet.verification.total_assets.toFixed(2)} =
-                      ${balanceSheet.verification.total_liabilities_and_equity.toFixed(2)}
+                      {format(balanceSheet.verification.total_assets)} = {/* ✅ CORRECT: Using format function */}
+                      {format(balanceSheet.verification.total_liabilities_and_equity)} {/* ✅ CORRECT: Using format function */}
                     </span>
                   </div>
                   <div className="text-xs text-gray-500 mt-1">

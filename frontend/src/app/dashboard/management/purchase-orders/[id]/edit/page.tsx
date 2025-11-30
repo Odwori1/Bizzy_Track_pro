@@ -45,14 +45,14 @@ export default function EditPurchaseOrderPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        
+
         const [purchaseOrder, suppliersData] = await Promise.all([
           apiClient.get<PurchaseOrder>(`/purchase-orders/${purchaseOrderId}`),
           apiClient.get<Supplier[]>('/suppliers')
         ]);
 
         setSuppliers(suppliersData);
-        
+
         setFormData({
           supplier_id: purchaseOrder.supplier_id,
           order_date: purchaseOrder.order_date.split('T')[0],

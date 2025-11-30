@@ -26,7 +26,7 @@ export default function ServiceCategoriesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       if (editingCategory) {
         await actions.updateServiceCategory(editingCategory.id, formData);
@@ -35,7 +35,7 @@ export default function ServiceCategoriesPage() {
         await actions.createServiceCategory(formData);
         setShowNewForm(false);
       }
-      
+
       setFormData({
         name: '',
         description: '',
@@ -134,7 +134,7 @@ export default function ServiceCategoriesPage() {
                       onChange={handleChange}
                       className="w-20"
                     />
-                    <div 
+                    <div
                       className="w-10 h-10 rounded border"
                       style={{ backgroundColor: formData.color }}
                     />
@@ -216,17 +216,17 @@ export default function ServiceCategoriesPage() {
                 </div>
 
                 <div className="flex gap-2 mt-4">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handleEdit(category)}
                     className="flex-1"
                   >
                     Edit
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handleDelete(category.id)}
                     className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
                   >

@@ -11,6 +11,7 @@ import {
   Legend,
   ChartOptions
 } from 'chart.js';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 ChartJS.register(
   CategoryScale,
@@ -37,6 +38,8 @@ interface BarChartProps {
 }
 
 export const BarChart: React.FC<BarChartProps> = ({ data, title, height = 300 }) => {
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const options: ChartOptions<'bar'> = {
     responsive: true,
     maintainAspectRatio: false,
@@ -54,7 +57,7 @@ export const BarChart: React.FC<BarChartProps> = ({ data, title, height = 300 })
         beginAtZero: true,
         ticks: {
           callback: function(value) {
-            return 'USh ' + value;
+            return format(Number(value)); // ✅ CORRECT: Using format function
           }
         }
       },

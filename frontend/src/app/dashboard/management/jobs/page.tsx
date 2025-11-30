@@ -9,6 +9,8 @@ import { useJobs } from '@/hooks/useJobs';
 import { useJobActions } from '@/hooks/useJobs';
 import { Job, JobFilters } from '@/types/jobs';
 import { getJobStats, JobStats } from '@/lib/jobStats';
+import { useCurrency } from '@/lib/currency';
+import { posEngine } from '@/lib/pos-engine';
 
 export default function JobsPage() {
   const [stats, setStats] = useState<JobStats>({
@@ -21,9 +23,11 @@ export default function JobsPage() {
   });
   const [filters, setFilters] = useState<JobFilters>({});
   const [searchTerm, setSearchTerm] = useState('');
+  const [addingToCart, setAddingToCart] = useState<string | null>(null);
 
   const { jobs, loading, error, refetch } = useJobs(filters);
   const { deleteJob } = useJobActions();
+  const { format } = useCurrency();
 
   // Load job statistics
   useEffect(() => {
@@ -61,6 +65,49 @@ export default function JobsPage() {
     }
   };
 
+  // Handle add job fee to cart
+  const handleAddJobFeeToCart = async (job: Job) => {
+    if (job.status !== 'completed') {
+      alert('Only completed jobs can be added to cart for payment');
+      return;
+    }
+
+    setAddingToCart(job.id);
+
+    try {
+      // Create universal sellable item for job fee
+      const sellableItem = {
+        id: job.id,
+        type: 'job_fee' as const,
+        sourceModule: 'jobs' as const,
+        name: `Job Fee: ${job.title}`,
+        description: job.service_name || 'Job service fee',
+        unitPrice: parseFloat(job.total_amount || '0') || 0,
+        quantity: 1,
+        category: 'Job Fees',
+        metadata: {
+          job_id: job.id,
+          job_stage: job.status,
+          job_description: job.title,
+          job_number: job.job_number
+        },
+        business_id: '' // Will be set by backend based on auth
+      };
+
+      // Add to universal cart using POS engine
+      posEngine.addItem(sellableItem);
+
+      // Show success feedback
+      console.log(`✅ Added job fee for "${job.title}" to cart`);
+
+    } catch (error: any) {
+      console.error('❌ Failed to add job fee to cart:', error);
+      alert(`Failed to add job fee to cart: ${error.message}`);
+    } finally {
+      setAddingToCart(null);
+    }
+  };
+
   // Format date for display
   const formatDate = (dateData: any) => {
     if (!dateData) return 'Not scheduled';
@@ -86,11 +133,18 @@ export default function JobsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Job Management</h1>
           <p className="text-gray-600">Manage and track all jobs</p>
         </div>
-        <Link href="/dashboard/management/jobs/new">
-          <Button variant="primary" size="lg">
-            Create New Job
-          </Button>
-        </Link>
+        <div className="flex space-x-3">
+          <Link href="/dashboard/management/pos/cart">
+            <Button variant="outline">
+              View Cart
+            </Button>
+          </Link>
+          <Link href="/dashboard/management/jobs/new">
+            <Button variant="primary" size="lg">
+              Create New Job
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -220,7 +274,32 @@ export default function JobsPage() {
                   <div className="text-sm text-gray-600">
                     {job.estimated_duration_minutes || 'Unknown'} min
                   </div>
+                  {job.total_amount && (
+                    <div className="text-sm font-semibold text-green-600">
+                      {format(job.total_amount)}
+                    </div>
+                  )}
                   <div className="flex space-x-2 mt-2">
+                    {job.status === 'completed' && job.total_amount && (
+                      <Button
+                        onClick={() => handleAddJobFeeToCart(job)}
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        disabled={addingToCart === job.id}
+                      >
+                        {addingToCart === job.id ? (
+                          <span className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Adding...
+                          </span>
+                        ) : (
+                          'Add to Cart'
+                        )}
+                      </Button>
+                    )}
                     <Link href={`/dashboard/management/jobs/${job.id}`}>
                       <Button variant="secondary" size="sm">
                         View

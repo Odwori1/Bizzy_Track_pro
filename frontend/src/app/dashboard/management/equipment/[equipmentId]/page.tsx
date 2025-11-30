@@ -5,12 +5,14 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useEquipmentStore } from '@/store/week6/equipment-store';
 import { EquipmentCard } from '@/components/equipment/EquipmentCard';
+import { useCurrency } from '@/lib/currency'; // ✅ ADDED IMPORT
 
 export default function EquipmentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const equipmentId = params.equipmentId as string;
-  
+  const { format } = useCurrency(); // ✅ ADDED HOOK
+
   const { equipment, hireBookings, fetchEquipment, fetchHireBookings } = useEquipmentStore();
   const [currentEquipment, setCurrentEquipment] = useState<any>(null);
   const [equipmentBookings, setEquipmentBookings] = useState<any[]>([]);
@@ -24,9 +26,9 @@ export default function EquipmentDetailPage() {
     if (equipmentId && equipment.length > 0) {
       const foundEquipment = equipment.find(eq => eq.id === equipmentId);
       setCurrentEquipment(foundEquipment);
-      
+
       // Filter bookings for this equipment
-      const relatedBookings = hireBookings.filter(booking => 
+      const relatedBookings = hireBookings.filter(booking =>
         booking.equipment_id === equipmentId
       );
       setEquipmentBookings(relatedBookings);
@@ -67,8 +69,8 @@ export default function EquipmentDetailPage() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <Link 
-            href="/dashboard/management/equipment" 
+          <Link
+            href="/dashboard/management/equipment"
             className="text-blue-600 hover:text-blue-800 mb-2 inline-block"
           >
             ← Back to Equipment
@@ -133,11 +135,11 @@ export default function EquipmentDetailPage() {
                 <dl className="mt-2 space-y-2">
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Hire Rate</dt>
-                    <dd className="text-sm text-gray-900">${currentEquipment.hire_rate}/day</dd>
+                    <dd className="text-sm text-gray-900">{format(currentEquipment.hire_rate)}/day</dd> {/* ✅ CORRECT: Using format function */}
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Deposit Amount</dt>
-                    <dd className="text-sm text-gray-900">${currentEquipment.deposit_amount}</dd>
+                    <dd className="text-sm text-gray-900">{format(currentEquipment.deposit_amount)}</dd> {/* ✅ CORRECT: Using format function */}
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Min Hire Duration</dt>
@@ -218,7 +220,7 @@ export default function EquipmentDetailPage() {
                     </div>
                     <div className="text-xs text-gray-600 space-y-1">
                       <div>Period: {formatDate(booking.start_date)} - {formatDate(booking.end_date)}</div>
-                      <div>Amount: ${booking.total_amount}</div>
+                      <div>Amount: {format(booking.total_amount)}</div> {/* ✅ CORRECT: Using format function */}
                     </div>
                     <Link
                       href={`/dashboard/management/equipment/hire/${booking.id}`}

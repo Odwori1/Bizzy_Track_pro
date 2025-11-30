@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePricingActions } from '@/hooks/usePricing';
 import { apiClient } from '@/lib/api';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface Service {
   id: string;
@@ -44,7 +44,7 @@ export default function BulkPricingPage() {
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   const { bulkUpdatePreview, bulkUpdateServices } = usePricingActions();
 
@@ -386,7 +386,7 @@ export default function BulkPricingPage() {
                   <div className="flex-1">
                     <div className="font-medium text-gray-900">{service.name}</div>
                     <div className="text-sm text-gray-600">
-                      {service.category_name && `${service.category_name} • `}{formatCurrency(parseFloat(service.base_price))} {/* FIXED: Dynamic currency */}
+                      {service.category_name && `${service.category_name} • `}{format(parseFloat(service.base_price))}  {/* ✅ CORRECT CURRENCY USAGE */}
                     </div>
                   </div>
                 </div>
@@ -439,9 +439,9 @@ export default function BulkPricingPage() {
                 <p className="text-xs text-gray-500 mt-1">
                   {updateType === 'percentage_increase' && 'Enter percentage to increase prices'}
                   {updateType === 'percentage_decrease' && 'Enter percentage to decrease prices'}
-                  {updateType === 'fixed_increase' && `Enter fixed amount to add to prices (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
-                  {updateType === 'fixed_decrease' && `Enter fixed amount to subtract from prices (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
-                  {updateType === 'override' && `Enter new price to set for all selected services (${currencySymbol})`} {/* FIXED: Dynamic currency symbol */}
+                  {updateType === 'fixed_increase' && 'Enter fixed amount to add to prices'}
+                  {updateType === 'fixed_decrease' && 'Enter fixed amount to subtract from prices'}
+                  {updateType === 'override' && 'Enter new price to set for all selected services'}
                 </p>
               </div>
 
@@ -497,13 +497,13 @@ export default function BulkPricingPage() {
                     <div className="flex-1">
                       <div className="font-medium text-gray-900">{service.name}</div>
                       <div className="text-sm text-gray-600">
-                        {formatCurrency(service.old_price)} → <span className="font-medium">{formatCurrency(service.new_price)}</span> {/* FIXED: Dynamic currency */}
+                        {format(service.old_price)} → <span className="font-medium">{format(service.new_price)}</span>  {/* ✅ CORRECT CURRENCY USAGE */}
                       </div>
                     </div>
                     <div className={`font-medium text-sm ${
                       (service.price_change || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                     }`}>
-                      {(service.price_change || 0) >= 0 ? '+' : ''}{formatCurrency(service.price_change)} {/* FIXED: Dynamic currency */}
+                      {(service.price_change || 0) >= 0 ? '+' : ''}{format(service.price_change)}  {/* ✅ CORRECT CURRENCY USAGE */}
                       <div className={`text-xs ${(service.change_percentage || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                         ({formatPercentage(service.change_percentage)})
                       </div>

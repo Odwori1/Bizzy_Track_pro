@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { FinancialStats } from '@/components/finances/FinancialStats';
 import { WalletCard } from '@/components/finances/WalletCard';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function FinancesPage() {
   const {
@@ -28,6 +29,7 @@ export default function FinancesPage() {
     fetchExpenses,
     fetchStats: fetchExpenseStats
   } = useExpenses();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -191,13 +193,13 @@ export default function FinancesPage() {
                 <div>
                   <p className="text-gray-600">Active Balance</p>
                   <p className="font-semibold text-green-600">
-                    ${wallets.reduce((total, wallet) => total + parseFloat(wallet.current_balance || 0), 0).toLocaleString()}
+                    {format(wallets.reduce((total, wallet) => total + parseFloat(wallet.current_balance || 0), 0))} {/* ✅ CORRECT: Using format function */}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-600">Total Expenses</p>
                   <p className="font-semibold text-red-600">
-                    ${expenses.filter(e => e.status === 'approved').reduce((total, expense) => total + parseFloat(expense.amount || 0), 0).toLocaleString()}
+                    {format(expenses.filter(e => e.status === 'approved').reduce((total, expense) => total + parseFloat(expense.amount || 0), 0))} {/* ✅ CORRECT: Using format function */}
                   </p>
                 </div>
                 <div>

@@ -3,11 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useEquipmentStore } from '@/store/week6/equipment-store';
+import { useCurrency } from '@/lib/currency';
+import { posEngine } from '@/lib/pos-engine';
+import { Button } from '@/components/ui/Button';
 
 export default function EquipmentPage() {
   const { equipment, activeHireBookings, fetchEquipment, fetchActiveHireBookings, deleteEquipment } = useEquipmentStore();
+  const { format } = useCurrency();
   const [isLoading, setIsLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [addingToCart, setAddingToCart] = useState<string | null>(null);
 
   useEffect(() => {
     fetchEquipment();
@@ -32,6 +37,50 @@ export default function EquipmentPage() {
     }
   };
 
+  const handleAddToCart = async (equipment: any) => {
+    if (!equipment.is_available) {
+      alert('This equipment is not available for hire');
+      return;
+    }
+
+    setAddingToCart(equipment.id);
+
+    try {
+      // Create universal sellable item for equipment hire
+      const sellableItem = {
+        id: equipment.id,
+        type: 'equipment_hire' as const,
+        sourceModule: 'hire' as const,
+        name: equipment.asset_name,
+        description: `Equipment hire: ${equipment.asset_name}`,
+        unitPrice: parseFloat(equipment.hire_rate) || 0,
+        quantity: 1,
+        category: 'Equipment Hire',
+        metadata: {
+          equipment_id: equipment.id,
+          hire_duration_days: 1, // Default 1 day, can be updated in cart
+          asset_code: equipment.asset_code
+        },
+        business_id: '' // Will be set by backend based on auth
+      };
+
+      // Add to universal cart using POS engine
+      posEngine.addItem(sellableItem);
+
+      // Show success feedback
+      console.log(`✅ Added "${equipment.asset_name}" to cart`);
+
+      // Optional: Show toast notification here
+      // toast.success(`Added ${equipment.asset_name} to cart`);
+
+    } catch (error: any) {
+      console.error('❌ Failed to add equipment to cart:', error);
+      alert(`Failed to add equipment to cart: ${error.message}`);
+    } finally {
+      setAddingToCart(null);
+    }
+  };
+
   const getEquipmentStatus = (equipmentId: string) => {
     const isHired = activeHireBookings.some(booking => booking.equipment_id === equipmentId);
     return isHired ? 'Hired' : 'Available';
@@ -49,6 +98,11 @@ export default function EquipmentPage() {
           <p className="text-gray-600">Manage your equipment assets and hire bookings</p>
         </div>
         <div className="space-x-3">
+          <Link href="/dashboard/management/pos/cart">
+            <Button variant="outline">
+              View Cart
+            </Button>
+          </Link>
           <Link
             href="/dashboard/management/equipment/new"
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
@@ -120,7 +174,7 @@ export default function EquipmentPage() {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Total Value</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${equipment.reduce((sum, eq) => sum + eq.current_value, 0).toLocaleString()}
+                {format(equipment.reduce((sum, eq) => sum + eq.current_value, 0))}
               </p>
             </div>
           </div>
@@ -178,15 +232,33 @@ export default function EquipmentPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ${item.hire_rate}/day
+                      {format(item.hire_rate)}/day
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ${item.current_value}
+                      {format(item.current_value)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {item.location}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      <Button
+                        onClick={() => handleAddToCart(item)}
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        disabled={!item.is_available || addingToCart === item.id}
+                      >
+                        {addingToCart === item.id ? (
+                          <span className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Adding...
+                          </span>
+                        ) : (
+                          item.is_available ? 'Add to Cart' : 'Unavailable'
+                        )}
+                      </Button>
                       <Link
                         href={`/dashboard/management/equipment/${item.id}`}
                         className="text-blue-600 hover:text-blue-900"
@@ -287,7 +359,7 @@ export default function EquipmentPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ${booking.total_amount}
+                      {format(booking.total_amount)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                       <Link

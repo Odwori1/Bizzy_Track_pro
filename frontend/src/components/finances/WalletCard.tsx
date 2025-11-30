@@ -2,6 +2,7 @@
 
 import { Card } from '@/components/ui/Card';
 import { Wallet } from '@/types/week7';
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface WalletCardProps {
   wallet: Wallet;
@@ -10,6 +11,8 @@ interface WalletCardProps {
 }
 
 export function WalletCard({ wallet, onClick, showActions = false }: WalletCardProps) {
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
+
   const getWalletTypeIcon = (type: string) => {
     const icons: Record<string, string> = {
       cash: '💰',
@@ -37,7 +40,7 @@ export function WalletCard({ wallet, onClick, showActions = false }: WalletCardP
   };
 
   return (
-    <Card 
+    <Card
       className={`cursor-pointer hover:shadow-md transition-shadow ${!wallet.is_active ? 'opacity-60' : ''}`}
       onClick={onClick}
     >
@@ -54,7 +57,7 @@ export function WalletCard({ wallet, onClick, showActions = false }: WalletCardP
           </div>
           <div className={`text-right ${wallet.current_balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             <div className="text-xl font-bold">
-              ${wallet.current_balance.toLocaleString()}
+              {format(wallet.current_balance)}  {/* ✅ CORRECT CURRENCY USAGE */}
             </div>
             <div className="text-sm text-gray-500">Balance</div>
           </div>

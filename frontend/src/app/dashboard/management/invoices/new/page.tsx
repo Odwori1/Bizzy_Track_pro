@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface Customer {
   id: string;
@@ -55,7 +55,7 @@ export default function NewInvoicePage() {
   const [services, setServices] = useState<Service[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [formData, setFormData] = useState<InvoiceFormData>({
     customer_id: '',
@@ -317,7 +317,7 @@ export default function NewInvoicePage() {
                           <option value="">Select Service</option>
                           {services.map((service) => (
                             <option key={service.id} value={service.id}>
-                              {service.name} ({formatCurrency(parseFloat(service.base_price))}) {/* FIXED: Dynamic currency */}
+                              {service.name} ({format(parseFloat(service.base_price))}) {/* ✅ CORRECT: Using format function */}
                             </option>
                           ))}
                         </select>
@@ -353,7 +353,7 @@ export default function NewInvoicePage() {
                       {/* Unit Price */}
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-gray-700">
-                          Unit Price ({currencySymbol}) {/* FIXED: Dynamic currency symbol */}
+                          Unit Price {/* ✅ CORRECT: No hardcoded currency symbol */}
                         </label>
                         <Input
                           type="number"
@@ -385,7 +385,7 @@ export default function NewInvoicePage() {
                           Item Total
                         </label>
                         <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200">
-                          {formatCurrency((item.quantity * item.unit_price) * (1 + item.tax_rate / 100))} {/* FIXED: Dynamic currency */}
+                          {format((item.quantity * item.unit_price) * (1 + item.tax_rate / 100))} {/* ✅ CORRECT: Using format function */}
                         </div>
                       </div>
                     </div>
@@ -445,7 +445,7 @@ export default function NewInvoicePage() {
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Total Amount:</span>
                   <span className="text-xl font-bold text-green-600">
-                    {formatCurrency(calculateTotals())} {/* FIXED: Dynamic currency */}
+                    {format(calculateTotals())} {/* ✅ CORRECT: Using format function */}
                   </span>
                 </div>
               </div>

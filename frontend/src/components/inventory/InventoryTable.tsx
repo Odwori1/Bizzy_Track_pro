@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { useInventory } from '@/hooks/week7/useInventory';
 import { Button } from '@/components/ui/Button';
 import { FilterBar } from '@/components/ui/week7/FilterBar';
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 export function InventoryTable() {
   const { items, loading, filters, setFilters } = useInventory();
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   const handleSearch = (search: string) => {
     setFilters({ ...filters, search });
@@ -80,7 +82,7 @@ export function InventoryTable() {
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${item.selling_price?.toFixed(2)}
+                    {format(item.selling_price)}  {/* ✅ CORRECT CURRENCY USAGE */}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <Link href={`/dashboard/management/inventory/items/${item.id}`}>

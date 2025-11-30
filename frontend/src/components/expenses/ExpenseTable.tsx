@@ -2,6 +2,7 @@
 
 import { Expense } from '@/types/week7';
 import Link from 'next/link';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface ExpenseTableProps {
   expenses: Expense[];
@@ -12,6 +13,8 @@ interface ExpenseTableProps {
 }
 
 export function ExpenseTable({ expenses, loading = false, onEdit, onDelete, onStatusUpdate }: ExpenseTableProps) {
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -130,7 +133,7 @@ export function ExpenseTable({ expenses, loading = false, onEdit, onDelete, onSt
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">
-                  ${Number(expense.amount).toLocaleString()}
+                  {format(Number(expense.amount))} {/* ✅ CORRECT: Using format function */}
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

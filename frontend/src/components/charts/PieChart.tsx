@@ -8,6 +8,7 @@ import {
   Legend,
   ChartOptions
 } from 'chart.js';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -26,6 +27,8 @@ interface PieChartProps {
 }
 
 export const PieChart: React.FC<PieChartProps> = ({ data, title, height = 300 }) => {
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const options: ChartOptions<'pie'> = {
     responsive: true,
     maintainAspectRatio: false,
@@ -44,7 +47,7 @@ export const PieChart: React.FC<PieChartProps> = ({ data, title, height = 300 })
             const value = context.parsed;
             const total = context.dataset.data.reduce((a, b) => a + b, 0);
             const percentage = Math.round((value / total) * 100);
-            return `${label}: USh ${value} (${percentage}%)`;
+            return `${label}: ${format(value)} (${percentage}%)`; // ✅ CORRECT: Using format function
           }
         }
       }

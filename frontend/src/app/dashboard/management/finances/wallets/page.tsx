@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { WalletCard } from '@/components/finances/WalletCard';
 import { Loading } from '@/components/ui/Loading';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function WalletsPage() {
   const {
@@ -17,6 +18,7 @@ export default function WalletsPage() {
     fetchWallets,
     fetchStats
   } = useWallets();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   useEffect(() => {
     fetchWallets();
@@ -55,7 +57,7 @@ export default function WalletsPage() {
             <div className="p-6">
               <h3 className="text-sm font-medium text-gray-600">Total Balance</h3>
               <div className="text-2xl font-bold text-green-600 mt-2">
-                ${stats.total_balance.toLocaleString()}
+                {format(stats.total_balance)} {/* ✅ CORRECT: Using format function */}
               </div>
               <p className="text-sm text-gray-600">Across all wallets</p>
             </div>

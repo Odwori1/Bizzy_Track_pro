@@ -2,6 +2,7 @@
 
 import { Card } from '@/components/ui/Card';
 import { InventoryStats as InventoryStatsType } from '@/types/week7';
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface InventoryStatsProps {
   stats: InventoryStatsType;
@@ -9,6 +10,8 @@ interface InventoryStatsProps {
 }
 
 export function InventoryStats({ stats, loading = false }: InventoryStatsProps) {
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -54,7 +57,7 @@ export function InventoryStats({ stats, loading = false }: InventoryStatsProps) 
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Value</h3>
           <div className="text-2xl font-bold text-green-600 mt-2">
-            ${stats.total_inventory_value?.toLocaleString() || '0'}
+            {format(stats.total_inventory_value || 0)}  {/* ✅ CORRECT CURRENCY USAGE */}
           </div>
           <p className="text-sm text-gray-600">Inventory worth</p>
         </div>

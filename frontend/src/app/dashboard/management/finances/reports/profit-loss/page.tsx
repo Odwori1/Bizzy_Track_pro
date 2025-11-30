@@ -6,9 +6,11 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { FormInput } from '@/components/ui/week7/FormInput';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function ProfitLossPage() {
   const { profitLoss, loading, fetchProfitLoss } = useFinancialReports();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
   const [dateRange, setDateRange] = useState({
     start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 30 days
     end_date: new Date().toISOString().split('T')[0], // Today
@@ -60,7 +62,7 @@ export default function ProfitLossPage() {
       <Card>
         <div className="p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Report Period</h3>
-          
+
           {/* Quick Range Buttons */}
           <div className="flex flex-wrap gap-2 mb-4">
             <Button variant="outline" size="sm" onClick={() => applyQuickRange(7)}>
@@ -109,7 +111,7 @@ export default function ProfitLossPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Revenue</h3>
                 <div className="text-2xl font-bold text-green-600 mt-2">
-                  ${totalRevenue.toFixed(2)}
+                  {format(totalRevenue)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -118,7 +120,7 @@ export default function ProfitLossPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
                 <div className="text-2xl font-bold text-red-600 mt-2">
-                  ${totalExpenses.toFixed(2)}
+                  {format(totalExpenses)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -129,7 +131,7 @@ export default function ProfitLossPage() {
                 <div className={`text-2xl font-bold mt-2 ${
                   netProfit >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  ${netProfit.toFixed(2)}
+                  {format(netProfit)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -157,7 +159,7 @@ export default function ProfitLossPage() {
                     <div key={index} className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">{revenue.wallet_type}</span>
                       <span className="text-sm font-medium text-green-600">
-                        ${Number(revenue.total_income).toFixed(2)}
+                        {format(Number(revenue.total_income))} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   ))}
@@ -170,7 +172,7 @@ export default function ProfitLossPage() {
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Revenue</span>
                       <span className="text-green-600">
-                        ${totalRevenue.toFixed(2)}
+                        {format(totalRevenue)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -187,7 +189,7 @@ export default function ProfitLossPage() {
                     <div key={index} className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">{expense.category_name}</span>
                       <span className="text-sm font-medium text-red-600">
-                        ${Number(expense.total_expenses).toFixed(2)}
+                        {format(Number(expense.total_expenses))} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   ))}
@@ -200,7 +202,7 @@ export default function ProfitLossPage() {
                     <div className="flex justify-between items-center font-semibold">
                       <span className="text-gray-900">Total Expenses</span>
                       <span className="text-red-600">
-                        ${totalExpenses.toFixed(2)}
+                        {format(totalExpenses)} {/* ✅ CORRECT: Using format function */}
                       </span>
                     </div>
                   </div>
@@ -220,7 +222,7 @@ export default function ProfitLossPage() {
                 <div className={`text-3xl font-bold ${
                   netProfit >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  ${netProfit.toFixed(2)}
+                  {format(netProfit)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </div>

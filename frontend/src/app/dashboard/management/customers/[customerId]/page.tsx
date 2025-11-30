@@ -7,14 +7,14 @@ import { useCustomerStore } from '@/store/customerStore';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 export default function CustomerDetailPage() {
   const params = useParams();
   const customerId = params.customerId as string;
 
   const { selectedCustomer, customerCommunications, loading, error, actions } = useCustomerStore();
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
 
   useEffect(() => {
     if (customerId) {
@@ -47,8 +47,6 @@ export default function CustomerDetailPage() {
       </div>
     );
   }
-
-  // REMOVED: Hardcoded formatCurrency function
 
   return (
     <div className="container mx-auto p-6">
@@ -109,7 +107,7 @@ export default function CustomerDetailPage() {
           <div className="space-y-3">
             <div>
               <label className="text-sm text-gray-500">Total Spent</label>
-              <div className="font-medium text-lg">{formatCurrency(selectedCustomer.total_spent)}</div>
+              <div className="font-medium text-lg">{format(selectedCustomer.total_spent)}</div>  {/* ✅ CORRECT CURRENCY USAGE */}
             </div>
             <div>
               <label className="text-sm text-gray-500">Last Visit</label>

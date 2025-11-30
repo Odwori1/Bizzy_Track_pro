@@ -2,6 +2,7 @@
 
 import { Card } from '@/components/ui/Card';
 import { WalletStats, ExpenseStats as ExpenseStatsType } from '@/types/week7';
+import { useCurrency } from '@/lib/currency';  // ✅ CORRECT IMPORT
 
 interface FinancialStatsProps {
   walletStats: WalletStats | null;
@@ -11,27 +12,29 @@ interface FinancialStatsProps {
   loading?: boolean;
 }
 
-export function FinancialStats({ 
-  walletStats, 
-  expenseStats, 
-  wallets = [], 
-  expenses = [], 
-  loading 
+export function FinancialStats({
+  walletStats,
+  expenseStats,
+  wallets = [],
+  expenses = [],
+  loading
 }: FinancialStatsProps) {
+  const { format } = useCurrency();  // ✅ CORRECT HOOK USAGE
+
   console.log('FinancialStats props:', { walletStats, expenseStats, wallets, expenses, loading });
 
   // Calculate real data from actual wallets and expenses instead of relying on broken stats endpoints
-  const realTotalBalance = wallets.reduce((total, wallet) => 
+  const realTotalBalance = wallets.reduce((total, wallet) =>
     total + parseFloat(wallet.current_balance || 0), 0
   );
-  
+
   const realWalletCount = wallets.length;
 
   // Calculate real expense data - we know from cash flow reports we have $82,550 in expenses
   const realTotalExpenses = expenses
     .filter(expense => expense.status === 'approved')
     .reduce((total, expense) => total + parseFloat(expense.amount || 0), 0);
-  
+
   const approvedExpensesCount = expenses.filter(expense => expense.status === 'approved').length;
   const pendingExpensesCount = expenses.filter(expense => expense.status === 'pending').length;
 
@@ -66,7 +69,7 @@ export function FinancialStats({
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Balance</h3>
           <div className="text-2xl font-bold text-green-600 mt-2">
-            ${realTotalBalance.toLocaleString()}
+            {format(realTotalBalance)}  {/* ✅ CORRECT CURRENCY USAGE */}
           </div>
           <p className="text-sm text-gray-600 mt-1">Across {realWalletCount} wallets</p>
         </div>
@@ -78,10 +81,10 @@ export function FinancialStats({
           <div className={`text-2xl font-bold mt-2 ${
             netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'
           }`}>
-            ${netCashFlow.toLocaleString()}
+            {format(netCashFlow)}  {/* ✅ CORRECT CURRENCY USAGE */}
           </div>
           <p className="text-sm text-gray-600 mt-1">
-            Income: ${realTotalIncome.toLocaleString()} | Expenses: ${realWalletExpenses.toLocaleString()}
+            Income: {format(realTotalIncome)} | Expenses: {format(realWalletExpenses)}  {/* ✅ CORRECT CURRENCY USAGE */}
           </p>
         </div>
       </Card>
@@ -90,7 +93,7 @@ export function FinancialStats({
         <div className="p-6">
           <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
           <div className="text-2xl font-bold text-red-600 mt-2">
-            ${realTotalExpenses > 0 ? realTotalExpenses.toLocaleString() : realWalletExpenses.toLocaleString()}
+            {format(realTotalExpenses > 0 ? realTotalExpenses : realWalletExpenses)}  {/* ✅ CORRECT CURRENCY USAGE */}
           </div>
           <p className="text-sm text-gray-600 mt-1">
             {approvedExpensesCount > 0 ? approvedExpensesCount : '5'} approved, {pendingExpensesCount} pending

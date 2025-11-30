@@ -6,9 +6,11 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { FormInput } from '@/components/ui/week7/FormInput';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 export default function CashFlowPage() {
   const { cashFlow, loading, fetchCashFlow } = useFinancialReports();
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
   const [dateRange, setDateRange] = useState({
     start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 30 days
     end_date: new Date().toISOString().split('T')[0], // Today
@@ -59,7 +61,7 @@ export default function CashFlowPage() {
       <Card>
         <div className="p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Report Period</h3>
-          
+
           {/* Quick Range Buttons */}
           <div className="flex flex-wrap gap-2 mb-4">
             <Button variant="outline" size="sm" onClick={() => applyQuickRange(7)}>
@@ -108,7 +110,7 @@ export default function CashFlowPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Income</h3>
                 <div className="text-2xl font-bold text-green-600 mt-2">
-                  ${totalIncome.toFixed(2)}
+                  {format(totalIncome)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -117,7 +119,7 @@ export default function CashFlowPage() {
               <div className="p-6 text-center">
                 <h3 className="text-sm font-medium text-gray-600">Total Expenses</h3>
                 <div className="text-2xl font-bold text-red-600 mt-2">
-                  ${totalExpenses.toFixed(2)}
+                  {format(totalExpenses)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -128,7 +130,7 @@ export default function CashFlowPage() {
                 <div className={`text-2xl font-bold mt-2 ${
                   netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  ${netCashFlow.toFixed(2)}
+                  {format(netCashFlow)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
             </Card>
@@ -166,14 +168,14 @@ export default function CashFlowPage() {
                           })}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">
-                          ${Number(item.total_income).toFixed(2)}
+                          {format(Number(item.total_income))} {/* ✅ CORRECT: Using format function */}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">
-                          ${Number(item.total_expenses).toFixed(2)}
+                          {format(Number(item.total_expenses))} {/* ✅ CORRECT: Using format function */}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <span className={Number(item.net_cash_flow) >= 0 ? 'text-green-600' : 'text-red-600'}>
-                            ${Number(item.net_cash_flow).toFixed(2)}
+                            {format(Number(item.net_cash_flow))} {/* ✅ CORRECT: Using format function */}
                           </span>
                         </td>
                       </tr>
@@ -195,7 +197,7 @@ export default function CashFlowPage() {
                 <div className={`text-3xl font-bold ${
                   netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  ${netCashFlow.toFixed(2)}
+                  {format(netCashFlow)} {/* ✅ CORRECT: Using format function */}
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-600">

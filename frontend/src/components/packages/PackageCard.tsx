@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Package as PackageIcon, Settings, Clock, DollarSign } from 'lucide-react';
 import Link from 'next/link';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface PackageCardProps {
   package: Package;
@@ -12,7 +12,7 @@ interface PackageCardProps {
 export function PackageCard({ package: pkg }: PackageCardProps) {
   // Safely handle undefined services array
   const servicesCount = pkg.services?.length || 0;
-  const { formatCurrency } = useBusinessCurrency(); // FIXED: Use formatCurrency only
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   return (
     <Link href={`/dashboard/management/packages/${pkg.id}`}>
@@ -34,7 +34,7 @@ export function PackageCard({ package: pkg }: PackageCardProps) {
           <div className="flex justify-between text-sm">
             <div className="flex items-center gap-1">
               <DollarSign size={14} className="text-green-600" />
-              <span>{formatCurrency(pkg.base_price)}</span> {/* FIXED: Use formatCurrency */}
+              <span>{format(pkg.base_price)}</span> {/* ✅ CORRECT: Using format function */}
             </div>
             <div className="flex items-center gap-1">
               <Clock size={14} className="text-blue-600" />

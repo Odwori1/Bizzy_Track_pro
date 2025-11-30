@@ -5,7 +5,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Shield, Clock, Users, AlertTriangle } from 'lucide-react';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface DeconstructionValidatorProps {
   package: Package;
@@ -19,7 +19,7 @@ export function DeconstructionValidator({
   onSelectionChange
 }: DeconstructionValidatorProps) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const { formatCurrency } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   // Safely handle services array
   const services = pkg.services || [];
@@ -112,7 +112,7 @@ export function DeconstructionValidator({
                       )}
                       {service.is_price_overridden && (
                         <Badge variant="outline" className="text-xs">
-                          Custom Price: {formatCurrency(service.package_price)} {/* FIXED: Dynamic currency */}
+                          Custom Price: {format(service.package_price)} {/* ✅ CORRECT: Using format function */}
                         </Badge>
                       )}
                     </div>

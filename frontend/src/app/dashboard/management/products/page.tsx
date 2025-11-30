@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { useCurrency } from '@/lib/currency';
 import { apiClient } from '@/lib/api';
 import { formatDate } from '@/lib/date-utils';
+import { posEngine } from '@/lib/pos-engine';
 
 interface Product {
   id: string;
@@ -35,6 +36,7 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [addingToCart, setAddingToCart] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProducts();
@@ -63,6 +65,55 @@ export default function ProductsPage() {
     }
   };
 
+  const handleAddToCart = async (product: Product) => {
+    if (!product.is_active) {
+      alert('This product is not active and cannot be added to cart');
+      return;
+    }
+
+    if (product.current_stock <= 0) {
+      alert('This product is out of stock');
+      return;
+    }
+
+    setAddingToCart(product.id);
+
+    try {
+      // Create universal sellable item following the same pattern as services
+      const sellableItem = {
+        id: product.id,
+        type: 'product' as const,
+        sourceModule: 'inventory' as const,
+        name: product.name,
+        description: product.description,
+        unitPrice: parseFloat(product.selling_price) || 0,
+        quantity: 1,
+        category: product.category_name,
+        metadata: {
+          product_id: product.id,
+          sku: product.sku,
+          stock_quantity: product.current_stock
+        },
+        business_id: '' // Will be set by backend based on auth
+      };
+
+      // Add to universal cart using POS engine (same pattern as services page)
+      posEngine.addItem(sellableItem);
+
+      // Show success feedback
+      console.log(`✅ Added "${product.name}" to cart`);
+
+      // Optional: Show toast notification here
+      // toast.success(`Added ${product.name} to cart`);
+
+    } catch (error: any) {
+      console.error('❌ Failed to add product to cart:', error);
+      alert(`Failed to add product to cart: ${error.message}`);
+    } finally {
+      setAddingToCart(null);
+    }
+  };
+
   const getStockStatusColor = (status: string) => {
     switch (status) {
       case 'low': return 'bg-red-100 text-red-800';
@@ -80,13 +131,13 @@ export default function ProductsPage() {
 
   // Filter products based on search and category
   const filteredProducts = products.filter(product => {
-    const matchesSearch = 
+    const matchesSearch =
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.barcode.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesCategory = categoryFilter === 'all' || product.category_id === categoryFilter;
-    
+
     return matchesSearch && matchesCategory;
   });
 
@@ -121,6 +172,11 @@ export default function ProductsPage() {
           <p className="text-gray-600">Manage your products and inventory</p>
         </div>
         <div className="flex space-x-3">
+          <Link href="/dashboard/management/pos/cart">
+            <Button variant="outline">
+              View Cart
+            </Button>
+          </Link>
           <Button
             variant="outline"
             onClick={fetchProducts}
@@ -168,8 +224,8 @@ export default function ProductsPage() {
               {searchTerm || categoryFilter !== 'all' ? 'No products found' : 'No products yet'}
             </div>
             <p className="text-gray-400 mb-4">
-              {searchTerm || categoryFilter !== 'all' 
-                ? 'Try adjusting your search or filters' 
+              {searchTerm || categoryFilter !== 'all'
+                ? 'Try adjusting your search or filters'
                 : 'Get started by adding your first product'
               }
             </p>
@@ -198,8 +254,8 @@ export default function ProductsPage() {
                       Edit
                     </Button>
                   </Link>
-                  <Button 
-                    variant="danger" 
+                  <Button
+                    variant="danger"
                     size="sm"
                     onClick={() => handleDeleteProduct(product.id, product.name)}
                   >
@@ -250,11 +306,23 @@ export default function ProductsPage() {
                       View Details
                     </Button>
                   </Link>
-                  <Link href={`/dashboard/management/pos/checkout?product=${product.id}`} className="flex-1">
-                    <Button variant="primary" className="w-full">
-                      Sell Now
-                    </Button>
-                  </Link>
+                  <Button
+                    onClick={() => handleAddToCart(product)}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={!product.is_active || product.current_stock <= 0 || addingToCart === product.id}
+                  >
+                    {addingToCart === product.id ? (
+                      <span className="flex items-center justify-center">
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Adding...
+                      </span>
+                    ) : (
+                      product.is_active && product.current_stock > 0 ? 'Add to Cart' : 'Unavailable'
+                    )}
+                  </Button>
                 </div>
               </div>
             </div>
@@ -262,7 +330,7 @@ export default function ProductsPage() {
         )}
       </div>
 
-      {/* Summary Stats */}
+      {/* Summary Stats - Using same currency pattern as transactions page */}
       {filteredProducts.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">

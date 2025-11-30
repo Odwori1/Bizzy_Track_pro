@@ -110,7 +110,7 @@ export default function ProductDetailPage() {
               <div className="flex justify-between">
                 <span className="text-gray-600">Stock Status:</span>
                 <span className={`font-medium ${
-                  product.stock_status === 'low' ? 'text-yellow-600' : 
+                  product.stock_status === 'low' ? 'text-yellow-600' :
                   product.stock_status === 'out' ? 'text-red-600' : 'text-green-600'
                 }`}>
                   {product.stock_status.toUpperCase()}

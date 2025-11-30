@@ -2,16 +2,19 @@
 
 import Link from 'next/link';
 import { EquipmentAsset } from '@/types/assets';
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface EquipmentCardProps {
   equipment: EquipmentAsset;
   showActions?: boolean;
 }
 
-export const EquipmentCard: React.FC<EquipmentCardProps> = ({ 
-  equipment, 
-  showActions = true 
+export const EquipmentCard: React.FC<EquipmentCardProps> = ({
+  equipment,
+  showActions = true
 }) => {
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
+
   const getConditionColor = (condition: string) => {
     switch (condition) {
       case 'excellent': return 'bg-green-100 text-green-800';
@@ -24,8 +27,8 @@ export const EquipmentCard: React.FC<EquipmentCardProps> = ({
   };
 
   const getStatusColor = (isAvailable: boolean) => {
-    return isAvailable 
-      ? 'bg-green-100 text-green-800' 
+    return isAvailable
+      ? 'bg-green-100 text-green-800'
       : 'bg-red-100 text-red-800';
   };
 
@@ -34,8 +37,8 @@ export const EquipmentCard: React.FC<EquipmentCardProps> = ({
       {/* Equipment Image/Photo */}
       <div className="h-48 bg-gray-100 rounded-t-lg flex items-center justify-center">
         {equipment.photos && equipment.photos.length > 0 ? (
-          <img 
-            src={equipment.photos[0]} 
+          <img
+            src={equipment.photos[0]}
             alt={equipment.asset_name}
             className="h-full w-full object-cover rounded-t-lg"
           />
@@ -63,27 +66,27 @@ export const EquipmentCard: React.FC<EquipmentCardProps> = ({
             <span className="text-gray-500">Category:</span>
             <span className="text-gray-900 font-medium capitalize">{equipment.category}</span>
           </div>
-          
+
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Serial No:</span>
             <span className="text-gray-900 font-mono">{equipment.serial_number}</span>
           </div>
-          
+
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Condition:</span>
             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getConditionColor(equipment.condition_status)}`}>
               {equipment.condition_status}
             </span>
           </div>
-          
+
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Hire Rate:</span>
-            <span className="text-gray-900 font-bold">${equipment.hire_rate}/day</span>
+            <span className="text-gray-900 font-bold">{format(equipment.hire_rate)}/day</span> {/* ✅ CORRECT: Using format function */}
           </div>
-          
+
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Deposit:</span>
-            <span className="text-gray-900">${equipment.deposit_amount}</span>
+            <span className="text-gray-900">{format(equipment.deposit_amount)}</span> {/* ✅ CORRECT: Using format function */}
           </div>
         </div>
 
@@ -102,7 +105,7 @@ export const EquipmentCard: React.FC<EquipmentCardProps> = ({
             >
               View Details
             </Link>
-            
+
             {equipment.is_available && (
               <Link
                 href={`/dashboard/management/equipment/hire?equipmentId=${equipment.id}`}

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Plus, Trash2, Search, DollarSign, Clock } from 'lucide-react';
-import { useBusinessCurrency } from '@/hooks/useBusinessCurrency'; // ADDED IMPORT
+import { useCurrency } from '@/lib/currency'; // ✅ CORRECT IMPORT
 
 interface PackageFormProps {
   onSubmit: (data: PackageFormData) => void;
@@ -19,7 +19,7 @@ interface PackageFormProps {
 
 export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData }: PackageFormProps) {
   const { availableServices, loading: servicesLoading, actions } = usePackageStore();
-  const { formatCurrency, currencySymbol } = useBusinessCurrency(); // ADDED HOOK
+  const { format } = useCurrency(); // ✅ CORRECT HOOK USAGE
 
   const [formData, setFormData] = useState<PackageFormData>({
     name: initialData?.name || '',
@@ -150,7 +150,7 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Base Price ({currencySymbol}) *</label> {/* FIXED: Dynamic currency symbol */}
+              <label className="block text-sm font-medium mb-1">Base Price *</label> {/* ✅ CORRECT: No hardcoded currency symbol */}
               <Input
                 type="number"
                 step="0.01"
@@ -216,7 +216,7 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Package Services</h3>
             <div className="text-sm text-gray-600">
-              {formData.services.length} services • {calculatePackageDuration()} min • {formatCurrency(calculatePackagePrice())} {/* FIXED: Dynamic currency */}
+              {formData.services.length} services • {calculatePackageDuration()} min • {format(calculatePackagePrice())} total {/* ✅ CORRECT: Using format function */}
             </div>
           </div>
         </CardHeader>
@@ -258,7 +258,7 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
                         <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
                           <div className="flex items-center gap-1">
                             <DollarSign size={12} />
-                            <span>{formatCurrency(service.base_price)}</span> {/* FIXED: Dynamic currency */}
+                            <span>{format(service.base_price)}</span> {/* ✅ CORRECT: Using format function */}
                           </div>
                           <div className="flex items-center gap-1">
                             <Clock size={12} />
@@ -294,7 +294,7 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                         <div className="flex items-center gap-1">
                           <DollarSign size={14} />
-                          <span>Base: {formatCurrency(service?.base_price || 0)}</span> {/* FIXED: Dynamic currency */}
+                          <span>Base: {format(service?.base_price || 0)}</span> {/* ✅ CORRECT: Using format function */}
                         </div>
                         <div className="flex items-center gap-1">
                           <Clock size={14} />
@@ -355,7 +355,7 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
 
                     <div className="flex items-end">
                       <div className="text-sm">
-                        <div>Total: {formatCurrency(packageService.package_price * packageService.default_quantity)}</div> {/* FIXED: Dynamic currency */}
+                        <div>Total: {format(packageService.package_price * packageService.default_quantity)}</div> {/* ✅ CORRECT: Using format function */}
                         <div>{((service?.duration_minutes || 0) * packageService.default_quantity)} min</div>
                       </div>
                     </div>
@@ -382,12 +382,12 @@ export function PackageForm({ onSubmit, onCancel, isLoading = false, initialData
               <div>
                 <h4 className="font-semibold text-green-800">Package Summary</h4>
                 <p className="text-sm text-green-600">
-                  {formData.services.length} services • {calculatePackageDuration()} minutes • {formatCurrency(calculatePackagePrice())} total {/* FIXED: Dynamic currency */}
+                  {formData.services.length} services • {calculatePackageDuration()} minutes • {format(calculatePackagePrice())} total {/* ✅ CORRECT: Using format function */}
                 </p>
               </div>
               <div className="text-right">
                 <div className="text-2xl font-bold text-green-800">
-                  {formatCurrency(calculatePackagePrice())} {/* FIXED: Dynamic currency */}
+                  {format(calculatePackagePrice())} {/* ✅ CORRECT: Using format function */}
                 </div>
                 <div className="text-sm text-green-600">
                   {calculatePackageDuration()} min
