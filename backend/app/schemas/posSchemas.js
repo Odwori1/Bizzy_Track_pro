@@ -16,7 +16,8 @@ export const createPOSTransactionSchema = Joi.object({
       product_id: Joi.string().uuid().optional().allow(null),
       inventory_item_id: Joi.string().uuid().optional().allow(null),
       service_id: Joi.string().uuid().optional().allow(null),
-      item_type: Joi.string().valid('product', 'service').required(),
+      equipment_id: Joi.string().uuid().optional().allow(null),  // NEW: Support for equipment hire
+      item_type: Joi.string().valid('product', 'service', 'equipment_hire').required(), // UPDATED: Added 'equipment_hire'
       item_name: Joi.string().max(255).required(),
       quantity: Joi.number().integer().min(1).required(),
       unit_price: Joi.number().precision(2).min(0).required(),

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Wallet } from '@/types/wallet-payment';
-import { walletService } from '@/services/wallet-service';
+import { walletService } from '@/lib/wallet-service';  // ✅ FIXED IMPORT PATH
 
 export const useWalletSelection = () => {
   const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -31,23 +31,23 @@ export const useWalletSelection = () => {
     switch (paymentMethod) {
       case 'cash':
         return wallets.filter(w => w.wallet_type === 'cash');
-      
+
       case 'mobile_money':
-        return wallets.filter(w => 
-          w.wallet_type === 'mobile_money' || 
-          w.name.toLowerCase().includes('mtn') || 
+        return wallets.filter(w =>
+          w.wallet_type === 'mobile_money' ||
+          w.name.toLowerCase().includes('mtn') ||
           w.name.toLowerCase().includes('airtel')
         );
-      
+
       case 'card':
-        return wallets.filter(w => 
-          w.wallet_type === 'card' || 
+        return wallets.filter(w =>
+          w.wallet_type === 'card' ||
           w.wallet_type === 'bank'
         );
-      
+
       case 'credit':
         return wallets.filter(w => w.wallet_type === 'credit');
-      
+
       default:
         return [];
     }
@@ -55,18 +55,18 @@ export const useWalletSelection = () => {
 
   const getDefaultWallet = (paymentMethod: string): Wallet | null => {
     const availableWallets = getWalletsByPaymentMethod(paymentMethod);
-    
+
     if (availableWallets.length === 0) return null;
 
     // Business logic for default selection
     if (paymentMethod === 'mobile_money') {
       // Prefer MTN over Airtel if both exist
-      const mtnWallet = availableWallets.find(w => 
+      const mtnWallet = availableWallets.find(w =>
         w.name.toLowerCase().includes('mtn')
       );
       return mtnWallet || availableWallets[0];
     }
-    
+
     return availableWallets[0];
   };
 

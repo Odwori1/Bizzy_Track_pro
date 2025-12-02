@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { SellableItem, CartItem } from '@/types/sellable-item';
 import { apiClient } from '@/lib/api';
+import { posEngine } from '@/lib/pos-engine'; // ✅ USE SAME AS PRODUCTS
 
 interface UniversalCartStore {
   items: CartItem[];
@@ -106,22 +107,25 @@ export const useUniversalCartStore = create<UniversalCartStore>()(
         if (item.quantity <= 0) errors.push('Quantity must be positive');
 
         // Module-specific validation
-        switch (item.type) {
-          case 'product':
-            if (!item.metadata?.product_id) errors.push('Product ID is required for products');
+        switch (item.sourceModule) {
+          case 'inventory':
+            if (!item.metadata.product_id) errors.push('Product ID is required for inventory items');
+            if (item.metadata.stock_quantity !== undefined && item.quantity > item.metadata.stock_quantity) {
+              errors.push('Insufficient stock');
+            }
             break;
 
-          case 'service':
-            if (!item.metadata?.service_id) errors.push('Service ID is required for services');
+          case 'services':
+            if (!item.metadata.service_id) errors.push('Service ID is required for service items');
             break;
 
-          case 'equipment_hire':
-            if (!item.metadata?.equipment_id) errors.push('Equipment ID is required for equipment hire');
-            // Note: We removed hire date validation here since backend doesn't expect it in metadata
+          case 'hire':
+            // SIMPLE VALIDATION LIKE PRODUCTS
+            if (!item.metadata.equipment_id) errors.push('Equipment ID is required for hire items');
             break;
 
-          case 'job_fee':
-            if (!item.metadata?.job_id) errors.push('Job ID is required for job fees');
+          case 'jobs':
+            if (!item.metadata.job_id) errors.push('Job ID is required for job items');
             break;
         }
 
@@ -131,60 +135,54 @@ export const useUniversalCartStore = create<UniversalCartStore>()(
         };
       },
 
+      // ✅ FIXED: Use EXACT SAME PATTERN as products page
       addEquipmentBookingToCart: async (bookingId: string): Promise<{ success: boolean; message: string }> => {
         try {
-          console.log(`🔄 Adding booking ${bookingId} to POS cart...`);
-
-          // 1. Fetch booking details from API
+          console.log(`🔄 Adding booking ${bookingId} to POS cart (using product pattern)...`);
+          
+          // 1. Fetch booking details (same as products fetch data)
           const response = await apiClient.get(`/equipment-hire/bookings/${bookingId}`);
           const booking = response.data || response;
-
+          
           if (!booking) {
             throw new Error('Booking not found');
           }
 
-          // 2. Calculate hire duration in days
-          const startDate = new Date(booking.hire_start_date);
-          const endDate = new Date(booking.hire_end_date);
-          const hireDurationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-          // 3. Format dates for display
-          const formatDate = (date: Date) => {
-            return date.toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric'
-            });
-          };
-
-          // 4. Create sellable item for POS cart
-          const sellableItem: SellableItem = {
+          console.log('📋 Booking for cart:', {
             id: booking.id,
-            type: 'equipment_hire' as const,
-            sourceModule: 'hire' as const,
-            name: `${booking.asset_name} Hire`,
-            description: `${booking.asset_name} (${formatDate(startDate)} to ${formatDate(endDate)}) - ${hireDurationDays} day${hireDurationDays !== 1 ? 's' : ''}`,
+            name: booking.asset_name,
+            price: booking.total_amount
+          });
+
+          // 2. Create sellable item EXACTLY like products do
+          const sellableItem = {
+            id: booking.id,
+            type: 'equipment_hire' as const,  // Only difference from products
+            sourceModule: 'hire' as const,     // Only difference from products
+            name: `${booking.asset_name || 'Equipment'} Hire`,
+            description: `Equipment hire booking #${booking.booking_number || booking.id.slice(-8)}`,
             unitPrice: parseFloat(booking.total_amount) || 0,
             quantity: 1,
             category: 'Equipment Hire',
             metadata: {
-              equipment_id: booking.equipment_asset_id,  // ✅ This maps to equipment_id in backend
-              // Note: We only include equipment_id, not dates, since backend schema doesn't expect metadata
-              // Dates are for display only, stored in booking table
+              // SIMPLE METADATA LIKE PRODUCTS
+              equipment_id: booking.equipment_asset_id || booking.id,
+              booking_id: booking.id,
+              booking_number: booking.booking_number,
+              // Optional: Add minimal hire info
+              asset_name: booking.asset_name,
+              // That's it! Keep it simple like products
             },
-            business_id: booking.business_id || ''
+            business_id: booking.business_id || '' // Same as products
           };
 
-          // 5. Validate and add to cart
-          const validation = get().validateItem(sellableItem);
-          if (!validation.isValid) {
-            throw new Error(`Invalid booking item: ${validation.errors.join(', ')}`);
-          }
+          console.log('🛒 Created equipment item (product pattern):', sellableItem);
 
-          get().addItem(sellableItem);
+          // 3. ✅ USE EXACT SAME METHOD AS PRODUCTS: posEngine.addItem()
+          posEngine.addItem(sellableItem);
 
-          console.log(`✅ Added booking to cart: ${booking.asset_name} - ${sellableItem.description}`);
-
+          console.log(`✅ Added booking to cart: ${sellableItem.name}`);
+          
           return {
             success: true,
             message: `Added ${booking.asset_name} hire to cart`

@@ -12,7 +12,7 @@ export class AssetService {
     try {
       await client.query('BEGIN');
 
-      // Generate asset code if not provided - FIXED: Uses database function
+      // Generate asset code if not provided
       if (!assetData.asset_code) {
         const nextCode = await this.generateNextAssetCode(client, businessId);
         assetData.asset_code = nextCode;
@@ -91,39 +91,14 @@ export class AssetService {
   }
 
   /**
-   * Generate next asset code (ASSET-001, ASSET-002, etc.) - FIXED VERSION
-   * Uses the database function generate_next_asset_code()
+   * Generate next asset code (ASSET-001, ASSET-002, etc.)
    */
   static async generateNextAssetCode(client, businessId) {
-    try {
-      const result = await client.query(
-        `SELECT generate_next_asset_code($1) as next_code`,
-        [businessId]
-      );
-      
-      if (result.rows.length === 0) {
-        // Fallback to old method if function doesn't exist yet
-        return await this.generateNextAssetCodeFallback(client, businessId);
-      }
-      
-      return result.rows[0].next_code;
-    } catch (error) {
-      // If function doesn't exist yet (migration not run), use fallback
-      console.warn('generate_next_asset_code function not found, using fallback:', error.message);
-      return await this.generateNextAssetCodeFallback(client, businessId);
-    }
-  }
-
-  /**
-   * Fallback method if the database function doesn't exist yet
-   */
-  static async generateNextAssetCodeFallback(client, businessId) {
-    // Get ALL asset codes, not just the last one
     const result = await client.query(
       `SELECT asset_code FROM fixed_assets
        WHERE business_id = $1
-       AND asset_code ~ '^ASSET-\\d+$'
-       ORDER BY asset_code`,
+       ORDER BY created_at DESC
+       LIMIT 1`,
       [businessId]
     );
 
@@ -131,30 +106,16 @@ export class AssetService {
       return 'ASSET-001';
     }
 
-    // Find the maximum number from existing codes
-    let maxNumber = 0;
-    for (const row of result.rows) {
-      const match = row.asset_code.match(/ASSET-(\d+)/);
-      if (match) {
-        const num = parseInt(match[1]);
-        if (num > maxNumber) {
-          maxNumber = num;
-        }
-      }
+    const lastCode = result.rows[0].asset_code;
+    const match = lastCode.match(/ASSET-(\d+)/);
+
+    if (match) {
+      const nextNumber = parseInt(match[1]) + 1;
+      return `ASSET-${nextNumber.toString().padStart(3, '0')}`;
     }
 
-    // Check for gaps in numbering
-    for (let i = 1; i <= maxNumber; i++) {
-      const code = `ASSET-${i.toString().padStart(3, '0')}`;
-      const exists = result.rows.some(row => row.asset_code === code);
-      if (!exists) {
-        return code; // Found a gap, use it
-      }
-    }
-
-    // No gaps, use next number
-    const nextNumber = maxNumber + 1;
-    return `ASSET-${nextNumber.toString().padStart(3, '0')}`;
+    // If format doesn't match, start from 001
+    return 'ASSET-001';
   }
 
   /**

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+// This script can be run in browser console to see product structure
+console.log("To debug POS structure, run in browser console:");
+
+const debugCode = `
+// 1. Find a product page that works
+// 2. Check what gets added to cart
+// 3. Compare with our equipment hire item
+
+// Example of what a working product item might look like:
+const exampleProductItem = {
+  id: 'product-123',
+  type: 'product',
+  sourceModule: 'inventory',
+  name: 'Test Product',
+  unitPrice: 100,
+  quantity: 1,
+  metadata: {
+    product_id: 'prod-123',
+    sku: 'SKU-123',
+    stock_quantity: 10
+  },
+  business_id: 'business-123'
+};
+
+console.log('Example product structure:', exampleProductItem);
+
+// Our equipment hire item should be similar but with hire metadata
+const ourEquipmentItem = {
+  id: 'booking-123',
+  type: 'equipment_hire',
+  sourceModule: 'hire',
+  name: 'Equipment Hire Name',
+  unitPrice: 250,
+  quantity: 1,
+  metadata: {
+    equipment_id: 'equip-123',
+    hire_duration_days: 3,
+    hire_start_date: '2024-12-01',
+    hire_end_date: '2024-12-04'
+  },
+  business_id: 'business-123'
+};
+
+console.log('Our equipment structure:', ourEquipmentItem);
+`;
+console.log(debugCode);
+</script>
+</body>
+</html>

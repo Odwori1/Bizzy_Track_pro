@@ -4,28 +4,19 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAssetsStore } from '@/store/week6/assets-store';
-import { useAssetHireStore } from '@/store/week6/asset-hire-store';
-import { MarkAsHireableModal } from '@/components/assets/MarkAsHireableModal';
-import { useCurrency } from '@/lib/currency';
-import { formatDate } from '@/lib/date-utils';  // ✅ USING EXISTING DATE UTILITY
+import { useCurrency } from '@/lib/currency';  // ✅ ADDED IMPORT
 
 export default function AssetDetailPage() {
   const params = useParams();
   const assetId = params.assetId as string;
 
   const { assets, fetchAssets } = useAssetsStore();
-  const { fetchHireableAssets, hireableAssets, getAssetHireDetails } = useAssetHireStore();
-  const { format } = useCurrency();
-
+  const { format } = useCurrency();  // ✅ ADDED HOOK USAGE
   const [currentAsset, setCurrentAsset] = useState<any>(null);
-  const [isHireableModalOpen, setIsHireableModalOpen] = useState(false);
-  const [isAssetHireable, setIsAssetHireable] = useState(false);
-  const [assetHireDetails, setAssetHireDetails] = useState<any>(null);
 
   useEffect(() => {
     fetchAssets();
-    fetchHireableAssets();
-  }, [fetchAssets, fetchHireableAssets]);
+  }, [fetchAssets]);
 
   useEffect(() => {
     if (assetId && assets.length > 0) {
@@ -33,29 +24,6 @@ export default function AssetDetailPage() {
       setCurrentAsset(foundAsset);
     }
   }, [assetId, assets]);
-
-  useEffect(() => {
-    const checkHireableStatus = async () => {
-      if (currentAsset && currentAsset.category === 'equipment') {
-        try {
-          const details = await getAssetHireDetails(currentAsset.id);
-          setAssetHireDetails(details);
-          setIsAssetHireable(details?.is_hireable === true);
-        } catch (error) {
-          // Asset not hireable yet, that's fine
-          setIsAssetHireable(false);
-          setAssetHireDetails(null);
-        }
-      }
-    };
-
-    checkHireableStatus();
-  }, [currentAsset, getAssetHireDetails]);
-
-  const handleMarkHireableSuccess = () => {
-    setIsAssetHireable(true);
-    fetchHireableAssets(); // Refresh the list
-  };
 
   if (!currentAsset) {
     return (
@@ -70,8 +38,6 @@ export default function AssetDetailPage() {
     );
   }
 
-  const isEquipmentCategory = currentAsset.category === 'equipment';
-
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -85,36 +51,12 @@ export default function AssetDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900">{currentAsset.asset_name}</h1>
           <p className="text-gray-600">{currentAsset.asset_code}</p>
         </div>
-        <div className="space-x-2">
-          {/* Show hireable status badges */}
-          {isEquipmentCategory && isAssetHireable && (
-            <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
-              ✓ Available for Hire
-            </span>
-          )}
-
-          {isEquipmentCategory && !isAssetHireable && (
-            <button
-              onClick={() => setIsHireableModalOpen(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            >
-              Mark as Hireable
-            </button>
-          )}
-
-          {isEquipmentCategory && !isAssetHireable && (
-            <span className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Equipment
-            </span>
-          )}
-
-          <Link
-            href={`/dashboard/management/assets/${assetId}/edit`}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-          >
-            Edit Asset
-          </Link>
-        </div>
+        <Link
+          href={`/dashboard/management/assets/${assetId}/edit`}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+        >
+          Edit Asset
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -203,13 +145,13 @@ export default function AssetDetailPage() {
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Purchase Date</dt>
                     <dd className="text-sm text-gray-900">
-                      {formatDate(currentAsset.purchase_date)}  {/* ✅ FIXED: Using date utility */}
+                      {new Date(currentAsset.purchase_date).toLocaleDateString()}
                     </dd>
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Purchase Price</dt>
                     <dd className="text-sm text-gray-900">
-                      {format(currentAsset.purchase_price)}
+                      {format(currentAsset.purchase_price)}  {/* ✅ FIXED: Using format function */}
                     </dd>
                   </div>
                   <div className="flex justify-between">
@@ -228,13 +170,13 @@ export default function AssetDetailPage() {
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Current Value</dt>
                     <dd className="text-sm text-gray-900">
-                      {format(currentAsset.current_value)}
+                      {format(currentAsset.current_value)}  {/* ✅ FIXED: Using format function */}
                     </dd>
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-sm text-gray-600">Depreciation Method</dt>
                     <dd className="text-sm text-gray-900 capitalize">
-                      {currentAsset.depreciation_method?.replace('_', ' ')}
+                      {currentAsset.depreciation_method.replace('_', ' ')}
                     </dd>
                   </div>
                   <div className="flex justify-between">
@@ -249,71 +191,6 @@ export default function AssetDetailPage() {
               </div>
             </div>
           </div>
-
-          {/* Hire Information Section (only for equipment category assets) */}
-          {isEquipmentCategory && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Hire Information</h2>
-
-              {isAssetHireable ? (
-                <div className="space-y-4">
-                  <p className="text-green-600 font-medium">
-                    ✓ This equipment is available for hire in the Equipment Hire module
-                  </p>
-                  
-                  {assetHireDetails && (
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm font-medium text-blue-800">Hire Rate</p>
-                          <p className="text-lg font-bold text-blue-900">
-                            {format(assetHireDetails.hire_rate_per_day)} / day
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-blue-800">Deposit</p>
-                          <p className="text-lg font-bold text-blue-900">
-                            {format(assetHireDetails.deposit_amount)}
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-sm text-blue-800 mt-2">
-                        This asset will appear in the Equipment Hire section. You can create hire bookings
-                        and track revenue linked to this asset.
-                      </p>
-                    </div>
-                  )}
-                  
-                  <Link
-                    href="/dashboard/management/equipment"
-                    className="inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                  >
-                    Go to Equipment Hire →
-                  </Link>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-gray-600">
-                    This equipment asset is not yet available for hire. Click "Mark as Hireable" to make it
-                    available in the Equipment Hire module.
-                  </p>
-                  <div className="bg-yellow-50 p-4 rounded-lg">
-                    <p className="text-sm text-yellow-800">
-                      Note: Only assets of category "equipment" can be marked as hireable.
-                      Once marked, the asset will appear in Equipment Hire and all hire revenue
-                      will be tracked against this asset.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setIsHireableModalOpen(true)}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-                  >
-                    Mark as Hireable
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Sidebar */}
@@ -350,13 +227,19 @@ export default function AssetDetailPage() {
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Last Maintenance</span>
                 <span className="text-sm text-gray-900">
-                  {formatDate(currentAsset.last_maintenance_date) || 'Never'}  {/* ✅ FIXED */}
+                  {currentAsset.last_maintenance_date
+                    ? new Date(currentAsset.last_maintenance_date).toLocaleDateString()
+                    : 'Never'
+                  }
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Next Maintenance</span>
                 <span className="text-sm text-gray-900">
-                  {formatDate(currentAsset.next_maintenance_date) || 'Not scheduled'}  {/* ✅ FIXED */}
+                  {currentAsset.next_maintenance_date
+                    ? new Date(currentAsset.next_maintenance_date).toLocaleDateString()
+                    : 'Not scheduled'
+                  }
                 </span>
               </div>
               <Link
@@ -369,17 +252,6 @@ export default function AssetDetailPage() {
           </div>
         </div>
       </div>
-
-      {/* Mark as Hireable Modal */}
-      {isEquipmentCategory && !isAssetHireable && (
-        <MarkAsHireableModal
-          assetId={assetId}
-          assetName={currentAsset.asset_name}
-          isOpen={isHireableModalOpen}
-          onClose={() => setIsHireableModalOpen(false)}
-          onSuccess={handleMarkHireableSuccess}
-        />
-      )}
     </div>
   );
 }

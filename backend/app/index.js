@@ -24,6 +24,8 @@ import packageRoutes from './routes/packageRoutes.js';
 import pricingRuleRoutes from './routes/pricingRuleRoutes.js';
 import discountApprovalRoutes from './routes/discountApprovalRoutes.js';
 import assetRoutes from './routes/assetRoutes.js';
+//hire assets route
+import assetHireRoutes from './routes/assetHireRoutes.js';
 import equipmentHireRoutes from './routes/equipmentHireRoutes.js';
 //additional assets and equipment routes
 import maintenanceRoutes from './routes/maintenanceRoutes.js';
@@ -171,6 +173,7 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/pricing-rules', pricingRuleRoutes);
 app.use('/api/discount-approvals', discountApprovalRoutes);
 app.use('/api/assets', assetRoutes);
+app.use('/api/asset-hire', assetHireRoutes);
 app.use('/api/equipment-hire', equipmentHireRoutes);
 //additional assets and equipment routes
 app.use('/api/maintenance', maintenanceRoutes);

@@ -9,7 +9,7 @@ export default function EquipmentEditPage() {
   const params = useParams();
   const router = useRouter();
   const equipmentId = params.equipmentId as string;
-  
+
   const { equipment, updateEquipment, fetchEquipment } = useEquipmentStore();
   const [currentEquipment, setCurrentEquipment] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -68,7 +68,7 @@ export default function EquipmentEditPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       await updateEquipment(equipmentId, formData);
       router.push('/dashboard/management/equipment');
@@ -109,8 +109,8 @@ export default function EquipmentEditPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <Link 
-            href="/dashboard/management/equipment" 
+          <Link
+            href="/dashboard/management/equipment"
             className="text-blue-600 hover:text-blue-800 mb-2 inline-block"
           >
             ← Back to Equipment
@@ -191,7 +191,7 @@ export default function EquipmentEditPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Purchase Price ($)
+                Purchase Price
               </label>
               <input
                 type="number"
@@ -204,7 +204,7 @@ export default function EquipmentEditPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Current Value ($)
+                Current Value
               </label>
               <input
                 type="number"
@@ -232,7 +232,7 @@ export default function EquipmentEditPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Hire Rate ($/day) *
+                Hire Rate (/day) *
               </label>
               <input
                 type="number"
@@ -246,7 +246,7 @@ export default function EquipmentEditPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Deposit Amount ($) *
+                Deposit Amount *
               </label>
               <input
                 type="number"

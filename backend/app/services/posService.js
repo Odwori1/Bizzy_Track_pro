@@ -64,14 +64,16 @@ export class POSService {
         await client.query(
           `INSERT INTO pos_transaction_items (
             business_id, pos_transaction_id, product_id, inventory_item_id, service_id,
+            equipment_id,
             item_type, item_name, quantity, unit_price, total_price, discount_amount
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             businessId,
             transaction.id,
             item.product_id || null,
             item.inventory_item_id || null,
             item.service_id || null,
+            item.equipment_id || null,
             item.item_type,
             item.item_name,
             item.quantity,
@@ -92,6 +94,17 @@ export class POSService {
         throw new Error(`Failed to process sale: ${processResult.rows[0].message}`);
       }
 
+      // If transaction includes equipment hire, log it
+      const equipmentItems = transactionData.items.filter(item => item.item_type === 'equipment_hire');
+      if (equipmentItems.length > 0) {
+        for (const equipmentItem of equipmentItems) {
+          log.info('Processing equipment hire transaction', {
+            equipment_id: equipmentItem.equipment_id,
+            transaction_id: transaction.id
+          });
+        }
+      }
+
       await auditLogger.logAction({
         businessId,
         userId,
@@ -101,7 +114,8 @@ export class POSService {
         newValues: {
           transaction_number: transaction.transaction_number,
           final_amount: transaction.final_amount,
-          payment_method: transaction.payment_method
+          payment_method: transaction.payment_method,
+          equipment_items_count: equipmentItems.length
         }
       });
 
@@ -245,14 +259,23 @@ export class POSService {
 
       const transaction = transactionResult.rows[0];
 
+      // FIXED: Correct join path for equipment items
+      // pos_transaction_items → equipment_assets → fixed_assets (for asset_name)
       const itemsQuery = `
         SELECT
           pti.*,
-          COALESCE(p.name, ii.name, s.name, pti.item_name) as item_display_name
+          COALESCE(p.name, ii.name, s.name, fa.asset_name, pti.item_name) as item_display_name,
+          fa.asset_name as equipment_name,
+          fa.asset_code as equipment_code,
+          ebb.booking_number as booking_number,
+          ebb.status as booking_status
         FROM pos_transaction_items pti
         LEFT JOIN products p ON pti.product_id = p.id
         LEFT JOIN inventory_items ii ON pti.inventory_item_id = ii.id
         LEFT JOIN services s ON pti.service_id = s.id
+        LEFT JOIN equipment_assets ea ON pti.equipment_id = ea.id
+        LEFT JOIN fixed_assets fa ON ea.asset_id = fa.id
+        LEFT JOIN equipment_hire_bookings ebb ON pti.booking_id = ebb.id
         WHERE pti.business_id = $1 AND pti.pos_transaction_id = $2
         ORDER BY pti.created_at
       `;

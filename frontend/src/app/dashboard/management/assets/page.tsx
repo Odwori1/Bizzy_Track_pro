@@ -3,9 +3,11 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useAssetsStore } from '@/store/week6/assets-store';
+import { useCurrency } from '@/lib/currency';  // ✅ ADDED IMPORT
 
 export default function AssetsPage() {
   const { assets, statistics, isLoading, error, fetchAssets, fetchAssetStatistics } = useAssetsStore();
+  const { format } = useCurrency();  // ✅ ADDED HOOK USAGE
 
   useEffect(() => {
     fetchAssets();
@@ -43,7 +45,7 @@ export default function AssetsPage() {
           </div>
           <div className="bg-white p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">Total Value</h3>
-            <p className="text-2xl font-bold">${statistics.total_current_value.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{format(statistics.total_current_value)}</p>  {/* ✅ FIXED: Using format function */}
           </div>
           <div className="bg-white p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">Active Assets</h3>
@@ -97,12 +99,12 @@ export default function AssetsPage() {
                       {asset.category}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      ${asset.current_value.toLocaleString()}
+                      {format(asset.current_value)}  {/* ✅ FIXED: Using format function */}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        asset.is_active 
-                          ? 'bg-green-100 text-green-800' 
+                        asset.is_active
+                          ? 'bg-green-100 text-green-800'
                           : 'bg-red-100 text-red-800'
                       }`}>
                         {asset.is_active ? 'Active' : 'Inactive'}

@@ -20,6 +20,12 @@ router.post(
 );
 
 router.get(
+  '/equipment',
+  requirePermission('equipment:read'),
+  equipmentHireController.getAllEquipment
+);
+
+router.get(
   '/equipment/available',
   requirePermission('equipment:read'),
   equipmentHireController.getAvailableEquipment

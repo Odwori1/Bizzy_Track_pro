@@ -103,6 +103,22 @@ export interface HireBooking {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Add these fields for proper asset linkage (from backend SQL joins)
+  asset_id?: string;
+  asset_name?: string;
+  asset_code?: string;
+  customer_name?: string;
+  actual_return_date?: string;
+  damage_notes?: string;
+  damage_charges?: number;
+  deposit_returned?: number;
+  final_amount?: number;
+  booking_number?: string;
+  job_id?: string | null;
+  job_number?: string | null;
+  hire_rate?: number;
+  pre_hire_condition?: string;
+  post_hire_condition?: string;
 }
 
 export interface AssetStatistics {

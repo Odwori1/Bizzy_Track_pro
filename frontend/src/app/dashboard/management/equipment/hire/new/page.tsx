@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useEquipmentStore } from '@/store/week6/equipment-store';
+import { useCurrency } from '@/lib/currency';  // ✅ ADDED IMPORT
 
 export default function NewHireBookingPage() {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function NewHireBookingPage() {
   const equipmentId = searchParams.get('equipmentId');
 
   const { equipment, customers, createHireBooking, fetchAvailableEquipment, fetchCustomers } = useEquipmentStore();
+  const { format } = useCurrency();  // ✅ ADDED HOOK USAGE
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -135,7 +137,7 @@ export default function NewHireBookingPage() {
                     .filter(eq => eq.is_available)
                     .map(eq => (
                       <option key={eq.id} value={eq.id}>
-                        {eq.asset_name} - ${eq.hire_rate}/day
+                        {eq.asset_name} - {format(eq.hire_rate)}/day
                       </option>
                     ))
                   }
@@ -202,7 +204,7 @@ export default function NewHireBookingPage() {
               {/* Hire Rate */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Hire Rate ($/day) *
+                  Hire Rate *
                 </label>
                 <input
                   type="number"
@@ -225,7 +227,7 @@ export default function NewHireBookingPage() {
                   value={formData.deposit_paid}
                   onChange={(e) => handleChange('deposit_paid', parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder={selectedEquipment ? `Recommended: $${selectedEquipment.deposit_amount}` : '0'}
+                  placeholder={selectedEquipment ? `Recommended: ${format(selectedEquipment.deposit_amount)}` : '0'}
                 />
               </div>
 
@@ -276,7 +278,7 @@ export default function NewHireBookingPage() {
 
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Hire Rate</span>
-                  <span className="text-sm font-medium">${selectedEquipment.hire_rate}/day</span>
+                  <span className="text-sm font-medium">{format(selectedEquipment.hire_rate)}/day</span>
                 </div>
 
                 <div className="flex justify-between">
@@ -286,13 +288,13 @@ export default function NewHireBookingPage() {
 
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Deposit Required</span>
-                  <span className="text-sm font-medium">${selectedEquipment.deposit_amount}</span>
+                  <span className="text-sm font-medium">{format(selectedEquipment.deposit_amount)}</span>
                 </div>
 
                 <div className="border-t pt-3">
                   <div className="flex justify-between">
                     <span className="text-sm font-medium text-gray-900">Total Amount</span>
-                    <span className="text-lg font-bold text-green-600">${totalAmount}</span>
+                    <span className="text-lg font-bold text-green-600">{format(totalAmount)}</span>
                   </div>
                 </div>
               </div>

@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useEquipmentStore } from '@/store/week6/equipment-store';
+import { useCurrency } from '@/lib/currency';
 
 export default function HireBookingsPage() {
   const { hireBookings, equipment, fetchHireBookings, fetchEquipment, updateHireBooking } = useEquipmentStore();
+  const { format } = useCurrency();
   const [isLoading, setIsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -222,11 +224,18 @@ export default function HireBookingsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">
-                        {equipment.find(eq => eq.id === booking.equipment_id)?.asset_name || 'Unknown Equipment'}
+                        {/* Use asset_name from booking data directly (from backend SQL join) */}
+                        {booking.asset_name || 'Unknown Equipment'}
                       </div>
                       <div className="text-sm text-gray-500">
-                        {equipment.find(eq => eq.id === booking.equipment_id)?.asset_code || 'N/A'}
+                        {/* Use asset_code from booking data directly */}
+                        {booking.asset_code || 'N/A'}
                       </div>
+                      {booking.customer_name && (
+                        <div className="text-xs text-gray-500">
+                          Customer: {booking.customer_name}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">
@@ -242,13 +251,13 @@ export default function HireBookingsPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">${booking.total_amount}</div>
+                      <div className="text-sm text-gray-900">{format(booking.total_amount)}</div>
                       <div className="text-sm text-gray-500">
-                        Deposit: ${booking.deposit_paid}
+                        Deposit: {format(booking.deposit_paid)}
                       </div>
-                      {booking.final_amount && (
+                      {booking.final_amount && booking.final_amount > 0 && (
                         <div className="text-sm font-medium text-green-600">
-                          Final: ${booking.final_amount}
+                          Final: {format(booking.final_amount)}
                         </div>
                       )}
                     </td>
@@ -269,7 +278,7 @@ export default function HireBookingsPage() {
                       >
                         View
                       </Link>
-                      
+
                       {booking.status !== 'completed' && booking.status !== 'cancelled' && (
                         <>
                           <Link
@@ -287,13 +296,13 @@ export default function HireBookingsPage() {
                           </button>
                         </>
                       )}
-                      
+
                       {booking.status === 'completed' && (
                         <span className="text-gray-400 cursor-not-allowed" title="Completed bookings cannot be modified">
                           Completed
                         </span>
                       )}
-                      
+
                       {booking.status === 'cancelled' && (
                         <span className="text-gray-400 cursor-not-allowed" title="Cancelled bookings cannot be modified">
                           Cancelled

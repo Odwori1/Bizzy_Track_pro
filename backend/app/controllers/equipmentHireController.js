@@ -121,6 +121,25 @@ export const equipmentHireController = {
     }
   },
 
+  async getAllEquipment(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      const equipment = await EquipmentHireService.getAllEquipment(businessId);
+
+      res.json({
+        success: true,
+        data: equipment,
+        count: equipment.length,
+        message: 'All equipment fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('All equipment fetch controller error', error);
+      next(error);
+    }
+  },
+
   async getBookings(req, res, next) {
     try {
       const businessId = req.user.businessId;

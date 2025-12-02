@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { EquipmentAsset, HireBooking } from '@/types/assets';
 import { apiClient } from '@/lib/api';
-import { getDateFromBackendFormat } from '@/lib/date-utils';
 
 interface Customer {
   id: string;
@@ -18,12 +17,15 @@ interface EquipmentState {
   isLoading: boolean;
   error: string | null;
 
-  // CORRECTED: Equipment should only be created via assets, not directly
+  // Actions
   fetchEquipment: () => Promise<void>;
   fetchAvailableEquipment: () => Promise<void>;
   fetchHireBookings: () => Promise<void>;
   fetchActiveHireBookings: () => Promise<void>;
   fetchCustomers: () => Promise<void>;
+  createEquipment: (equipmentData: Partial<EquipmentAsset>) => Promise<void>;
+  updateEquipment: (equipmentId: string, equipmentData: Partial<EquipmentAsset>) => Promise<void>;
+  deleteEquipment: (equipmentId: string) => Promise<void>;
   createHireBooking: (bookingData: any) => Promise<void>;
   updateHireBooking: (bookingId: string, bookingData: any) => Promise<void>;
   returnEquipment: (bookingId: string, returnData: any) => Promise<void>;
@@ -41,40 +43,35 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
   fetchEquipment: async () => {
     set({ isLoading: true, error: null });
     try {
-      // ✅ FIXED: Get equipment from equipment-hire endpoint (returns equipment_assets)
+      // Get ALL equipment from backend ONLY
       const response = await apiClient.get<any>('/equipment-hire/equipment');
       const equipmentData = Array.isArray(response) ? response : (response?.data || []);
 
       const backendEquipment = equipmentData.map((eq: any) => ({
-        id: eq.id, // This is equipment_assets.id - CORRECT for booking creation
+        id: eq.id,
         business_id: eq.business_id,
         asset_name: eq.asset_name || 'Unknown Equipment',
         asset_code: eq.asset_code || 'N/A',
-        asset_id: eq.asset_id, // Store the fixed_assets.id for reference
         category: 'equipment',
-        description: '', // Not available from equipment_assets
-        purchase_date: '', // Not available from equipment_assets
-        purchase_price: 0, // Not available from equipment_assets
+        description: eq.description || '',
+        purchase_date: eq.purchase_date || new Date().toISOString().split('T')[0],
+        purchase_price: eq.purchase_price || 0,
         current_value: eq.current_value || 0,
         location: eq.current_location || 'Unknown',
         condition_status: eq.condition_status || 'good',
-        serial_number: '', // Not available from equipment_assets
+        serial_number: eq.serial_number || '',
         is_available: eq.is_available !== false,
-        hire_rate: eq.hire_rate_per_day || 50,
+        hire_rate: eq.hire_rate_per_day || eq.hire_rate || 50,
         deposit_amount: eq.deposit_amount || 100,
         min_hire_duration: eq.minimum_hire_period || 1,
-        max_hire_duration: 30,
+        max_hire_duration: 7,
         photos: eq.photos || [],
         created_by: eq.created_by,
         created_at: eq.created_at?.utc || new Date().toISOString(),
-        updated_at: eq.updated_at?.utc || new Date().toISOString(),
-        is_hireable: eq.is_hireable,
-        equipment_asset_id: eq.id, // Same as id
-        condition_notes: eq.condition_notes || ''
+        updated_at: eq.updated_at?.utc || new Date().toISOString()
       } as EquipmentAsset));
 
-      console.log('Equipment loaded from equipment-hire:', backendEquipment.length, 'items');
-      console.log('Sample equipment item:', backendEquipment[0]);
+      console.log('Backend equipment loaded:', backendEquipment);
       set({ equipment: backendEquipment, isLoading: false });
     } catch (error: any) {
       console.error('Failed to fetch equipment:', error);
@@ -85,43 +82,34 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
   fetchAvailableEquipment: async () => {
     set({ isLoading: true, error: null });
     try {
-      // ✅ FIXED: Get available equipment from equipment-hire endpoint
-      const response = await apiClient.get<any>('/equipment-hire/equipment');
+      const response = await apiClient.get<any>('/equipment-hire/equipment/available');
       const equipmentData = Array.isArray(response) ? response : (response?.data || []);
 
-      // Filter for available equipment only
-      const availableEquipment = equipmentData
-        .filter((eq: any) => eq.is_available !== false)
-        .map((eq: any) => ({
-          id: eq.id, // This is equipment_assets.id - CORRECT for booking creation
-          business_id: eq.business_id,
-          asset_name: eq.asset_name || 'Unknown Equipment',
-          asset_code: eq.asset_code || 'N/A',
-          asset_id: eq.asset_id, // Store the fixed_assets.id for reference
-          category: 'equipment',
-          description: '', // Not available from equipment_assets
-          purchase_date: '', // Not available from equipment_assets
-          purchase_price: 0, // Not available from equipment_assets
-          current_value: eq.current_value || 0,
-          location: eq.current_location || 'Unknown',
-          condition_status: eq.condition_status || 'good',
-          serial_number: '', // Not available from equipment_assets
-          is_available: true,
-          hire_rate: eq.hire_rate_per_day || 50,
-          deposit_amount: eq.deposit_amount || 100,
-          min_hire_duration: eq.minimum_hire_period || 1,
-          max_hire_duration: 30,
-          photos: eq.photos || [],
-          created_by: eq.created_by,
-          created_at: eq.created_at?.utc || new Date().toISOString(),
-          updated_at: eq.updated_at?.utc || new Date().toISOString(),
-          is_hireable: eq.is_hireable,
-          equipment_asset_id: eq.id, // Same as id
-          condition_notes: eq.condition_notes || ''
-        } as EquipmentAsset));
+      const availableEquipment = equipmentData.map((eq: any) => ({
+        id: eq.id,
+        business_id: eq.business_id,
+        asset_name: eq.asset_name || 'Unknown Equipment',
+        asset_code: eq.asset_code || 'N/A',
+        category: 'equipment',
+        description: eq.description || '',
+        purchase_date: eq.purchase_date || new Date().toISOString().split('T')[0],
+        purchase_price: eq.purchase_price || 0,
+        current_value: eq.current_value || 0,
+        location: eq.current_location || 'Unknown',
+        condition_status: eq.condition_status || 'good',
+        serial_number: eq.serial_number || '',
+        is_available: true,
+        hire_rate: eq.hire_rate_per_day || eq.hire_rate || 50,
+        deposit_amount: eq.deposit_amount || 100,
+        min_hire_duration: eq.minimum_hire_period || 1,
+        max_hire_duration: 7,
+        photos: eq.photos || [],
+        created_by: eq.created_by,
+        created_at: eq.created_at?.utc || new Date().toISOString(),
+        updated_at: eq.updated_at?.utc || new Date().toISOString()
+      } as EquipmentAsset));
 
-      console.log('Available equipment:', availableEquipment.length, 'items');
-      console.log('Sample available equipment:', availableEquipment[0]);
+      console.log('Available equipment:', availableEquipment);
       set({ equipment: availableEquipment, isLoading: false });
     } catch (error: any) {
       console.error('Failed to fetch available equipment:', error);
@@ -141,33 +129,31 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
 
       if (Array.isArray(bookingsData) && bookingsData.length > 0) {
         hireBookings = bookingsData.map((booking: any) => {
-          const startDate = getDateFromBackendFormat(booking.hire_start_date);
-          const endDate = getDateFromBackendFormat(booking.hire_end_date);
-          const createdDate = getDateFromBackendFormat(booking.created_at);
-          const updatedDate = getDateFromBackendFormat(booking.updated_at);
-          const actualReturnDate = getDateFromBackendFormat(booking.actual_return_date);
-          const equipmentAssetId = booking.equipment_asset_id || booking.id;
+          const startDate = booking.hire_start_date?.utc || booking.hire_start_date;
+          const endDate = booking.hire_end_date?.utc || booking.hire_end_date;
+          const assetId = booking.asset_id || booking.equipment_asset_id;
 
           return {
             id: booking.id,
-            equipment_id: equipmentAssetId,
+            equipment_id: assetId,
             business_id: booking.business_id,
             customer_id: booking.customer_id,
-            start_date: startDate ? startDate.toISOString() : booking.hire_start_date,
-            end_date: endDate ? endDate.toISOString() : booking.hire_end_date,
+            start_date: startDate,
+            end_date: endDate,
             total_amount: parseFloat(booking.total_amount) || 0,
             deposit_paid: parseFloat(booking.deposit_paid) || 0,
             status: booking.status || 'pending',
             condition_before: booking.pre_hire_condition || '',
             condition_after: booking.post_hire_condition || '',
             created_by: booking.created_by,
-            created_at: createdDate ? createdDate.toISOString() : booking.created_at,
-            updated_at: updatedDate ? updatedDate.toISOString() : booking.updated_at,
+            created_at: booking.created_at?.utc || booking.created_at,
+            updated_at: booking.updated_at?.utc || booking.updated_at,
+            // Map additional fields from backend SQL joins
             asset_id: booking.asset_id,
             asset_name: booking.asset_name || 'Unknown Equipment',
             asset_code: booking.asset_code || 'N/A',
             customer_name: booking.customer_name || 'Unknown Customer',
-            actual_return_date: actualReturnDate ? actualReturnDate.toISOString() : booking.actual_return_date,
+            actual_return_date: booking.actual_return_date,
             damage_notes: booking.damage_notes,
             damage_charges: parseFloat(booking.damage_charges) || 0,
             deposit_returned: parseFloat(booking.deposit_returned) || 0,
@@ -177,13 +163,12 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
             job_number: booking.job_number,
             hire_rate: parseFloat(booking.hire_rate) || 0,
             pre_hire_condition: booking.pre_hire_condition,
-            post_hire_condition: booking.post_hire_condition,
-            equipment_asset_id: equipmentAssetId // Store for reference
+            post_hire_condition: booking.post_hire_condition
           } as HireBooking;
         });
       }
 
-      console.log('Processed hire bookings:', hireBookings.length);
+      console.log('Processed hire bookings:', hireBookings);
       set({ hireBookings, isLoading: false });
     } catch (error: any) {
       console.error('Failed to fetch hire bookings:', error);
@@ -206,33 +191,31 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
         activeHireBookings = bookingsData
           .filter((booking: any) => booking.status !== 'completed')
           .map((booking: any) => {
-            const startDate = getDateFromBackendFormat(booking.hire_start_date);
-            const endDate = getDateFromBackendFormat(booking.hire_end_date);
-            const createdDate = getDateFromBackendFormat(booking.created_at);
-            const updatedDate = getDateFromBackendFormat(booking.updated_at);
-            const actualReturnDate = getDateFromBackendFormat(booking.actual_return_date);
-            const equipmentAssetId = booking.equipment_asset_id || booking.id;
+            const startDate = booking.hire_start_date?.utc || booking.hire_start_date;
+            const endDate = booking.hire_end_date?.utc || booking.hire_end_date;
+            const assetId = booking.asset_id || booking.equipment_asset_id;
 
             return {
               id: booking.id,
-              equipment_id: equipmentAssetId,
+              equipment_id: assetId,
               business_id: booking.business_id,
               customer_id: booking.customer_id,
-              start_date: startDate ? startDate.toISOString() : booking.hire_start_date,
-              end_date: endDate ? endDate.toISOString() : booking.hire_end_date,
+              start_date: startDate,
+              end_date: endDate,
               total_amount: parseFloat(booking.total_amount) || 0,
               deposit_paid: parseFloat(booking.deposit_paid) || 0,
               status: booking.status || 'pending',
               condition_before: booking.pre_hire_condition || '',
               condition_after: booking.post_hire_condition || '',
               created_by: booking.created_by,
-              created_at: createdDate ? createdDate.toISOString() : booking.created_at,
-              updated_at: updatedDate ? updatedDate.toISOString() : booking.updated_at,
+              created_at: booking.created_at?.utc || booking.created_at,
+              updated_at: booking.updated_at?.utc || booking.updated_at,
+              // Map additional fields from backend SQL joins
               asset_id: booking.asset_id,
               asset_name: booking.asset_name || 'Unknown Equipment',
               asset_code: booking.asset_code || 'N/A',
               customer_name: booking.customer_name || 'Unknown Customer',
-              actual_return_date: actualReturnDate ? actualReturnDate.toISOString() : booking.actual_return_date,
+              actual_return_date: booking.actual_return_date,
               damage_notes: booking.damage_notes,
               damage_charges: parseFloat(booking.damage_charges) || 0,
               deposit_returned: parseFloat(booking.deposit_returned) || 0,
@@ -242,13 +225,12 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
               job_number: booking.job_number,
               hire_rate: parseFloat(booking.hire_rate) || 0,
               pre_hire_condition: booking.pre_hire_condition,
-              post_hire_condition: booking.post_hire_condition,
-              equipment_asset_id: equipmentAssetId // Store for reference
+              post_hire_condition: booking.post_hire_condition
             } as HireBooking;
           });
       }
 
-      console.log('Active hire bookings:', activeHireBookings.length);
+      console.log('Active hire bookings:', activeHireBookings);
       set({ activeHireBookings, isLoading: false });
     } catch (error: any) {
       console.error('Failed to fetch active hire bookings:', error);
@@ -288,7 +270,7 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
         ];
       }
 
-      console.log('Processed customers:', customers.length);
+      console.log('Processed customers:', customers);
       set({ customers, isLoading: false });
     } catch (error: any) {
       console.error('Failed to fetch customers:', error);
@@ -314,13 +296,48 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
     }
   },
 
+  createEquipment: async (equipmentData: Partial<EquipmentAsset>) => {
+    set({ isLoading: true, error: null });
+    try {
+      // TODO: Implement backend API call for creating equipment
+      // This requires selecting an existing fixed asset first
+      console.warn('Equipment creation requires linking to existing fixed asset');
+      throw new Error('Equipment creation via API not implemented. Use Asset Management module first.');
+    } catch (error: any) {
+      set({ error: error.message, isLoading: false });
+      throw error;
+    }
+  },
+
+  updateEquipment: async (equipmentId: string, equipmentData: Partial<EquipmentAsset>) => {
+    set({ isLoading: true, error: null });
+    try {
+      // TODO: Implement backend API call for updating equipment
+      console.warn('Equipment update not implemented');
+      throw new Error('Equipment update via API not implemented');
+    } catch (error: any) {
+      set({ error: error.message, isLoading: false });
+      throw error;
+    }
+  },
+
+  deleteEquipment: async (equipmentId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      // TODO: Implement backend API call for deleting equipment
+      console.warn('Equipment deletion not implemented');
+      throw new Error('Equipment deletion via API not implemented');
+    } catch (error: any) {
+      set({ error: error.message, isLoading: false });
+      throw error;
+    }
+  },
+
   createHireBooking: async (bookingData: any) => {
     set({ isLoading: true, error: null });
     try {
-      console.log('=== CREATE BOOKING DEBUG ===');
-      console.log('Booking data received:', bookingData);
-      console.log('Equipment asset ID:', bookingData.equipment_asset_id);
-      
+      console.log('Creating hire booking with data:', bookingData);
+
       // Validate required fields
       if (!bookingData.equipment_asset_id) {
         throw new Error('Equipment selection is required');
@@ -346,10 +363,8 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
 
       console.log('Formatted booking data for API:', formattedData);
 
-      const response = await apiClient.post<any>('/equipment-hire/bookings', formattedData);
-      console.log('Booking created successfully:', response);
-
-      const newBooking = response.data || response;
+      const newBooking = await apiClient.post<HireBooking>('/equipment-hire/bookings', formattedData);
+      console.log('Booking created successfully:', newBooking);
 
       set(state => ({
         hireBookings: [...state.hireBookings, newBooking],
@@ -360,7 +375,6 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
       return newBooking;
     } catch (error: any) {
       console.error('Failed to create hire booking:', error);
-      console.error('Error details:', error.response?.data || error.message);
       set({ error: error.message, isLoading: false });
       throw error;
     }
@@ -369,8 +383,7 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
   updateHireBooking: async (bookingId: string, bookingData: any) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.put<any>(`/equipment-hire/bookings/${bookingId}`, bookingData);
-      const updatedBooking = response.data || response;
+      const updatedBooking = await apiClient.put<HireBooking>(`/equipment-hire/bookings/${bookingId}`, bookingData);
 
       // Update both hireBookings and activeHireBookings
       set(state => ({
@@ -379,11 +392,9 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
         ),
         activeHireBookings: state.activeHireBookings
           .map(booking => booking.id === bookingId ? updatedBooking : booking)
-          .filter(booking => booking.status !== 'completed'),
+          .filter(booking => booking.status !== 'completed'), // Remove completed from active
         isLoading: false
       }));
-      
-      return updatedBooking;
     } catch (error: any) {
       set({ error: error.message, isLoading: false });
       throw error;
@@ -396,7 +407,7 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
       console.log('Processing equipment return for booking:', bookingId, returnData);
 
       // Update the booking status to completed with all return data
-      const response = await apiClient.put<any>(`/equipment-hire/bookings/${bookingId}`, {
+      const updatedBooking = await apiClient.put<HireBooking>(`/equipment-hire/bookings/${bookingId}`, {
         status: 'completed',
         post_hire_condition: returnData.condition_after,
         actual_return_date: new Date().toISOString().split('T')[0],
@@ -406,7 +417,6 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
         final_amount: returnData.final_amount
       });
 
-      const updatedBooking = response.data || response;
       console.log('Booking updated for return:', updatedBooking);
 
       // Update the bookings lists - remove from active, keep in all bookings

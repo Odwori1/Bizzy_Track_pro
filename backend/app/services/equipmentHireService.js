@@ -1,76 +1,8 @@
-import { query, getClient } from '../utils/database.js';
+import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
 
 export class EquipmentHireService {
-  /**
-   * Create equipment asset (link to fixed asset)
-   */
-  static async createEquipmentAsset(businessId, equipmentData, userId) {
-    const client = await getClient();
-
-    try {
-      await client.query('BEGIN');
-
-      const result = await client.query(
-        `INSERT INTO equipment_assets (
-          business_id, asset_id, hire_rate_per_day, hire_rate_per_week, hire_rate_per_month,
-          minimum_hire_period, deposit_amount, is_available, is_hireable,
-          current_location, specifications, photos, condition_notes, operational_instructions,
-          created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        RETURNING *`,
-        [
-          businessId,
-          equipmentData.asset_id,
-          equipmentData.hire_rate_per_day,
-          equipmentData.hire_rate_per_week || null,
-          equipmentData.hire_rate_per_month || null,
-          equipmentData.minimum_hire_period || 1,
-          equipmentData.deposit_amount || 0,
-          equipmentData.is_available !== false,
-          equipmentData.is_hireable !== false,
-          equipmentData.current_location || '',
-          equipmentData.specifications ? JSON.stringify(equipmentData.specifications) : null,
-          equipmentData.photos ? JSON.stringify(equipmentData.photos) : null,
-          equipmentData.condition_notes || '',
-          equipmentData.operational_instructions || '',
-          userId
-        ]
-      );
-
-      const equipment = result.rows[0];
-
-      // Log equipment creation
-      await auditLogger.logAction({
-        businessId,
-        userId,
-        action: 'equipment.created',
-        resourceType: 'equipment',
-        resourceId: equipment.id,
-        newValues: {
-          asset_id: equipmentData.asset_id,
-          hire_rate_per_day: equipmentData.hire_rate_per_day
-        }
-      });
-
-      log.info('Equipment asset created', {
-        businessId,
-        userId,
-        equipmentId: equipment.id,
-        assetId: equipmentData.asset_id
-      });
-
-      await client.query('COMMIT');
-      return equipment;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
   /**
    * Create equipment hire booking
    */
@@ -162,6 +94,7 @@ export class EquipmentHireService {
     try {
       const result = await client.query(
         `SELECT ehb.*,
+                ea.id as equipment_asset_id,
                 ea.asset_id,
                 fa.asset_name,
                 fa.asset_code,
@@ -226,14 +159,14 @@ export class EquipmentHireService {
       allowedFields.forEach(field => {
         if (updateData[field] !== undefined) {
           updateFields.push(`${field} = $${paramCount}`);
-          
+
           // Handle date formatting and constraint requirements
           if (['hire_start_date', 'hire_end_date', 'actual_return_date'].includes(field) && updateData[field]) {
             const date = new Date(updateData[field]);
             if (isNaN(date.getTime())) {
               throw new Error(`Invalid date format for ${field}: ${updateData[field]}`);
             }
-            
+
             // For actual_return_date, ensure it's not before hire_start_date (constraint requirement)
             if (field === 'actual_return_date') {
               const hireStartDate = new Date(currentBooking.rows[0].hire_start_date);
@@ -266,8 +199,8 @@ export class EquipmentHireService {
       updateValues.push(bookingId, businessId);
 
       const result = await client.query(
-        `UPDATE equipment_hire_bookings 
-         SET ${updateFields.join(', ')} 
+        `UPDATE equipment_hire_bookings
+         SET ${updateFields.join(', ')}
          WHERE id = $${paramCount} AND business_id = $${paramCount + 1}
          RETURNING *`,
         updateValues
@@ -281,7 +214,7 @@ export class EquipmentHireService {
           'UPDATE equipment_assets SET is_available = true WHERE id = $1',
           [updatedBooking.equipment_asset_id]
         );
-        
+
         log.info('Equipment marked as available', {
           equipmentAssetId: updatedBooking.equipment_asset_id,
           status: updateData.status
@@ -410,23 +343,35 @@ export class EquipmentHireService {
   static async calculateHireAmount(equipmentAssetId, startDate, endDate, customRate = null) {
     const client = await getClient();
     try {
+      console.log('Calculating hire amount for equipment asset ID:', equipmentAssetId);
+      
       const equipment = await client.query(
         'SELECT hire_rate_per_day FROM equipment_assets WHERE id = $1',
         [equipmentAssetId]
       );
 
       if (!equipment.rows[0]) {
-        throw new Error('Equipment asset not found');
+        // Log detailed error for debugging
+        const allEquipment = await client.query(
+          'SELECT id, asset_id FROM equipment_assets LIMIT 10'
+        );
+        console.error('Equipment not found. Available equipment:', allEquipment.rows);
+        throw new Error(`Equipment asset not found for ID: ${equipmentAssetId}`);
       }
 
       const dailyRate = customRate || equipment.rows[0].hire_rate_per_day;
+      console.log('Daily rate:', dailyRate);
 
       // Calculate days between dates
       const start = new Date(startDate);
       const end = new Date(endDate);
       const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+      console.log('Hire period days:', days);
 
-      return dailyRate * days;
+      const total = dailyRate * days;
+      console.log('Total amount:', total);
+
+      return total;
     } finally {
       client.release();
     }
@@ -439,7 +384,7 @@ export class EquipmentHireService {
     const client = await getClient();
     try {
       const result = await client.query(
-        `SELECT ea.*, fa.asset_name, fa.asset_code, fa.condition_status
+        `SELECT ea.*, fa.asset_name, fa.asset_code, fa.condition_status, fa.current_value
          FROM equipment_assets ea
          JOIN fixed_assets fa ON ea.asset_id = fa.id
          WHERE ea.business_id = $1
@@ -469,6 +414,7 @@ export class EquipmentHireService {
          FROM equipment_assets ea
          JOIN fixed_assets fa ON ea.asset_id = fa.id
          WHERE ea.business_id = $1
+           AND ea.is_hireable = true
          ORDER BY fa.asset_name`,
         [businessId]
       );
@@ -489,6 +435,7 @@ export class EquipmentHireService {
     try {
       let queryStr = `
         SELECT ehb.*,
+               ea.id as equipment_asset_id,
                ea.asset_id,
                fa.asset_name,
                fa.asset_code,
@@ -529,6 +476,7 @@ export class EquipmentHireService {
     try {
       const result = await client.query(
         `SELECT ehb.*,
+                ea.id as equipment_asset_id,
                 ea.asset_id,
                 fa.asset_name,
                 fa.asset_code,
