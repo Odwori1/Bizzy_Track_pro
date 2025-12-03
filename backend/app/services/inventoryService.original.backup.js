@@ -1,18 +1,16 @@
 import { query, getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
-import { InventoryAccountingService } from './inventoryAccountingService.js';
-import { InventorySyncService } from './inventorySyncService.js';
 
 export class InventoryService {
   /**
-   * Get inventory overview with accounting metrics
+   * Get inventory overview dashboard data
    */
   static async getOverview(businessId) {
     const client = await getClient();
 
     try {
-      log.info('Getting inventory overview with accounting metrics', { businessId });
+      log.info('Getting inventory overview', { businessId });
 
       const totalItemsResult = await client.query(
         'SELECT COUNT(*) as count FROM inventory_items WHERE business_id = $1 AND is_active = true',
@@ -31,14 +29,8 @@ export class InventoryService {
         [businessId]
       );
 
-      // Get FIFO valuation
-      const valuationResult = await client.query(
-        `SELECT 
-           SUM(current_value) as fifo_value,
-           SUM(current_quantity) as total_quantity,
-           COUNT(*) as valued_items
-         FROM inventory_valuation_fifo 
-         WHERE business_id = $1`,
+      const totalValueResult = await client.query(
+        'SELECT SUM(current_stock * cost_price) as total_value FROM inventory_items WHERE business_id = $1 AND is_active = true',
         [businessId]
       );
 
@@ -68,34 +60,18 @@ export class InventoryService {
         [businessId]
       );
 
-      // Get accounting summary
-      const accountingSummaryResult = await client.query(
-        `SELECT 
-           COUNT(*) as total_transactions,
-           SUM(CASE WHEN transaction_type = 'purchase' THEN total_cost ELSE 0 END) as total_purchases,
-           SUM(CASE WHEN transaction_type = 'sale' THEN total_cost ELSE 0 END) as total_cogs,
-           COUNT(DISTINCT inventory_item_id) as items_with_transactions
-         FROM inventory_transactions
-         WHERE business_id = $1`,
-        [businessId]
-      );
-
       return {
         summary: {
           total_items: parseInt(totalItemsResult.rows[0].count) || 0,
           low_stock_items: parseInt(lowStockResult.rows[0].count) || 0,
           out_of_stock_items: parseInt(outOfStockResult.rows[0].count) || 0,
-          total_inventory_value: parseFloat(valuationResult.rows[0].fifo_value) || 0,
-          total_quantity: parseFloat(valuationResult.rows[0].total_quantity) || 0,
-          valued_items: parseInt(valuationResult.rows[0].valued_items) || 0
+          total_inventory_value: parseFloat(totalValueResult.rows[0].total_value) || 0
         },
         categories: categoriesResult.rows,
         recent_movements: recentMovementsResult.rows,
-        accounting_summary: accountingSummaryResult.rows[0] || {},
         alerts: {
           has_low_stock: parseInt(lowStockResult.rows[0].count) > 0,
-          has_out_of_stock: parseInt(outOfStockResult.rows[0].count) > 0,
-          valuation_available: parseInt(valuationResult.rows[0].valued_items) > 0
+          has_out_of_stock: parseInt(outOfStockResult.rows[0].count) > 0
         }
       };
 
@@ -255,7 +231,7 @@ export class InventoryService {
   }
 
   /**
-   * Create inventory item with accounting integration
+   * Create inventory item
    */
   static async createItem(businessId, itemData, userId) {
     const client = await getClient();
@@ -263,7 +239,6 @@ export class InventoryService {
     try {
       await client.query('BEGIN');
 
-      // Verify category belongs to business
       const categoryCheck = await client.query(
         'SELECT id FROM inventory_categories WHERE id = $1 AND business_id = $2',
         [itemData.category_id, businessId]
@@ -273,7 +248,6 @@ export class InventoryService {
         throw new Error('Category not found or access denied');
       }
 
-      // Check for duplicate SKU
       const skuCheck = await client.query(
         'SELECT id FROM inventory_items WHERE business_id = $1 AND sku = $2',
         [businessId, itemData.sku]
@@ -283,7 +257,6 @@ export class InventoryService {
         throw new Error('SKU already exists');
       }
 
-      // Insert inventory item
       const result = await client.query(
         `INSERT INTO inventory_items (
           business_id, category_id, name, description, sku,
@@ -309,46 +282,6 @@ export class InventoryService {
 
       const item = result.rows[0];
 
-      // ========================================================================
-      // NEW: AUTO-CREATE PRODUCT FOR POS IF FLAG IS SET
-      // ========================================================================
-      if (itemData.auto_create_product) {
-        try {
-          const syncResult = await InventorySyncService.makeInventoryItemSellable(item.id, userId);
-          log.info(`Auto-created product from inventory item: ${item.id} → ${syncResult.product.id}`);
-        } catch (syncError) {
-          log.warn(`Failed to auto-create product from inventory item:`, syncError);
-          // Don't fail the whole operation
-        }
-      }
-
-      // ========================================================================
-      // NEW: CREATE INITIAL INVENTORY TRANSACTION IF STARTING STOCK > 0
-      // ========================================================================
-      if (itemData.current_stock > 0) {
-        try {
-          await client.query(
-            `INSERT INTO inventory_transactions (
-              business_id, inventory_item_id, transaction_type,
-              quantity, unit_cost, reference_type, notes, created_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-              businessId,
-              item.id,
-              'adjustment',
-              itemData.current_stock,
-              itemData.cost_price,
-              'inventory_setup',
-              `Initial stock setup for ${item.name}`,
-              userId
-            ]
-          );
-        } catch (txError) {
-          log.warn(`Failed to create initial inventory transaction:`, txError);
-          // Don't fail the whole operation
-        }
-      }
-
       await auditLogger.logAction({
         businessId,
         userId,
@@ -359,9 +292,7 @@ export class InventoryService {
           name: item.name,
           sku: item.sku,
           cost_price: item.cost_price,
-          selling_price: item.selling_price,
-          auto_product_created: itemData.auto_create_product || false,
-          initial_transaction_created: itemData.current_stock > 0
+          selling_price: item.selling_price
         }
       });
 
@@ -376,7 +307,7 @@ export class InventoryService {
   }
 
   /**
-   * Get inventory item by ID with accounting info
+   * Get inventory item by ID
    */
   static async getItemById(businessId, itemId) {
     const client = await getClient();
@@ -386,29 +317,13 @@ export class InventoryService {
         `SELECT
           ii.*,
           ic.name as category_name,
-          p.id as product_id,
-          p.name as product_name,
           CASE
             WHEN ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0 THEN 'low'
             WHEN ii.current_stock = 0 THEN 'out_of_stock'
             ELSE 'adequate'
-          END as stock_status,
-          -- Accounting info
-          (SELECT COALESCE(SUM(quantity * unit_cost), 0)
-           FROM inventory_transactions
-           WHERE inventory_item_id = ii.id AND transaction_type = 'purchase') as total_investment,
-          (SELECT COALESCE(SUM(quantity), 0)
-           FROM inventory_transactions
-           WHERE inventory_item_id = ii.id AND transaction_type = 'sale') as total_sold,
-          (SELECT COALESCE(AVG(unit_cost), 0)
-           FROM inventory_transactions
-           WHERE inventory_item_id = ii.id AND transaction_type = 'purchase') as average_cost,
-          (SELECT COALESCE(SUM(quantity * unit_cost), 0)
-           FROM inventory_transactions
-           WHERE inventory_item_id = ii.id AND transaction_type = 'sale') as total_cogs
+          END as stock_status
          FROM inventory_items ii
          LEFT JOIN inventory_categories ic ON ii.category_id = ic.id
-         LEFT JOIN products p ON ii.id = p.inventory_item_id
          WHERE ii.id = $1 AND ii.business_id = $2`,
         [itemId, businessId]
       );
@@ -417,40 +332,7 @@ export class InventoryService {
         throw new Error('Item not found or access denied');
       }
 
-      const item = result.rows[0];
-      
-      // Get recent transactions
-      const transactionsResult = await client.query(
-        `SELECT 
-           it.*,
-           je.description as journal_description,
-           CASE 
-             WHEN it.reference_type = 'pos_transaction' THEN 'POS Sale'
-             WHEN it.reference_type = 'purchase_order' THEN 'Purchase'
-             ELSE it.reference_type
-           END as transaction_source
-         FROM inventory_transactions it
-         LEFT JOIN journal_entries je ON it.journal_entry_id = je.id
-         WHERE it.inventory_item_id = $1 AND it.business_id = $2
-         ORDER BY it.created_at DESC
-         LIMIT 20`,
-        [itemId, businessId]
-      );
-      
-      item.recent_transactions = transactionsResult.rows;
-
-      // Get current valuation from FIFO view
-      const valuationResult = await client.query(
-        `SELECT * FROM inventory_valuation_fifo 
-         WHERE inventory_item_id = $1 AND business_id = $2`,
-        [itemId, businessId]
-      );
-      
-      if (valuationResult.rows.length > 0) {
-        item.valuation = valuationResult.rows[0];
-      }
-
-      return item;
+      return result.rows[0];
     } catch (error) {
       log.error('Get item by ID service error', error);
       throw error;
@@ -533,58 +415,13 @@ export class InventoryService {
 
       const updatedItem = result.rows[0];
 
-      // If stock changed significantly, create adjustment transaction
-      const oldStock = parseFloat(itemCheck.rows[0].current_stock);
-      const newStock = parseFloat(itemData.current_stock || oldStock);
-      
-      if (Math.abs(newStock - oldStock) > 0.01 && itemData.current_stock !== undefined) {
-        const adjustmentQuantity = newStock - oldStock;
-        const adjustmentType = adjustmentQuantity > 0 ? 'adjustment' : 'write_off';
-        
-        await client.query(
-          `INSERT INTO inventory_transactions (
-            business_id, inventory_item_id, transaction_type,
-            quantity, unit_cost, reference_type, notes, created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            businessId,
-            itemId,
-            adjustmentType,
-            Math.abs(adjustmentQuantity),
-            updatedItem.cost_price,
-            'inventory_adjustment',
-            `Stock adjustment from ${oldStock} to ${newStock}`,
-            userId
-          ]
-        );
-      }
-
-      // Sync to product if linked
-      const productCheck = await client.query(
-        'SELECT id FROM products WHERE inventory_item_id = $1 AND business_id = $2',
-        [itemId, businessId]
-      );
-      
-      if (productCheck.rows.length > 0) {
-        try {
-          await InventorySyncService.syncInventoryToProduct(itemId, userId);
-        } catch (syncError) {
-          log.warn(`Failed to sync inventory to product:`, syncError);
-        }
-      }
-
       await auditLogger.logAction({
         businessId,
         userId,
         action: 'inventory.item.updated',
         resourceType: 'inventory_item',
         resourceId: itemId,
-        newValues: itemData,
-        stock_adjustment: Math.abs(newStock - oldStock) > 0.01 ? {
-          old_stock: oldStock,
-          new_stock: newStock,
-          adjustment: newStock - oldStock
-        } : null
+        newValues: itemData
       });
 
       await client.query('COMMIT');
@@ -642,7 +479,7 @@ export class InventoryService {
   }
 
   /**
-   * Get all inventory items with optional filters
+   * Get all inventory items with optional filters and SEARCH capability
    */
   static async getItems(businessId, filters = {}) {
     const client = await getClient();
@@ -656,19 +493,9 @@ export class InventoryService {
             WHEN ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0 THEN 'low'
             WHEN ii.current_stock = 0 THEN 'out_of_stock'
             ELSE 'adequate'
-          END as stock_status,
-          -- Accounting info
-          (SELECT COUNT(*) FROM inventory_transactions it
-           WHERE it.inventory_item_id = ii.id) as transaction_count,
-          (SELECT COALESCE(SUM(it.quantity * it.unit_cost), 0)
-           FROM inventory_transactions it
-           WHERE it.inventory_item_id = ii.id AND it.transaction_type = 'purchase') as total_investment,
-          -- Product link
-          p.id as product_id,
-          p.name as product_name
+          END as stock_status
         FROM inventory_items ii
         LEFT JOIN inventory_categories ic ON ii.category_id = ic.id
-        LEFT JOIN products p ON ii.id = p.inventory_item_id
         WHERE ii.business_id = $1
       `;
       const params = [businessId];
@@ -690,12 +517,12 @@ export class InventoryService {
         queryStr += ` AND ii.current_stock <= ii.min_stock_level AND ii.min_stock_level > 0`;
       }
 
-      // Search filter
+      // ✅ SEARCH FILTER
       if (filters.search) {
         paramCount++;
         queryStr += ` AND (
-          ii.name ILIKE $${paramCount} OR
-          ii.sku ILIKE $${paramCount} OR
+          ii.name ILIKE $${paramCount} OR 
+          ii.sku ILIKE $${paramCount} OR 
           ii.description ILIKE $${paramCount} OR
           ic.name ILIKE $${paramCount}
         )`;
@@ -738,7 +565,7 @@ export class InventoryService {
   }
 
   /**
-   * Record inventory movement with accounting integration
+   * Record inventory movement and update stock
    */
   static async recordMovement(businessId, movementData, userId) {
     const client = await getClient();
@@ -747,7 +574,7 @@ export class InventoryService {
       await client.query('BEGIN');
 
       const itemCheck = await client.query(
-        'SELECT id, current_stock, name, cost_price FROM inventory_items WHERE id = $1 AND business_id = $2',
+        'SELECT id, current_stock FROM inventory_items WHERE id = $1 AND business_id = $2',
         [movementData.inventory_item_id, businessId]
       );
 
@@ -755,33 +582,11 @@ export class InventoryService {
         throw new Error('Inventory item not found or access denied');
       }
 
-      const item = itemCheck.rows[0];
-      const currentStock = parseFloat(item.current_stock);
+      const currentStock = parseFloat(itemCheck.rows[0].current_stock);
       const quantity = parseFloat(movementData.quantity);
       const unitCost = parseFloat(movementData.unit_cost);
       const totalValue = quantity * unitCost;
 
-      // Handle purchases with accounting entries
-      if (movementData.movement_type === 'purchase') {
-        try {
-          await InventoryAccountingService.recordInventoryPurchase(
-            {
-              business_id: businessId,
-              purchase_order_id: movementData.reference_id,
-              inventory_item_id: movementData.inventory_item_id,
-              quantity: quantity,
-              unit_cost: unitCost,
-              payment_method: movementData.payment_method || 'accounts_payable'
-            },
-            userId
-          );
-        } catch (accountingError) {
-          log.error('Inventory purchase accounting failed:', accountingError);
-          throw new Error(`Purchase accounting failed: ${accountingError.message}`);
-        }
-      }
-
-      // Record inventory movement
       const movementResult = await client.query(
         `INSERT INTO inventory_movements (
           business_id, inventory_item_id, movement_type, quantity,
@@ -804,20 +609,10 @@ export class InventoryService {
 
       const movement = movementResult.rows[0];
 
-      // Update inventory stock
       const newStock = await client.query(
         'SELECT update_inventory_stock($1, $2, $3) as new_stock',
         [movementData.inventory_item_id, quantity, movementData.movement_type]
       );
-
-      // Sync to product if it's a purchase or major adjustment
-      if (movementData.movement_type === 'purchase' || movementData.movement_type === 'adjustment') {
-        try {
-          await InventorySyncService.syncInventoryToProduct(movementData.inventory_item_id, userId);
-        } catch (syncError) {
-          log.warn(`Failed to sync inventory to product:`, syncError);
-        }
-      }
 
       await auditLogger.logAction({
         businessId,
@@ -829,8 +624,7 @@ export class InventoryService {
           movement_type: movement.movement_type,
           quantity: movement.quantity,
           unit_cost: movement.unit_cost,
-          new_stock: parseFloat(newStock.rows[0].new_stock),
-          accounting_created: movementData.movement_type === 'purchase'
+          new_stock: parseFloat(newStock.rows[0].new_stock)
         }
       });
 
@@ -869,7 +663,7 @@ export class InventoryService {
   }
 
   /**
-   * Get inventory statistics with accounting metrics
+   * Get inventory statistics
    */
   static async getInventoryStatistics(businessId) {
     const client = await getClient();
@@ -882,15 +676,9 @@ export class InventoryService {
           COUNT(*) FILTER (WHERE current_stock <= min_stock_level AND min_stock_level > 0) as low_stock_items,
           COUNT(*) FILTER (WHERE current_stock = 0) as out_of_stock_items,
           SUM(current_stock * cost_price) as total_inventory_value,
-          SUM(current_stock * selling_price) as total_potential_revenue,
-          -- Accounting metrics
-          (SELECT COALESCE(SUM(total_cost), 0) FROM inventory_transactions
-           WHERE business_id = $1 AND transaction_type = 'purchase') as total_purchases_value,
-          (SELECT COALESCE(SUM(total_cost), 0) FROM inventory_transactions
-           WHERE business_id = $1 AND transaction_type = 'sale') as total_cogs_value,
-          (SELECT COUNT(*) FROM inventory_transactions WHERE business_id = $1) as total_transactions
-        FROM inventory_items
-        WHERE business_id = $1
+          SUM(current_stock * selling_price) as total_potential_revenue
+         FROM inventory_items
+         WHERE business_id = $1
       `;
 
       const result = await client.query(queryStr, [businessId]);
@@ -906,52 +694,5 @@ export class InventoryService {
       client.release();
     }
   }
-
-  /**
-   * Get inventory valuation report (GAAP-compliant FIFO)
-   */
-  static async getInventoryValuationReport(businessId, asOfDate = new Date()) {
-    try {
-      return await InventoryAccountingService.getInventoryValuation(businessId, 'fifo', asOfDate);
-    } catch (error) {
-      log.error('Inventory valuation report error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get COGS report for a period
-   */
-  static async getCogsReport(businessId, startDate, endDate) {
-    try {
-      return await InventoryAccountingService.getCogsReport(businessId, startDate, endDate);
-    } catch (error) {
-      log.error('COGS report error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Sync all inventory items to products
-   */
-  static async syncAllInventoryToProducts(businessId, userId) {
-    try {
-      return await InventoryAccountingService.syncAllInventoryToProducts(businessId, userId);
-    } catch (error) {
-      log.error('Bulk sync error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get sync status between inventory and products
-   */
-  static async getSyncStatus(businessId) {
-    try {
-      return await InventorySyncService.getSyncStatus(businessId);
-    } catch (error) {
-      log.error('Sync status error:', error);
-      throw error;
-    }
-  }
 }
+

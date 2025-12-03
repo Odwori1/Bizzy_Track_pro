@@ -1,0 +1,129 @@
+--- backend/app/services/posService.js.backup
++++ backend/app/services/posService.js
+@@ -1,8 +1,9 @@
+ import { getClient } from '../utils/database.js';
+ import { auditLogger } from '../utils/auditLogger.js';
+ import { log } from '../utils/logger.js';
+-import { AccountingService } from './accountingService.js';
+-import { InventoryAccountingService } from './inventoryAccountingService.js';
++// Use comprehensive transaction accounting service
++import { TransactionAccountingService } from './transactionAccountingService.js';
++// Keep inventory sync for product-inventory linking
+ import { InventorySyncService } from './inventorySyncService.js';
+ 
+ export class POSService {
+@@ -102,19 +103,17 @@
+         }
+       }
+ 
+-      // ========================================================================
+-      // STEP 5: CREATE ACCOUNTING ENTRIES
+-      // ========================================================================
+-      let accountingResult = null;
++      // ======================================================================
++      // STEP 5: CREATE GAAP-COMPLIANT ACCOUNTING ENTRIES FOR ALL ITEM TYPES
++      // ======================================================================
++      let accountingResults = null;
+       try {
+-        // Create sales revenue journal entry
+-        accountingResult = await AccountingService.createJournalEntryForPosSale(
+-          {
+-            business_id: businessId,
+-            pos_transaction_id: transaction.id,
+-            total_amount: transaction.final_amount,
+-            items: inventoryItems
+-          },
++        accountingResults = await TransactionAccountingService.createAccountingEntriesForTransaction(
++          {
++            business_id: businessId,
++            pos_transaction_id: transaction.id,
++            items: processedItems,  // Use ALL items, not just inventory items
++            payment_method: transactionData.payment_method
++          },
+           userId
+         );
+ 
+@@ -123,8 +122,8 @@
+         log.info('Created accounting entries for POS sale:', {
+           transaction_id: transaction.id,
+-          journal_entry_id: accountingResult.sales_entry?.journal_entry?.id,
+-          total_cogs: accountingResult.total_cogs
++          revenue_entry_id: accountingResults.sales_revenue_entry?.journal_entry?.id,
++          total_cogs: accountingResults.analysis?.total_cogs
+         });
+ 
+       } catch (accountingError) {
+@@ -140,38 +139,6 @@
+         });
+       }
+ 
+-      // ========================================================================
+-      // STEP 6: RECORD COGS FOR INVENTORY ITEMS
+-      // ========================================================================
+-      if (inventoryItems.length > 0) {
+-        try {
+-          const cogsResult = await InventoryAccountingService.recordPosSaleWithCogs(
+-            {
+-              business_id: businessId,
+-              pos_transaction_id: transaction.id,
+-              items: inventoryItems
+-            },
+-            userId
+-          );
+-
+-          log.info('Recorded COGS for inventory items:', {
+-            transaction_id: transaction.id,
+-            total_cogs: cogsResult.summary.total_cogs,
+-            items_processed: cogsResult.summary.items_processed
+-          });
+-
+-        } catch (cogsError) {
+-          log.error('COGS recording failed (continuing transaction):', cogsError);
+-        }
+-      }
+-
+       // ========================================================================
+-      // STEP 7: HANDLE EQUIPMENT HIRE IF PRESENT
++      // STEP 6: HANDLE EQUIPMENT HIRE IF PRESENT
+       // ========================================================================
+       const equipmentItems = processedItems.filter(item => item.item_type === 'equipment_hire');
+       if (equipmentItems.length > 0) {
+@@ -185,7 +152,7 @@
+         }
+       }
+ 
+-      // ========================================================================
++      // ======================================================================
+       // STEP 8: AUDIT LOG
+       // ========================================================================
+       await auditLogger.logAction({
+@@ -197,7 +164,8 @@
+           transaction_number: transaction.transaction_number,
+           final_amount: transaction.final_amount,
+           payment_method: transaction.payment_method,
+           item_count: processedItems.length,
+-          inventory_items_count: inventoryItems.length,
+-          accounting_created: accountingResult !== null,
++          inventory_items_count: inventoryItems.length,
++          accounting_created: accountingResults !== null,
+           equipment_items_count: equipmentItems.length
+         }
+       });
+@@ -210,10 +178,10 @@
+       const completeTransaction = await this.getTransactionById(businessId, transaction.id);
+       
+       // Add accounting info to response
+-      completeTransaction.accounting_info = {
+-        journal_entry_created: accountingResult !== null,
+-        sales_entry_id: accountingResult?.sales_entry?.journal_entry?.id,
+-        cogs_entry_id: accountingResult?.cogs_entry?.journal_entry?.id,
+-        total_cogs: accountingResult?.total_cogs || 0
++      completeTransaction.accounting_info = accountingResults ? {
++        revenue_entry_id: accountingResults.sales_revenue_entry?.journal_entry?.id,
++        cogs_entry_id: accountingResults.cogs_entry?.journal_entry?.id,
++        total_cogs: accountingResults.analysis?.total_cogs || 0,
++        total_revenue: accountingResults.analysis?.total_revenue || 0
+-      };
++      } : null;
+ 
+       return completeTransaction;
