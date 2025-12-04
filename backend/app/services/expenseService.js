@@ -347,7 +347,7 @@ export class ExpenseService {
 
     try {
       let queryStr = `
-        SELECT 
+        SELECT
           ec.*,
           COUNT(e.id) as expense_count
         FROM expense_categories ec
@@ -389,7 +389,7 @@ export class ExpenseService {
   }
 
   /**
-   * Create expense record
+   * Create expense record WITH ACCOUNTING INTEGRATION
    */
   static async createExpense(businessId, expenseData, userId) {
     const client = await getClient();
@@ -419,6 +419,7 @@ export class ExpenseService {
         }
       }
 
+      // Create expense record
       const result = await client.query(
         `INSERT INTO expenses (
           business_id, category_id, wallet_id, amount, description,
@@ -439,6 +440,49 @@ export class ExpenseService {
       );
 
       const expense = result.rows[0];
+
+      // 🆕 ACCOUNTING INTEGRATION: Create journal entry if expense is paid
+      if (expenseData.status === 'paid' || expenseData.status === 'approved') {
+        try {
+          const { AccountingService } = await import('./accountingService.js');
+          
+          // Map expense category to account code
+          const accountCode = await this.mapExpenseCategoryToAccount(expenseData.category_id, businessId);
+          
+          const journalEntryData = {
+            business_id: businessId,
+            description: `Expense: ${expenseData.description}`,
+            journal_date: expenseData.expense_date || new Date(),
+            reference_type: 'expense',
+            reference_id: expense.id,
+            lines: [
+              {
+                account_code: accountCode, // Expense account
+                description: `Expense: ${expenseData.description}`,
+                amount: expenseData.amount,
+                line_type: 'debit'
+              },
+              {
+                account_code: expenseData.wallet_id ? '1110' : '2100', // Cash or Accounts Payable
+                description: `Payment for expense: ${expenseData.description}`,
+                amount: expenseData.amount,
+                line_type: 'credit'
+              }
+            ]
+          };
+
+          await AccountingService.createJournalEntry(journalEntryData, userId);
+          log.info('Accounting journal entry created for expense', {
+            expenseId: expense.id,
+            amount: expenseData.amount,
+            accountCode: accountCode
+          });
+        } catch (accountingError) {
+          // Don't fail expense creation if accounting fails
+          log.error('Failed to create accounting entry for expense:', accountingError);
+          // Expense is still created, accounting error is logged
+        }
+      }
 
       await auditLogger.logAction({
         businessId,
@@ -551,7 +595,7 @@ export class ExpenseService {
   }
 
   /**
-   * Approve or reject expense
+   * Approve or reject expense WITH ACCOUNTING INTEGRATION
    */
   static async approveExpense(businessId, expenseId, approvalData, userId) {
     const client = await getClient();
@@ -603,6 +647,54 @@ export class ExpenseService {
           },
           userId
         );
+      }
+
+      // 🆕 ACCOUNTING INTEGRATION: Create journal entry when expense is approved/paid
+      if (approvalData.status === 'approved' || approvalData.status === 'paid') {
+        try {
+          const { AccountingService } = await import('./accountingService.js');
+          
+          // Only create accounting entry if not already created (when expense was created as paid)
+          const existingJournalCheck = await client.query(
+            `SELECT COUNT(*) as count FROM journal_entries 
+             WHERE business_id = $1 AND reference_type = 'expense' AND reference_id = $2`,
+            [businessId, expenseId]
+          );
+
+          if (parseInt(existingJournalCheck.rows[0].count) === 0) {
+            const accountCode = await this.mapExpenseCategoryToAccount(currentExpense.category_id, businessId);
+            
+            const journalEntryData = {
+              business_id: businessId,
+              description: `Expense Approval: ${currentExpense.description}`,
+              journal_date: new Date(),
+              reference_type: 'expense',
+              reference_id: expenseId,
+              lines: [
+                {
+                  account_code: accountCode,
+                  description: `Expense: ${currentExpense.description}`,
+                  amount: currentExpense.amount,
+                  line_type: 'debit'
+                },
+                {
+                  account_code: currentExpense.wallet_id ? '1110' : '2100',
+                  description: `Payment for expense: ${currentExpense.description}`,
+                  amount: currentExpense.amount,
+                  line_type: 'credit'
+                }
+              ]
+            };
+
+            await AccountingService.createJournalEntry(journalEntryData, userId);
+            log.info('Accounting journal entry created for approved expense', {
+              expenseId: expenseId,
+              amount: currentExpense.amount
+            });
+          }
+        } catch (accountingError) {
+          log.error('Failed to create accounting entry for approved expense:', accountingError);
+        }
       }
 
       await auditLogger.logAction({
@@ -709,6 +801,41 @@ export class ExpenseService {
         businessId
       });
       throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * 🆕 Helper: Map expense category to accounting account code
+   */
+  static async mapExpenseCategoryToAccount(categoryId, businessId) {
+    const client = await getClient();
+    
+    try {
+      // Try to get custom mapping from expense_categories table
+      const result = await client.query(
+        `SELECT name, COALESCE(account_code, 
+          CASE 
+            WHEN name ILIKE '%rent%' THEN '5200'
+            WHEN name ILIKE '%salary%' OR name ILIKE '%wage%' THEN '5500'
+            WHEN name ILIKE '%utility%' THEN '5400'
+            WHEN name ILIKE '%advertis%' OR name ILIKE '%market%' THEN '5500'
+            ELSE '5300'  -- Default to Office Expenses
+          END) as account_code
+         FROM expense_categories 
+         WHERE id = $1 AND business_id = $2`,
+        [categoryId, businessId]
+      );
+
+      if (result.rows.length > 0) {
+        return result.rows[0].account_code;
+      }
+
+      return '5300'; // Default Office Expenses
+    } catch (error) {
+      log.warn('Error mapping expense category to account code:', error);
+      return '5300'; // Default fallback
     } finally {
       client.release();
     }

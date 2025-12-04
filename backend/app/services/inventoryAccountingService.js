@@ -1,3 +1,4 @@
+// File: backend/app/services/inventoryAccountingService.js
 import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
@@ -5,21 +6,11 @@ import { AccountingService } from './accountingService.js';
 
 /**
  * INVENTORY ACCOUNTING SERVICE
- * GAAP-compliant inventory accounting with COGS tracking
- * Integrates inventory system with accounting system
+ * FIXED: Use created_at instead of transaction_date
  */
 export class InventoryAccountingService {
   /**
    * Record inventory purchase with accounting entries
-   * @param {Object} purchaseData - Purchase data
-   * @param {UUID} purchaseData.business_id - Business ID
-   * @param {UUID} purchaseData.purchase_order_id - Purchase order ID
-   * @param {UUID} purchaseData.inventory_item_id - Inventory item ID
-   * @param {Number} purchaseData.quantity - Quantity purchased
-   * @param {Number} purchaseData.unit_cost - Unit cost
-   * @param {String} purchaseData.payment_method - 'cash' or 'accounts_payable'
-   * @param {UUID} userId - User ID
-   * @returns {Object} Result with inventory transaction and journal entry
    */
   static async recordInventoryPurchase(purchaseData, userId) {
     const client = await getClient();
@@ -29,7 +20,7 @@ export class InventoryAccountingService {
 
       // 1. Get inventory item details
       const itemResult = await client.query(
-        `SELECT id, name, sku FROM inventory_items 
+        `SELECT id, name, sku FROM inventory_items
          WHERE id = $1 AND business_id = $2`,
         [purchaseData.inventory_item_id, purchaseData.business_id]
       );
@@ -81,7 +72,7 @@ export class InventoryAccountingService {
 
       // 4. Update inventory item stock
       await client.query(
-        `UPDATE inventory_items 
+        `UPDATE inventory_items
          SET current_stock = current_stock + $1,
              updated_at = NOW()
          WHERE id = $2`,
@@ -131,12 +122,6 @@ export class InventoryAccountingService {
 
   /**
    * Record POS sale with COGS accounting
-   * @param {Object} saleData - Sale data
-   * @param {UUID} saleData.business_id - Business ID
-   * @param {UUID} saleData.pos_transaction_id - POS transaction ID
-   * @param {Array} saleData.items - Sale items
-   * @param {UUID} userId - User ID
-   * @returns {Object} Result with COGS entries
    */
   static async recordPosSaleWithCogs(saleData, userId) {
     const client = await getClient();
@@ -152,8 +137,8 @@ export class InventoryAccountingService {
         if (item.inventory_item_id) {
           // Get current cost from inventory
           const costResult = await client.query(
-            `SELECT cost_price, current_stock, name 
-             FROM inventory_items 
+            `SELECT cost_price, current_stock, name
+             FROM inventory_items
              WHERE id = $1 AND business_id = $2`,
             [item.inventory_item_id, saleData.business_id]
           );
@@ -198,7 +183,7 @@ export class InventoryAccountingService {
 
           // Update inventory stock
           await client.query(
-            `UPDATE inventory_items 
+            `UPDATE inventory_items
              SET current_stock = current_stock - $1,
                  updated_at = NOW()
              WHERE id = $2`,
@@ -208,7 +193,7 @@ export class InventoryAccountingService {
           // Update product stock if linked
           if (item.product_id) {
             await client.query(
-              `UPDATE products 
+              `UPDATE products
                SET current_stock = current_stock - $1,
                    updated_at = NOW()
                WHERE id = $2 AND business_id = $3`,
@@ -239,7 +224,7 @@ export class InventoryAccountingService {
         cogsJournalEntry = await AccountingService.createJournalEntry({
           business_id: saleData.business_id,
           description: `COGS for POS Sale #${saleData.pos_transaction_id}`,
-          transaction_date: new Date(),
+          journal_date: new Date(),
           reference_type: 'pos_transaction',
           reference_id: saleData.pos_transaction_id,
           lines: [
@@ -247,13 +232,13 @@ export class InventoryAccountingService {
               account_code: '5100', // Cost of Goods Sold
               description: 'Cost of inventory sold in POS transaction',
               amount: totalCogs,
-              normal_balance: 'debit'
+              line_type: 'debit'
             },
             {
               account_code: '1300', // Inventory
               description: 'Reduction in inventory from POS sales',
               amount: totalCogs,
-              normal_balance: 'credit'
+              line_type: 'credit'
             }
           ]
         }, userId);
@@ -261,7 +246,7 @@ export class InventoryAccountingService {
         // Link COGS journal entry to inventory transactions
         for (const transaction of cogsTransactions) {
           await client.query(
-            `UPDATE inventory_transactions 
+            `UPDATE inventory_transactions
              SET cogs_entry_id = $1
              WHERE id = $2`,
             [cogsJournalEntry.journal_entry.id, transaction.transaction.id]
@@ -309,10 +294,7 @@ export class InventoryAccountingService {
   }
 
   /**
-   * Sync inventory item to product (make sellable in POS)
-   * @param {UUID} inventoryItemId - Inventory item ID
-   * @param {UUID} userId - User ID
-   * @returns {Object} Sync result
+   * Sync inventory item to product
    */
   static async syncInventoryToProduct(inventoryItemId, userId) {
     const client = await getClient();
@@ -334,7 +316,7 @@ export class InventoryAccountingService {
 
       // Check if product already exists for this inventory item
       const productResult = await client.query(
-        `SELECT * FROM products 
+        `SELECT * FROM products
          WHERE business_id = $1 AND inventory_item_id = $2`,
         [inventoryItem.business_id, inventoryItemId]
       );
@@ -343,8 +325,8 @@ export class InventoryAccountingService {
       if (productResult.rows.length > 0) {
         // Update existing product
         const updateResult = await client.query(
-          `UPDATE products 
-           SET 
+          `UPDATE products
+           SET
              name = $1,
              description = COALESCE($2, description),
              sku = $3,
@@ -408,7 +390,7 @@ export class InventoryAccountingService {
 
       // Update inventory item with product reference
       await client.query(
-        `UPDATE inventory_items 
+        `UPDATE inventory_items
          SET updated_at = NOW()
          WHERE id = $1`,
         [inventoryItemId]
@@ -448,26 +430,18 @@ export class InventoryAccountingService {
 
   /**
    * Get inventory valuation (GAAP-compliant)
-   * @param {UUID} businessId - Business ID
-   * @param {String} method - Valuation method: 'fifo', 'lifo', 'average'
-   * @param {Date} asOfDate - Valuation date
-   * @returns {Object} Inventory valuation
+   * FIXED: Use created_at instead of transaction_date
    */
   static async getInventoryValuation(businessId, method = 'fifo', asOfDate = new Date()) {
     const client = await getClient();
 
     try {
       let valuationQuery;
+      let queryParams;
+
       switch (method.toLowerCase()) {
         case 'fifo':
-          valuationQuery = `
-            SELECT * FROM inventory_valuation_fifo 
-            WHERE business_id = $1
-            ORDER BY inventory_item_id
-          `;
-          break;
-
-        case 'average':
+          // FIXED: Use created_at instead of transaction_date
           valuationQuery = `
             SELECT 
               it.business_id,
@@ -477,24 +451,50 @@ export class InventoryAccountingService {
               SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE 0 END) as total_purchased,
               SUM(CASE WHEN it.transaction_type = 'sale' THEN it.quantity ELSE 0 END) as total_sold,
               SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE -it.quantity END) as current_quantity,
-              AVG(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END) as average_cost,
-              SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.total_cost ELSE 0 END) as total_investment,
+              MIN(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END) as earliest_cost,
+              SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity * it.unit_cost ELSE 0 END) as total_investment,
               (SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE -it.quantity END) *
-               AVG(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END)) as current_value
+               MIN(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END)) as current_value
             FROM inventory_transactions it
             JOIN inventory_items ii ON it.inventory_item_id = ii.id
-            WHERE it.business_id = $1 
+            WHERE it.business_id = $1
               AND it.created_at <= $2
             GROUP BY it.business_id, it.inventory_item_id, ii.name, ii.sku
             ORDER BY ii.name
           `;
+          queryParams = [businessId, asOfDate];
+          break;
+
+        case 'average':
+          // FIXED: Use created_at instead of transaction_date
+          valuationQuery = `
+            SELECT
+              it.business_id,
+              it.inventory_item_id,
+              ii.name as item_name,
+              ii.sku,
+              SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE 0 END) as total_purchased,
+              SUM(CASE WHEN it.transaction_type = 'sale' THEN it.quantity ELSE 0 END) as total_sold,
+              SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE -it.quantity END) as current_quantity,
+              AVG(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END) as average_cost,
+              SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity * it.unit_cost ELSE 0 END) as total_investment,
+              (SUM(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.quantity ELSE -it.quantity END) *
+               AVG(CASE WHEN it.transaction_type IN ('purchase', 'adjustment') THEN it.unit_cost END)) as current_value
+            FROM inventory_transactions it
+            JOIN inventory_items ii ON it.inventory_item_id = ii.id
+            WHERE it.business_id = $1
+              AND it.created_at <= $2
+            GROUP BY it.business_id, it.inventory_item_id, ii.name, ii.sku
+            ORDER BY ii.name
+          `;
+          queryParams = [businessId, asOfDate];
           break;
 
         default:
           throw new Error(`Unsupported valuation method: ${method}`);
       }
 
-      const result = await client.query(valuationQuery, [businessId, asOfDate]);
+      const result = await client.query(valuationQuery, queryParams);
 
       const totalValuation = result.rows.reduce((sum, row) => {
         return sum + (parseFloat(row.current_value) || 0);
@@ -526,23 +526,20 @@ export class InventoryAccountingService {
 
   /**
    * Get COGS report for a period
-   * @param {UUID} businessId - Business ID
-   * @param {Date} startDate - Start date
-   * @param {Date} endDate - End date
-   * @returns {Object} COGS report
+   * FIXED: Use created_at instead of transaction_date
    */
   static async getCogsReport(businessId, startDate, endDate) {
     const client = await getClient();
 
     try {
       const result = await client.query(
-        `SELECT 
+        `SELECT
           it.inventory_item_id,
           ii.name as item_name,
           ii.sku,
           SUM(it.quantity) as total_quantity_sold,
           AVG(it.unit_cost) as average_unit_cost,
-          SUM(it.total_cost) as total_cogs,
+          SUM(it.quantity * it.unit_cost) as total_cogs,
           COUNT(DISTINCT it.reference_id) as number_of_sales,
           MIN(it.created_at) as first_sale_date,
           MAX(it.created_at) as last_sale_date
@@ -585,10 +582,7 @@ export class InventoryAccountingService {
   }
 
   /**
-   * Sync all inventory items to products (bulk operation)
-   * @param {UUID} businessId - Business ID
-   * @param {UUID} userId - User ID
-   * @returns {Object} Sync results
+   * Sync all inventory items to products
    */
   static async syncAllInventoryToProducts(businessId, userId) {
     const client = await getClient();
@@ -596,7 +590,7 @@ export class InventoryAccountingService {
     try {
       // Get all inventory items without linked products
       const inventoryItemsResult = await client.query(
-        `SELECT ii.* 
+        `SELECT ii.*
          FROM inventory_items ii
          LEFT JOIN products p ON ii.id = p.inventory_item_id
          WHERE ii.business_id = $1 AND p.id IS NULL`,

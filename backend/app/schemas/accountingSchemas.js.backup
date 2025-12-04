@@ -1,0 +1,228 @@
+import Joi from 'joi';
+import { log } from '../utils/logger.js';
+
+/**
+ * GAAP-COMPLIANT ACCOUNTING VALIDATION SCHEMAS
+ * Ensures all accounting data meets GAAP standards before processing
+ */
+export class AccountingSchemas {
+  /**
+   * Journal Entry Line Validation
+   */
+  static journalEntryLineSchema = Joi.object({
+    account_code: Joi.string()
+      .pattern(/^\d{4}$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Account code must be a 4-digit number',
+        'any.required': 'Account code is required'
+      }),
+
+    description: Joi.string()
+      .max(500)
+      .required()
+      .messages({
+        'string.max': 'Description must not exceed 500 characters',
+        'any.required': 'Description is required'
+      }),
+
+    amount: Joi.number()
+      .positive()
+      .precision(4)
+      .required()
+      .messages({
+        'number.positive': 'Amount must be positive',
+        'number.precision': 'Amount must have maximum 4 decimal places',
+        'any.required': 'Amount is required'
+      }),
+
+    normal_balance: Joi.string()
+      .valid('debit', 'credit')
+      .required()
+      .messages({
+        'any.only': 'Normal balance must be either "debit" or "credit"',
+        'any.required': 'Normal balance is required'
+      })
+  });
+
+  /**
+   * Complete Journal Entry Validation
+   * Includes custom validation for Debits = Credits
+   */
+  static journalEntrySchema = Joi.object({
+    description: Joi.string()
+      .max(1000)
+      .required()
+      .messages({
+        'string.max': 'Description must not exceed 1000 characters',
+        'any.required': 'Description is required'
+      }),
+
+    transaction_date: Joi.date()
+      .max('now')
+      .default(() => new Date(), 'Current date')
+      .messages({
+        'date.max': 'Transaction date cannot be in the future'
+      }),
+
+    reference_type: Joi.string()
+      .valid(
+        'pos_transaction',
+        'purchase_order',
+        'invoice',
+        'expense',
+        'depreciation',
+        'adjustment',
+        'manual_entry'
+      )
+      .required()
+      .messages({
+        'any.only': 'Invalid reference type',
+        'any.required': 'Reference type is required'
+      }),
+
+    reference_id: Joi.string()
+      .uuid()
+      .allow(null, '')
+      .messages({
+        'string.guid': 'Reference ID must be a valid UUID'
+      }),
+
+    lines: Joi.array()
+      .items(this.journalEntryLineSchema)
+      .min(2)
+      .required()
+      .custom((value, helpers) => {
+        // GAAP RULE: Debits must equal Credits
+        const totalDebits = value
+          .filter(line => line.normal_balance === 'debit')
+          .reduce((sum, line) => sum + parseFloat(line.amount), 0);
+
+        const totalCredits = value
+          .filter(line => line.normal_balance === 'credit')
+          .reduce((sum, line) => sum + parseFloat(line.amount), 0);
+
+        // Allow for tiny floating point differences (accounting tolerance)
+        if (Math.abs(totalDebits - totalCredits) > 0.001) {
+          return helpers.error('any.custom', {
+            message: `Debits (${totalDebits.toFixed(2)}) do not equal Credits (${totalCredits.toFixed(2)})`
+          });
+        }
+
+        return value;
+      })
+      .messages({
+        'array.min': 'Journal entry must have at least 2 lines (debit and credit)',
+        'any.required': 'Journal entry lines are required',
+        'any.custom': 'Debits must equal Credits'
+      })
+  });
+
+  /**
+   * Trial Balance Report Validation
+   */
+  static trialBalanceSchema = Joi.object({
+    start_date: Joi.date()
+      .max(Joi.ref('end_date'))
+      .messages({
+        'date.max': 'Start date cannot be after end date'
+      }),
+
+    end_date: Joi.date()
+      .max('now')
+      .default(() => new Date(), 'Current date')
+      .messages({
+        'date.max': 'End date cannot be in the future'
+      })
+  });
+
+  /**
+   * General Ledger Validation
+   */
+  static generalLedgerSchema = Joi.object({
+    account_code: Joi.string()
+      .pattern(/^\d{4}$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Account code must be a 4-digit number',
+        'any.required': 'Account code is required'
+      }),
+
+    start_date: Joi.date()
+      .max(Joi.ref('end_date'))
+      .messages({
+        'date.max': 'Start date cannot be after end date'
+      }),
+
+    end_date: Joi.date()
+      .max('now')
+      .default(() => new Date(), 'Current date')
+  });
+
+  /**
+   * Inventory Valuation Validation
+   */
+  static inventoryValuationSchema = Joi.object({
+    method: Joi.string()
+      .valid('fifo', 'average')
+      .default('fifo')
+      .messages({
+        'any.only': 'Valuation method must be either "fifo" or "average"'
+      }),
+
+    as_of_date: Joi.date()
+      .max('now')
+      .default(() => new Date(), 'Current date')
+  });
+
+  /**
+   * COGS Report Validation
+   */
+  static cogsReportSchema = Joi.object({
+    start_date: Joi.date()
+      .required()
+      .max(Joi.ref('end_date')),
+
+    end_date: Joi.date()
+      .required()
+      .max('now')
+  });
+
+  /**
+   * Inventory Sync Validation
+   */
+  static inventorySyncSchema = Joi.object({
+    source: Joi.string()
+      .valid('product', 'inventory', 'average')
+      .default('inventory')
+      .messages({
+        'any.only': 'Sync source must be "product", "inventory", or "average"'
+      })
+  });
+
+  /**
+   * Financial Reports Validation (for future use)
+   */
+  static financialReportSchema = Joi.object({
+    report_type: Joi.string()
+      .valid('profit_loss', 'balance_sheet', 'cash_flow')
+      .required()
+      .messages({
+        'any.only': 'Report type must be "profit_loss", "balance_sheet", or "cash_flow"'
+      }),
+
+    start_date: Joi.date()
+      .required()
+      .max(Joi.ref('end_date')),
+
+    end_date: Joi.date()
+      .required()
+      .max('now'),
+
+    format: Joi.string()
+      .valid('json', 'pdf', 'csv')
+      .default('json')
+  });
+}
+
+export default AccountingSchemas;

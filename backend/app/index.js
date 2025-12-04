@@ -59,6 +59,11 @@ import cameraRoutes from './routes/cameraRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import branchRoutes from './routes/branchRoutes.js';
 
+//accounting route
+// Add this import with other route imports
+import accountingRoutes from './routes/accountingRoutes.js';
+
+
 //additional invoice routes
 import invoiceTemplateRoutes from './routes/invoiceTemplateRoutes.js';
 import recurringInvoiceRoutes from './routes/recurringInvoiceRoutes.js';
@@ -192,6 +197,10 @@ app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/analytics/sales', salesAnalyticsRoutes);
+
+//Acconting route
+// Add this with other protected routes (after authentication middleware)
+app.use('/api/accounting', accountingRoutes);
 
 app.use('/api/departments', departmentRoutes);
 app.use('/api/job-assignments', jobAssignmentRoutes);

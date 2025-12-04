@@ -122,7 +122,7 @@ export const invoiceService = {
   async getInvoiceById(id, businessId, client = null) {
     const useExternalClient = client !== null;
     const dbClient = client || await getClient();
-    
+
     try {
       const invoiceQuery = `
         SELECT
@@ -270,16 +270,15 @@ export const invoiceService = {
       const newAmountPaid = (parseFloat(currentInvoice.amount_paid) || 0) + parseFloat(paymentData.amount);
       const balanceDue = parseFloat(currentInvoice.total_amount) - newAmountPaid;
 
-      // FIXED: Use valid status values that match database constraint
+      // Determine new status
       let newStatus = currentInvoice.status;
       if (balanceDue <= 0) {
         newStatus = 'paid';
       } else if (newAmountPaid > 0 && currentInvoice.status === 'draft') {
-        newStatus = 'sent'; // Move from draft to sent when first payment is made
+        newStatus = 'sent';
       }
-      // If already sent and partial payment, keep as 'sent'
 
-      // Only update amount_paid and status, let database compute balance_due
+      // Update invoice
       const updateQuery = `
         UPDATE invoices
         SET
@@ -304,10 +303,102 @@ export const invoiceService = {
       const result = await client.query(updateQuery, values);
       const updatedInvoice = result.rows[0];
 
-      // Get complete updated invoice for audit (this will have the computed balance_due)
+      // Get complete updated invoice
       const completeUpdatedInvoice = await this.getInvoiceById(invoiceId, businessId, client);
 
-      // Log the audit action
+      // 🆕 ACCOUNTING INTEGRATION: Create journal entry for invoice payment
+      if (paymentData.amount > 0) {
+        try {
+          const { AccountingService } = await import('./accountingService.js');
+          
+          // Determine revenue account based on line items
+          let revenueAccount = '4100'; // Default Sales Revenue
+          if (currentInvoice.line_items && currentInvoice.line_items.length > 0) {
+            const hasServices = currentInvoice.line_items.some(item => 
+              item.service_id || item.description?.toLowerCase().includes('service')
+            );
+            revenueAccount = hasServices ? '4200' : '4100';
+          }
+
+          const journalEntryData = {
+            business_id: businessId,
+            description: `Invoice Payment: ${currentInvoice.invoice_number}`,
+            journal_date: paymentData.payment_date || new Date(),
+            reference_type: 'invoice',
+            reference_id: invoiceId,
+            lines: [
+              {
+                account_code: '1110', // Cash
+                description: `Payment received for Invoice ${currentInvoice.invoice_number}`,
+                amount: paymentData.amount,
+                line_type: 'debit'
+              },
+              {
+                account_code: revenueAccount, // Sales Revenue or Service Revenue
+                description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
+                amount: paymentData.amount,
+                line_type: 'credit'
+              }
+            ]
+          };
+
+          await AccountingService.createJournalEntry(journalEntryData, userId);
+          log.info('Accounting journal entry created for invoice payment', {
+            invoiceId: invoiceId,
+            invoiceNumber: currentInvoice.invoice_number,
+            amount: paymentData.amount,
+            revenueAccount: revenueAccount
+          });
+
+          // 🆕 If this is a partial payment and previous revenue wasn't recorded
+          // (accrual accounting: record revenue when invoice is sent, not when paid)
+          if (currentInvoice.status === 'sent' && newStatus === 'sent') {
+            // Check if revenue was already recorded when invoice was sent
+            const existingRevenueCheck = await client.query(
+              `SELECT COUNT(*) as count FROM journal_entries 
+               WHERE business_id = $1 AND reference_type = 'invoice' AND reference_id = $2
+               AND description LIKE '%Revenue from Invoice%'`,
+              [businessId, invoiceId]
+            );
+
+            if (parseInt(existingRevenueCheck.rows[0].count) === 0) {
+              // Record accounts receivable for the unpaid portion
+              const accountsReceivableEntry = {
+                business_id: businessId,
+                description: `Accounts Receivable: Invoice ${currentInvoice.invoice_number}`,
+                journal_date: currentInvoice.invoice_date || new Date(),
+                reference_type: 'invoice',
+                reference_id: invoiceId,
+                lines: [
+                  {
+                    account_code: '1200', // Accounts Receivable
+                    description: `Receivable for Invoice ${currentInvoice.invoice_number}`,
+                    amount: currentInvoice.total_amount,
+                    line_type: 'debit'
+                  },
+                  {
+                    account_code: revenueAccount,
+                    description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
+                    amount: currentInvoice.total_amount,
+                    line_type: 'credit'
+                  }
+                ]
+              };
+
+              await AccountingService.createJournalEntry(accountsReceivableEntry, userId);
+              log.info('Accrual accounting: Recorded revenue and accounts receivable', {
+                invoiceId: invoiceId,
+                amount: currentInvoice.total_amount
+              });
+            }
+          }
+
+        } catch (accountingError) {
+          log.error('Failed to create accounting entry for invoice payment:', accountingError);
+          // Don't fail the payment recording
+        }
+      }
+
       await auditLogger.logAction({
         businessId,
         userId,
