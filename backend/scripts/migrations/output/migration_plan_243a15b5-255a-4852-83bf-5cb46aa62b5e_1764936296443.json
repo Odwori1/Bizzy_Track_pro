@@ -1,0 +1,237 @@
+{
+  "business_id": "243a15b5-255a-4852-83bf-5cb46aa62b5e",
+  "calculated_at": "2025-12-05T12:04:56.381Z",
+  "assets": {
+    "cash": {
+      "amount": 3055500,
+      "source": "money_wallets",
+      "account_code": "1110",
+      "details": "7 wallets"
+    },
+    "fixed_assets": {
+      "amount": 246280.04,
+      "source": "fixed_assets (current_value)",
+      "account_code": "1300",
+      "details": "14 assets"
+    },
+    "inventory": {
+      "amount": 305000,
+      "source": "inventory_items ONLY (not products)",
+      "account_code": "1300",
+      "details": "3 inventory items (5 products excluded from inventory valuation)",
+      "notes": "Products table exists but NOT in inventory management system per audit report"
+    },
+    "products_excluded": {
+      "amount": 8370,
+      "source": "products (excluded from inventory)",
+      "details": "Products are sold but not tracked in inventory system"
+    },
+    "accounts_receivable": {
+      "amount": 3316.28,
+      "source": "invoices",
+      "account_code": "1200",
+      "details": "18 unpaid invoices"
+    }
+  },
+  "liabilities": {
+    "accounts_payable": {
+      "amount": 1000,
+      "source": "purchase_orders",
+      "account_code": "2100",
+      "details": "1 unpaid purchase orders"
+    }
+  },
+  "revenue": {
+    "equipment_hire": {
+      "amount": 700,
+      "source": "pos_transaction_items (equipment_hire)",
+      "account_code": "4200",
+      "details": "2 equipment hires (treated as service revenue)"
+    },
+    "product_sales": {
+      "amount": 6835,
+      "source": "pos_transaction_items (product)",
+      "account_code": "4100",
+      "details": "17 product sales"
+    },
+    "service_sales": {
+      "amount": 1250,
+      "source": "pos_transaction_items (service)",
+      "account_code": "4200",
+      "details": "3 service sales"
+    },
+    "total": {
+      "amount": 9030,
+      "source": "pos_transactions.final_amount",
+      "details": "Total POS revenue (includes taxes/fees/adjustments: 245.00)"
+    },
+    "adjustment": {
+      "amount": 245,
+      "source": "POS taxes/fees/adjustments",
+      "details": "Difference between transaction total and items total"
+    }
+  },
+  "expenses": {
+    "amount": 82425,
+    "source": "expenses (paid)",
+    "account_code": "5200",
+    "details": "6 paid expenses"
+  },
+  "cogs": {
+    "amount": 1295,
+    "source": "pos_transaction_items × products.cost_price",
+    "account_code": "5100",
+    "details": "9 product items sold"
+  },
+  "journal_entries": [
+    {
+      "entry_number": 1,
+      "description": "Opening Balance Migration - Assets & Liabilities",
+      "journal_date": "2025-12-05",
+      "reference_type": "migration",
+      "reference_id": "migration_243a15b5-255a-4852-83bf-5cb46aa62b5e_1764936296441",
+      "lines": [
+        {
+          "account_code": "1110",
+          "description": "Cash & Equivalents - Opening Balance",
+          "amount": 3055500,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "1200",
+          "description": "Accounts Receivable - Opening Balance",
+          "amount": 3316.28,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "1300",
+          "description": "Fixed Assets - Opening Balance",
+          "amount": 246280.04,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "1300",
+          "description": "Inventory Assets - Opening Balance",
+          "amount": 305000,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "2100",
+          "description": "Accounts Payable - Opening Balance",
+          "amount": 1000,
+          "line_type": "credit"
+        },
+        {
+          "account_code": "3100",
+          "description": "Owner's Capital - Opening Equity",
+          "amount": 3609096.32,
+          "line_type": "credit"
+        }
+      ],
+      "is_balanced": true,
+      "total_debits": 3610096.32,
+      "total_credits": 3610096.32,
+      "difference": 0
+    },
+    {
+      "entry_number": 2,
+      "description": "Revenue Recognition - Historical Sales (Includes taxes/fees)",
+      "journal_date": "2025-12-05",
+      "reference_type": "migration",
+      "reference_id": "migration_243a15b5-255a-4852-83bf-5cb46aa62b5e_1764936296441_revenue",
+      "lines": [
+        {
+          "account_code": "1110",
+          "description": "Cash Received from Historical Sales",
+          "amount": 9030,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "4100",
+          "description": "Product Sales Revenue",
+          "amount": 6835,
+          "line_type": "credit"
+        },
+        {
+          "account_code": "4200",
+          "description": "Service Revenue (Services + Equipment Hire)",
+          "amount": 1950,
+          "line_type": "credit"
+        },
+        {
+          "account_code": "4100",
+          "description": "Revenue Adjustment (Taxes/Fees)",
+          "amount": 245,
+          "line_type": "credit"
+        }
+      ],
+      "is_balanced": true,
+      "total_debits": 9030,
+      "total_credits": 9030,
+      "difference": 0
+    },
+    {
+      "entry_number": 3,
+      "description": "COGS Recognition - Historical Product Sales",
+      "journal_date": "2025-12-05",
+      "reference_type": "migration",
+      "reference_id": "migration_243a15b5-255a-4852-83bf-5cb46aa62b5e_1764936296441_cogs",
+      "lines": [
+        {
+          "account_code": "5100",
+          "description": "Cost of Goods Sold - Historical",
+          "amount": 1295,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "1300",
+          "description": "Inventory Reduction - COGS",
+          "amount": 1295,
+          "line_type": "credit"
+        }
+      ],
+      "is_balanced": true,
+      "total_debits": 1295,
+      "total_credits": 1295,
+      "difference": 0
+    },
+    {
+      "entry_number": 4,
+      "description": "Expense Recognition - Historical Expenses",
+      "journal_date": "2025-12-05",
+      "reference_type": "migration",
+      "reference_id": "migration_243a15b5-255a-4852-83bf-5cb46aa62b5e_1764936296441_expenses",
+      "lines": [
+        {
+          "account_code": "5200",
+          "description": "Business Expenses - Historical",
+          "amount": 82425,
+          "line_type": "debit"
+        },
+        {
+          "account_code": "1110",
+          "description": "Cash Payment for Expenses",
+          "amount": 82425,
+          "line_type": "credit"
+        }
+      ],
+      "is_balanced": true,
+      "total_debits": 82425,
+      "total_credits": 82425,
+      "difference": 0
+    }
+  ],
+  "accounting_equation": {
+    "total_debits": 3702846.32,
+    "total_credits": 3702846.32,
+    "is_balanced": true,
+    "difference": 0
+  },
+  "profit_loss": {
+    "total_revenue": 9030,
+    "total_expenses": 82425,
+    "total_cogs": 1295,
+    "net_profit_loss": -74690,
+    "is_profit": false
+  }
+}

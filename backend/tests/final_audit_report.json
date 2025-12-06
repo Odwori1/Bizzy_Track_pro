@@ -1,0 +1,128 @@
+{
+  "business": {
+    "name": "Fixed Permissions Test",
+    "currency": "UGX",
+    "currency_symbol": "USh",
+    "id": "243a15b5-255a-4852-83bf-5cb46aa62b5e"
+  },
+  "analysis_date": "2025-12-05T04:39:23.085Z",
+  "financial_data": {
+    "Cash (Money Wallets)": 3055500,
+    "Fixed Assets": 246280.04,
+    "Inventory Assets": 305000,
+    "Accounts Receivable": 3316.28,
+    "Sales Revenue": 9035,
+    "Business Expenses": 82425,
+    "Accounts Payable": 1000,
+    "Accounting System Total": 750
+  },
+  "balance_sheet": {
+    "assets": {
+      "cash": 3055500,
+      "fixed_assets": 246280.04,
+      "inventory": 305000,
+      "accounts_receivable": 3316.28,
+      "total": 3610096.32
+    },
+    "liabilities": {
+      "accounts_payable": 1000,
+      "total": 1000
+    },
+    "equity": {
+      "opening_equity": 3609096.32,
+      "revenue": 9035,
+      "expenses": 82425,
+      "net_profit": -73390,
+      "final_equity": 3535706.32
+    }
+  },
+  "accounting_equation": {
+    "formula": "Assets = Liabilities + Equity",
+    "calculated": "3610096.32 = 1000.00 + 3535706.32",
+    "balanced": false
+  },
+  "migration_plan": {
+    "step1": {
+      "description": "Opening Balance Entry",
+      "entries": [
+        {
+          "account": "1110",
+          "description": "Cash opening balance",
+          "type": "debit",
+          "amount": 3055500
+        },
+        {
+          "account": "1300",
+          "description": "Fixed Assets opening",
+          "type": "debit",
+          "amount": 246280.04
+        },
+        {
+          "account": "1300",
+          "description": "Inventory opening",
+          "type": "debit",
+          "amount": 305000
+        },
+        {
+          "account": "1200",
+          "description": "Accounts Receivable opening",
+          "type": "debit",
+          "amount": 3316.28
+        },
+        {
+          "account": "3100",
+          "description": "Opening Equity",
+          "type": "credit",
+          "amount": 3609096.32
+        },
+        {
+          "account": "2100",
+          "description": "Accounts Payable",
+          "type": "credit",
+          "amount": 1000
+        }
+      ]
+    },
+    "step2": {
+      "description": "Historical Revenue Recognition",
+      "entries": [
+        {
+          "account": "3100",
+          "description": "Transfer revenue to retained earnings",
+          "type": "debit",
+          "amount": 9035
+        },
+        {
+          "account": "3200",
+          "description": "Retained Earnings - Historical Revenue",
+          "type": "credit",
+          "amount": 9035
+        }
+      ]
+    },
+    "step3": {
+      "description": "Historical Expenses Recognition",
+      "entries": [
+        {
+          "account": "3200",
+          "description": "Retained Earnings - Historical Expenses",
+          "type": "debit",
+          "amount": 82425
+        },
+        {
+          "account": "3100",
+          "description": "Reduce opening equity for expenses",
+          "type": "credit",
+          "amount": 82425
+        }
+      ]
+    }
+  },
+  "gap_analysis": {
+    "legacy_total": 3701556.32,
+    "accounting_total": 750,
+    "gap": 3700806.32,
+    "percentage_in_accounting": 0.02026174763160162,
+    "migration_needed": true
+  }
+}

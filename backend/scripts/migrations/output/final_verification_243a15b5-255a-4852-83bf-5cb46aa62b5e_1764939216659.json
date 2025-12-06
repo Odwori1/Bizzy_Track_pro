@@ -1,0 +1,120 @@
+{
+  "business_id": "243a15b5-255a-4852-83bf-5cb46aa62b5e",
+  "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa",
+  "verified_at": "2025-12-05T12:53:36.658Z",
+  "journal_entries": [
+    {
+      "reference_number": "JE-MIG-1764938317350-83",
+      "description": "Opening Balance Migration - Assets & Liabilities",
+      "total_amount": 3610096.32,
+      "line_count": "6",
+      "total_debits": 3610096.32,
+      "total_credits": 3610096.32
+    },
+    {
+      "reference_number": "JE-MIG-1764938317374-633",
+      "description": "Revenue Recognition - Historical Sales (Includes taxes/fees)",
+      "total_amount": 9030,
+      "line_count": "4",
+      "total_debits": 9030,
+      "total_credits": 9030
+    },
+    {
+      "reference_number": "JE-MIG-1764938317393-161",
+      "description": "COGS Recognition - Historical Product Sales",
+      "total_amount": 1295,
+      "line_count": "2",
+      "total_debits": 1295,
+      "total_credits": 1295
+    },
+    {
+      "reference_number": "JE-MIG-1764938317400-885",
+      "description": "Expense Recognition - Historical Expenses",
+      "total_amount": 82425,
+      "line_count": "2",
+      "total_debits": 82425,
+      "total_credits": 82425
+    }
+  ],
+  "trial_balance": [
+    {
+      "account_code": "1110",
+      "account_name": "Cash",
+      "account_type": "asset",
+      "total_debits": 3064530,
+      "total_credits": 82425
+    },
+    {
+      "account_code": "1200",
+      "account_name": "Accounts Receivable",
+      "account_type": "asset",
+      "total_debits": 3316.28,
+      "total_credits": 0
+    },
+    {
+      "account_code": "1300",
+      "account_name": "Inventory",
+      "account_type": "asset",
+      "total_debits": 551280.04,
+      "total_credits": 1295
+    },
+    {
+      "account_code": "2100",
+      "account_name": "Accounts Payable",
+      "account_type": "liability",
+      "total_debits": 0,
+      "total_credits": 1000
+    },
+    {
+      "account_code": "3100",
+      "account_name": "Owner's Capital",
+      "account_type": "equity",
+      "total_debits": 0,
+      "total_credits": 3609096.32
+    },
+    {
+      "account_code": "4100",
+      "account_name": "Sales Revenue",
+      "account_type": "revenue",
+      "total_debits": 0,
+      "total_credits": 7080
+    },
+    {
+      "account_code": "4200",
+      "account_name": "Service Revenue",
+      "account_type": "revenue",
+      "total_debits": 0,
+      "total_credits": 1950
+    },
+    {
+      "account_code": "5100",
+      "account_name": "Cost of Goods Sold",
+      "account_type": "expense",
+      "total_debits": 1295,
+      "total_credits": 0
+    },
+    {
+      "account_code": "5200",
+      "account_name": "Rent Expense",
+      "account_type": "expense",
+      "total_debits": 82425,
+      "total_credits": 0
+    }
+  ],
+  "financial_position": {
+    "assets": 3535406.32,
+    "liabilities": 1000,
+    "opening_equity": 3609096.32,
+    "revenue": 9030,
+    "expenses": 83720,
+    "net_profit_loss": -74690,
+    "final_equity": 3534406.32
+  },
+  "balance_sheet_balanced": true,
+  "comparison_with_audit": {
+    "assets_match": false,
+    "liabilities_match": true,
+    "equity_match": false,
+    "notes": "Small differences due to database (9,030) vs audit (9,035) revenue"
+  }
+}

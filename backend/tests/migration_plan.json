@@ -1,0 +1,88 @@
+{
+  "business": {
+    "name": "Fixed Permissions Test",
+    "currency": "UGX",
+    "currency_symbol": "USh",
+    "id": "243a15b5-255a-4852-83bf-5cb46aa62b5e"
+  },
+  "analysis_date": "2025-12-05T04:10:24.658Z",
+  "legacy_data": {
+    "cash": 3055500,
+    "revenue": 9035,
+    "expenses": 82425,
+    "receivables": 3316.28
+  },
+  "calculated_position": {
+    "total_assets": 3058816.28,
+    "total_liabilities": 0,
+    "opening_equity": 3058816.28,
+    "retained_earnings": -73390
+  },
+  "migration_steps": [
+    {
+      "step": 1,
+      "description": "Opening Balance Entry",
+      "entries": [
+        {
+          "account": "1110",
+          "description": "Cash opening balance",
+          "type": "debit",
+          "amount": 3055500
+        },
+        {
+          "account": "1200",
+          "description": "Accounts Receivable opening",
+          "type": "debit",
+          "amount": 3316.28
+        },
+        {
+          "account": "3100",
+          "description": "Opening Equity",
+          "type": "credit",
+          "amount": 3058816.28
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "description": "Historical Revenue Recognition",
+      "entries": [
+        {
+          "account": "3100",
+          "description": "Transfer revenue to retained earnings",
+          "type": "debit",
+          "amount": 9035
+        },
+        {
+          "account": "3200",
+          "description": "Retained Earnings - Historical Revenue",
+          "type": "credit",
+          "amount": 9035
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "description": "Historical Expenses Recognition",
+      "entries": [
+        {
+          "account": "3200",
+          "description": "Retained Earnings - Historical Expenses",
+          "type": "debit",
+          "amount": 82425
+        },
+        {
+          "account": "3100",
+          "description": "Reduce opening equity for expenses",
+          "type": "credit",
+          "amount": 82425
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "accounting_equation": "Assets = Liabilities + Equity",
+    "calculated": "3058816.28 = 0.00 + 3058816.28",
+    "balanced": true
+  }
+}

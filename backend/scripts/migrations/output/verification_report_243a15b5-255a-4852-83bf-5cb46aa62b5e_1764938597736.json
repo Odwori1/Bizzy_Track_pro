@@ -1,0 +1,427 @@
+{
+  "business_id": "243a15b5-255a-4852-83bf-5cb46aa62b5e",
+  "verified_at": "2025-12-05T12:43:17.736Z",
+  "equation_verification": {
+    "total_debits": 3703596.32,
+    "total_credits": 3703596.32,
+    "is_balanced": true,
+    "difference": 0
+  },
+  "migration_entries": {
+    "summary": {
+      "total_entries": "4",
+      "batch_count": "1",
+      "first_entry": "2025-12-05T12:38:37.349Z",
+      "last_entry": "2025-12-05T12:38:37.400Z"
+    },
+    "entries": [
+      {
+        "reference_number": "JE-MIG-1764938317350-83",
+        "description": "Opening Balance Migration - Assets & Liabilities",
+        "total_amount": "3610096.32",
+        "journal_date": "2025-12-04T20:00:00.000Z",
+        "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa"
+      },
+      {
+        "reference_number": "JE-MIG-1764938317374-633",
+        "description": "Revenue Recognition - Historical Sales (Includes taxes/fees)",
+        "total_amount": "9030.00",
+        "journal_date": "2025-12-04T20:00:00.000Z",
+        "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa"
+      },
+      {
+        "reference_number": "JE-MIG-1764938317393-161",
+        "description": "COGS Recognition - Historical Product Sales",
+        "total_amount": "1295.00",
+        "journal_date": "2025-12-04T20:00:00.000Z",
+        "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa"
+      },
+      {
+        "reference_number": "JE-MIG-1764938317400-885",
+        "description": "Expense Recognition - Historical Expenses",
+        "total_amount": "82425.00",
+        "journal_date": "2025-12-04T20:00:00.000Z",
+        "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa"
+      }
+    ]
+  },
+  "trial_balance": {
+    "accounts": [
+      {
+        "account_code": "1110",
+        "account_name": "Cash",
+        "account_type": "asset",
+        "total_debits": "3065080.00",
+        "total_credits": "82625.00",
+        "balance": "2982455.00",
+        "normal_balance": "Debit"
+      },
+      {
+        "account_code": "1200",
+        "account_name": "Accounts Receivable",
+        "account_type": "asset",
+        "total_debits": "3316.28",
+        "total_credits": "0",
+        "balance": "3316.28",
+        "normal_balance": "Debit"
+      },
+      {
+        "account_code": "1300",
+        "account_name": "Inventory",
+        "account_type": "asset",
+        "total_debits": "551280.04",
+        "total_credits": "1295.00",
+        "balance": "549985.04",
+        "normal_balance": "Debit"
+      },
+      {
+        "account_code": "2100",
+        "account_name": "Accounts Payable",
+        "account_type": "liability",
+        "total_debits": "0",
+        "total_credits": "1000.00",
+        "balance": "-1000.00",
+        "normal_balance": "Credit"
+      },
+      {
+        "account_code": "3100",
+        "account_name": "Owner's Capital",
+        "account_type": "equity",
+        "total_debits": "0",
+        "total_credits": "3609096.32",
+        "balance": "-3609096.32",
+        "normal_balance": "Credit"
+      },
+      {
+        "account_code": "4100",
+        "account_name": "Sales Revenue",
+        "account_type": "revenue",
+        "total_debits": "0",
+        "total_credits": "7630.00",
+        "balance": "-7630.00",
+        "normal_balance": "Credit"
+      },
+      {
+        "account_code": "4200",
+        "account_name": "Service Revenue",
+        "account_type": "revenue",
+        "total_debits": "0",
+        "total_credits": "1950.00",
+        "balance": "-1950.00",
+        "normal_balance": "Credit"
+      },
+      {
+        "account_code": "5100",
+        "account_name": "Cost of Goods Sold",
+        "account_type": "expense",
+        "total_debits": "1295.00",
+        "total_credits": "0",
+        "balance": "1295.00",
+        "normal_balance": "Debit"
+      },
+      {
+        "account_code": "5200",
+        "account_name": "Rent Expense",
+        "account_type": "expense",
+        "total_debits": "82425.00",
+        "total_credits": "0",
+        "balance": "82425.00",
+        "normal_balance": "Debit"
+      },
+      {
+        "account_code": "5300",
+        "account_name": "Utilities Expense",
+        "account_type": "expense",
+        "total_debits": "200.00",
+        "total_credits": "0",
+        "balance": "200.00",
+        "normal_balance": "Debit"
+      }
+    ],
+    "summary": {
+      "total_debits": 3703596.32,
+      "total_credits": 3703596.32,
+      "is_balanced": true
+    }
+  },
+  "financial_position": {
+    "balance_sheet": {
+      "assets": {
+        "items": [
+          {
+            "account_code": "1110",
+            "account_name": "Cash",
+            "balance": "2982455.00"
+          },
+          {
+            "account_code": "1200",
+            "account_name": "Accounts Receivable",
+            "balance": "3316.28"
+          },
+          {
+            "account_code": "1300",
+            "account_name": "Inventory",
+            "balance": "549985.04"
+          }
+        ],
+        "total": 3535756.32
+      },
+      "liabilities": {
+        "items": [
+          {
+            "account_code": "2100",
+            "account_name": "Accounts Payable",
+            "balance": "1000.00"
+          }
+        ],
+        "total": 1000
+      },
+      "equity": {
+        "items": [
+          {
+            "account_code": "3100",
+            "account_name": "Owner's Capital",
+            "balance": "3609096.32"
+          }
+        ],
+        "total": 3609096.32
+      },
+      "equation_balanced": false,
+      "equation_difference": 74340
+    },
+    "profit_loss": {
+      "revenue": {
+        "items": [
+          {
+            "account_type": "revenue",
+            "account_code": "4100",
+            "account_name": "Sales Revenue",
+            "balance": "-7630.00"
+          },
+          {
+            "account_type": "revenue",
+            "account_code": "4200",
+            "account_name": "Service Revenue",
+            "balance": "-1950.00"
+          }
+        ],
+        "total": -9580
+      },
+      "expenses": {
+        "items": [
+          {
+            "account_type": "expense",
+            "account_code": "5100",
+            "account_name": "Cost of Goods Sold",
+            "balance": "1295.00"
+          },
+          {
+            "account_type": "expense",
+            "account_code": "5200",
+            "account_name": "Rent Expense",
+            "balance": "82425.00"
+          },
+          {
+            "account_type": "expense",
+            "account_code": "5300",
+            "account_name": "Utilities Expense",
+            "balance": "200.00"
+          }
+        ],
+        "total": 83920
+      },
+      "net_profit_loss": -93500,
+      "is_profit": false
+    }
+  },
+  "reconciliation": {
+    "legacy_data": {
+      "assets": {
+        "cash": {
+          "amount": 3055500,
+          "source": "money_wallets",
+          "account_code": "1110",
+          "details": "7 wallets"
+        },
+        "fixed_assets": {
+          "amount": 246280.04,
+          "source": "fixed_assets (current_value)",
+          "account_code": "1300",
+          "details": "14 assets"
+        },
+        "inventory": {
+          "amount": 305000,
+          "source": "inventory_items ONLY (not products)",
+          "account_code": "1300",
+          "details": "3 inventory items (5 products excluded from inventory valuation)",
+          "notes": "Products table exists but NOT in inventory management system per audit report"
+        },
+        "products_excluded": {
+          "amount": 8370,
+          "source": "products (excluded from inventory)",
+          "details": "Products are sold but not tracked in inventory system"
+        },
+        "accounts_receivable": {
+          "amount": 3316.28,
+          "source": "invoices",
+          "account_code": "1200",
+          "details": "18 unpaid invoices"
+        }
+      },
+      "liabilities": {
+        "accounts_payable": {
+          "amount": 1000,
+          "source": "purchase_orders",
+          "account_code": "2100",
+          "details": "1 unpaid purchase orders"
+        }
+      },
+      "revenue": {
+        "equipment_hire": {
+          "amount": 700,
+          "source": "pos_transaction_items (equipment_hire)",
+          "account_code": "4200",
+          "details": "2 equipment hires (treated as service revenue)"
+        },
+        "product_sales": {
+          "amount": 6835,
+          "source": "pos_transaction_items (product)",
+          "account_code": "4100",
+          "details": "17 product sales"
+        },
+        "service_sales": {
+          "amount": 1250,
+          "source": "pos_transaction_items (service)",
+          "account_code": "4200",
+          "details": "3 service sales"
+        },
+        "total": {
+          "amount": 9030,
+          "source": "pos_transactions.final_amount",
+          "details": "Total POS revenue (includes taxes/fees/adjustments: 245.00)"
+        },
+        "adjustment": {
+          "amount": 245,
+          "source": "POS taxes/fees/adjustments",
+          "details": "Difference between transaction total and items total"
+        }
+      },
+      "expenses": {
+        "amount": 82425,
+        "source": "expenses (paid)",
+        "account_code": "5200",
+        "details": "6 paid expenses"
+      },
+      "cogs": {
+        "amount": 1295,
+        "source": "pos_transaction_items × products.cost_price",
+        "account_code": "5100",
+        "details": "9 product items sold"
+      }
+    },
+    "accounting_data": {
+      "balance_sheet": {
+        "assets": {
+          "items": [
+            {
+              "account_code": "1110",
+              "account_name": "Cash",
+              "balance": "2982455.00"
+            },
+            {
+              "account_code": "1200",
+              "account_name": "Accounts Receivable",
+              "balance": "3316.28"
+            },
+            {
+              "account_code": "1300",
+              "account_name": "Inventory",
+              "balance": "549985.04"
+            }
+          ],
+          "total": 3535756.32
+        },
+        "liabilities": {
+          "items": [
+            {
+              "account_code": "2100",
+              "account_name": "Accounts Payable",
+              "balance": "1000.00"
+            }
+          ],
+          "total": 1000
+        },
+        "equity": {
+          "items": [
+            {
+              "account_code": "3100",
+              "account_name": "Owner's Capital",
+              "balance": "3609096.32"
+            }
+          ],
+          "total": 3609096.32
+        },
+        "equation_balanced": false,
+        "equation_difference": 74340
+      },
+      "profit_loss": {
+        "revenue": {
+          "items": [
+            {
+              "account_type": "revenue",
+              "account_code": "4100",
+              "account_name": "Sales Revenue",
+              "balance": "-7630.00"
+            },
+            {
+              "account_type": "revenue",
+              "account_code": "4200",
+              "account_name": "Service Revenue",
+              "balance": "-1950.00"
+            }
+          ],
+          "total": -9580
+        },
+        "expenses": {
+          "items": [
+            {
+              "account_type": "expense",
+              "account_code": "5100",
+              "account_name": "Cost of Goods Sold",
+              "balance": "1295.00"
+            },
+            {
+              "account_type": "expense",
+              "account_code": "5200",
+              "account_name": "Rent Expense",
+              "balance": "82425.00"
+            },
+            {
+              "account_type": "expense",
+              "account_code": "5300",
+              "account_name": "Utilities Expense",
+              "balance": "200.00"
+            }
+          ],
+          "total": 83920
+        },
+        "net_profit_loss": -93500,
+        "is_profit": false
+      }
+    },
+    "reconciliation": {
+      "assets": {},
+      "liabilities": {},
+      "revenue": {},
+      "expenses": {},
+      "discrepancies": [
+        {
+          "item": "Total Assets",
+          "legacy": 3610096.32,
+          "accounting": 3535756.32,
+          "difference": 74340
+        }
+      ]
+    }
+  }
+}

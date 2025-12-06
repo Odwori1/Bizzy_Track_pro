@@ -1,0 +1,40 @@
+{
+  "migration_batch_id": "2f31a4b0-89c5-4f47-af59-98db1703a9aa",
+  "business_id": "243a15b5-255a-4852-83bf-5cb46aa62b5e",
+  "user_id": "b4af1699-0149-47e2-bc55-66214c0572ba",
+  "executed_at": "2025-12-05T12:38:37.410Z",
+  "created_entries": [
+    {
+      "journal_entry_id": "46e3cc80-b2d6-493b-ba9b-dfaed9826e76",
+      "reference_number": "JE-MIG-1764938317350-83",
+      "description": "Opening Balance Migration - Assets & Liabilities",
+      "total_amount": "3610096.32"
+    },
+    {
+      "journal_entry_id": "24939660-65ff-4350-aa1f-d4cfd8f3f959",
+      "reference_number": "JE-MIG-1764938317374-633",
+      "description": "Revenue Recognition - Historical Sales (Includes taxes/fees)",
+      "total_amount": "9030.00"
+    },
+    {
+      "journal_entry_id": "c7d59efe-17cd-41fd-b64e-a39084415cdf",
+      "reference_number": "JE-MIG-1764938317393-161",
+      "description": "COGS Recognition - Historical Product Sales",
+      "total_amount": "1295.00"
+    },
+    {
+      "journal_entry_id": "8d9aa656-5de2-4d7a-afe4-7c30694ba8f6",
+      "reference_number": "JE-MIG-1764938317400-885",
+      "description": "Expense Recognition - Historical Expenses",
+      "total_amount": "82425.00"
+    }
+  ],
+  "verification": {
+    "entry_count": 4,
+    "expected_count": 4,
+    "total_debits": 3702846.32,
+    "total_credits": 3702846.32,
+    "is_balanced": true,
+    "difference": 0
+  }
+}

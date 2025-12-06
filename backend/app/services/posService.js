@@ -428,26 +428,27 @@ export class POSService {
 
       // Get journal entries for this transaction
       const journalEntriesQuery = `
-        SELECT 
+        SELECT
           je.*,
           json_agg(json_build_object(
             'id', jel.id,
-            'account_code', jel.account_code,
-            'account_name', jel.account_name,
+            'account_code', ca.account_code,
+            'account_name', ca.account_name,
             'description', jel.description,
             'amount', jel.amount,
-            'normal_balance', jel.normal_balance
-          ) ORDER BY 
-            CASE WHEN jel.normal_balance = 'debit' THEN 0 ELSE 1 END,
-            jel.account_code
+            'line_type', jel.line_type
+          ) ORDER BY
+            CASE WHEN jel.line_type = 'debit' THEN 0 ELSE 1 END,
+            ca.account_code
           ) as lines
         FROM journal_entries je
         LEFT JOIN journal_entry_lines jel ON je.id = jel.journal_entry_id
-        WHERE je.business_id = $1 
+        LEFT JOIN chart_of_accounts ca ON jel.account_id = ca.id
+        WHERE je.business_id = $1
           AND je.reference_type = 'pos_transaction'
           AND je.reference_id = $2
         GROUP BY je.id
-        ORDER BY je.transaction_date
+        ORDER BY je.created_at
       `;
 
       const journalEntriesResult = await client.query(journalEntriesQuery, [businessId, transactionId]);
@@ -458,14 +459,14 @@ export class POSService {
         SELECT it.*, ii.name as item_name, ii.sku
         FROM inventory_transactions it
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
-        WHERE it.business_id = $1 
+        WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
           AND it.reference_id = $2
         ORDER BY it.created_at
       `;
 
       const inventoryTransactionsResult = await client.query(
-        inventoryTransactionsQuery, 
+        inventoryTransactionsQuery,
         [businessId, transactionId]
       );
       transaction.inventory_transactions = inventoryTransactionsResult.rows;
@@ -520,7 +521,7 @@ export class POSService {
       const newStatus = updateData.status;
 
       // Check if we're voiding/cancelling a completed transaction
-      const isVoidingCompleted = (newStatus === 'void' || newStatus === 'cancelled') 
+      const isVoidingCompleted = (newStatus === 'void' || newStatus === 'cancelled')
         && currentStatus === 'completed';
 
       // If voiding a completed transaction, create reversal accounting entries
@@ -528,7 +529,7 @@ export class POSService {
         try {
           // Get the transaction with items
           const transaction = await this.getTransactionById(businessId, transactionId);
-          
+
           // Create reversal entries for each journal entry
           for (const journalEntry of transaction.journal_entries || []) {
             const reversalLines = journalEntry.lines.map(line => ({
@@ -541,7 +542,7 @@ export class POSService {
 
             // Import AccountingService for reversal
             const { AccountingService } = await import('./accountingService.js');
-            
+
             await AccountingService.createJournalEntry({
               business_id: businessId,
               description: `Reversal of ${journalEntry.description}`,
@@ -641,7 +642,7 @@ export class POSService {
 
       // Check if transaction has accounting entries
       const accountingCheck = await client.query(
-        `SELECT COUNT(*) as count FROM journal_entries 
+        `SELECT COUNT(*) as count FROM journal_entries
          WHERE reference_type = 'pos_transaction' AND reference_id = $1`,
         [transactionId]
       );
@@ -656,10 +657,10 @@ export class POSService {
         [businessId, transactionId]
       );
 
-      // Delete any inventory transactions
+      // Delete any inventory transactions - FIXED: Proper quote escaping
       await client.query(
-        'DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2 AND reference_type = $3',
-        [businessId, transactionId, 'pos_transaction']
+        `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2 AND reference_type = 'pos_transaction'`,
+        [businessId, transactionId]
       );
 
       // Delete the transaction
@@ -711,17 +712,17 @@ export class POSService {
 
     try {
       const queryStr = `
-        SELECT 
+        SELECT
           sa.*,
           -- Add COGS and gross profit
-          (SELECT COALESCE(SUM(it.total_cost), 0) 
+          (SELECT COALESCE(SUM(it.total_cost), 0)
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.transaction_type = 'sale'
              AND ($2::timestamp IS NULL OR it.created_at >= $2)
              AND ($3::timestamp IS NULL OR it.created_at <= $3)) as total_cogs,
-          sa.total_sales - 
-          (SELECT COALESCE(SUM(it.total_cost), 0) 
+          sa.total_sales -
+          (SELECT COALESCE(SUM(it.total_cost), 0)
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.transaction_type = 'sale'
@@ -729,7 +730,7 @@ export class POSService {
              AND ($3::timestamp IS NULL OR it.created_at <= $3)) as gross_profit
         FROM get_sales_analytics($1, $2, $3) sa
       `;
-      
+
       const params = [businessId, startDate, endDate];
 
       log.info('🗄️ Database Query - getSalesAnalytics:', { query: queryStr, params });
@@ -787,7 +788,7 @@ export class POSService {
           COUNT(*) FILTER (WHERE pt.payment_method = 'card') as card_count,
           COUNT(*) FILTER (WHERE pt.payment_method = 'mobile_money') as mobile_money_count
         FROM pos_transactions pt
-        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id 
+        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id
           AND it.reference_type = 'pos_transaction'
           AND it.transaction_type = 'sale'
         WHERE pt.business_id = $1
@@ -845,7 +846,7 @@ export class POSService {
             ELSE 'adequate'
           END as stock_status,
           -- Inventory sync status
-          CASE 
+          CASE
             WHEN p.inventory_item_id IS NOT NULL THEN 'synced'
             ELSE 'not_synced'
           END as inventory_sync_status,
@@ -854,7 +855,7 @@ export class POSService {
           ii.cost_price as inventory_cost,
           -- Accounting info
           (SELECT COUNT(*) FROM inventory_transactions it
-           WHERE it.inventory_item_id = ii.id 
+           WHERE it.inventory_item_id = ii.id
              AND it.transaction_type = 'sale'
              AND it.created_at >= CURRENT_DATE - INTERVAL '30 days') as recent_sales_count
         FROM products p
@@ -863,7 +864,7 @@ export class POSService {
         WHERE p.business_id = $1
           AND p.is_active = true
       `;
-      
+
       const params = [businessId];
       let paramCount = 1;
 
