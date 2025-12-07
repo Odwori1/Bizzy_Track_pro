@@ -10,7 +10,10 @@ import {
   ReportFilters,
   MonthlySummary,
   ExpenseAnalysis,
-  RevenueReport
+  RevenueReport,
+  // ADD THESE:
+  AccountingProfitLoss,
+  JournalEntriesResponse
 } from '@/types/week7';
 
 interface FinancialState {
@@ -28,6 +31,10 @@ interface FinancialState {
   reportFilters: ReportFilters;
   exportLoading: boolean;
   currentDateRange: { startDate: string; endDate: string };
+  
+  // ADD THESE:
+  accountingProfitLoss: AccountingProfitLoss | null;
+  journalEntries: JournalEntriesResponse | null;
 
   // Actions
   setReportFilters: (filters: ReportFilters) => void;
@@ -37,17 +44,21 @@ interface FinancialState {
   fetchCashFlow: (filters: ReportFilters) => Promise<void>;
   fetchBalanceSheet: (filters: ReportFilters) => Promise<void>;
   fetchTitheCalculation: (filters?: Partial<ReportFilters>) => Promise<void>;
-  
+
   // Quick Reports Actions
   fetchMonthlySummary: () => Promise<void>;
   fetchExpenseAnalysis: (filters: ReportFilters) => Promise<void>;
   fetchRevenueReport: (filters: ReportFilters) => Promise<void>;
-  
+
   // Export Actions
   exportPDF: (reportType: string, filters?: Partial<ReportFilters>) => Promise<{ success: boolean; error?: string }>;
   exportExcel: (reportType: string, filters?: Partial<ReportFilters>) => Promise<{ success: boolean; error?: string }>;
-  
+
   clearError: () => void;
+  
+  // ADD THESE ACTIONS:
+  fetchAccountingProfitLoss: (filters: { start_date: string; end_date: string }) => Promise<void>;
+  fetchJournalEntries: (params?: any) => Promise<void>;
 }
 
 export const useFinancialStore = create<FinancialState>((set, get) => ({
@@ -71,6 +82,10 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
     startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
   },
+  
+  // ADD THESE:
+  accountingProfitLoss: null,
+  journalEntries: null,
 
   // Actions
   setReportFilters: (filters) => {
@@ -78,7 +93,7 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
   },
 
   setDateRange: (startDate, endDate) => {
-    set({ 
+    set({
       currentDateRange: { startDate, endDate },
       reportFilters: { start_date: startDate, end_date: endDate }
     });
@@ -214,4 +229,54 @@ export const useFinancialStore = create<FinancialState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  // ============================================
+  // ACCOUNTING METHODS
+  // ============================================
+
+  fetchAccountingProfitLoss: async (filters) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.getAccountingProfitLoss(
+        filters.start_date,
+        filters.end_date
+      );
+      
+      console.log('Accounting Profit Loss Response:', response);
+      
+      // Note: Backend returns { success: true, data: {...} }
+      // Our apiClient automatically extracts data
+      set({ 
+        accountingProfitLoss: response,
+        loading: false 
+      });
+      
+      return response;
+    } catch (error: any) {
+      console.error('Error fetching accounting profit loss:', error);
+      set({ 
+        error: error.message || 'Failed to fetch accounting profit loss data',
+        loading: false 
+      });
+      throw error;
+    }
+  },
+
+  fetchJournalEntries: async (params = {}) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.getJournalEntries(params);
+      set({ 
+        journalEntries: response,
+        loading: false 
+      });
+      return response;
+    } catch (error: any) {
+      set({ 
+        error: error.message || 'Failed to fetch journal entries',
+        loading: false 
+      });
+      throw error;
+    }
+  },
 }));

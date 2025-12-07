@@ -202,3 +202,135 @@ export interface RevenueReport {
     end_date: string;
   };
 }
+
+// ============================================
+// ACCOUNTING SYSTEM TYPES
+// ============================================
+
+export interface JournalEntryLine {
+  id: string;
+  business_id: string;
+  journal_entry_id: string;
+  account_id: string;
+  line_type: 'debit' | 'credit';
+  amount: string; // Note: Backend returns as string
+  description: string;
+  created_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  account_code: string;
+  account_name: string;
+  account_type: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  business_id: string;
+  journal_date: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  reference_number: string;
+  reference_type: 'pos_transaction' | 'expense' | 'manual';
+  reference_id: string;
+  description: string;
+  total_amount: string; // Note: Backend returns as string
+  status: string;
+  created_by: string;
+  created_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  updated_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  posted_at: {
+    utc: string;
+    local: string;
+    iso_local: string;
+    formatted: string;
+    timestamp: number;
+  };
+  voided_at: any;
+  migration_batch_id: any;
+  migration_source_table: any;
+  migration_source_id: any;
+  created_by_name: string;
+  lines: JournalEntryLine[];
+  line_count: number;
+  total_debits: number;
+  total_credits: number;
+  is_balanced: boolean;
+}
+
+export interface JournalEntriesResponse {
+  entries: JournalEntry[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface AccountingProfitLoss {
+  period: {
+    start_date: string;
+    end_date: string;
+  };
+  revenue: {
+    total: number;
+    breakdown: Array<{
+      account_code: string;
+      account_name: string;
+      amount: number;
+    }>;
+  };
+  cogs: {
+    total: number;
+    breakdown: Array<{
+      account_code: string;
+      account_name: string;
+      amount: number;
+    }>;
+  };
+  operating_expenses: {
+    total: number;
+    breakdown: Array<{
+      account_code: string;
+      account_name: string;
+      amount: number;
+    }>;
+  };
+  gross_profit: number;
+  gross_margin: number;
+  net_profit: number;
+  net_margin: number;
+  _metadata: {
+    journal_entry_count: number;
+    transaction_count: number;
+    data_source: string;
+  };
+}
+
+export interface TrialBalance {
+  // We'll add this later when we implement trial balance
+}
+
+export interface GeneralLedger {
+  // We'll add this later when we implement general ledger
+}

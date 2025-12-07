@@ -24,13 +24,13 @@ class ApiClient {
 
     // FIX: Public endpoints that should NEVER have tokens
     const publicEndpoints = ['/api/businesses/register', '/api/businesses/login'];
-    const isPublicEndpoint = publicEndpoints.some(publicEndpoint => 
+    const isPublicEndpoint = publicEndpoints.some(publicEndpoint =>
       fullEndpoint.includes(publicEndpoint)
     );
 
     // Only get token for protected endpoints
-    const token = !isPublicEndpoint && typeof window !== 'undefined' 
-      ? localStorage.getItem('token') 
+    const token = !isPublicEndpoint && typeof window !== 'undefined'
+      ? localStorage.getItem('token')
       : null;
 
     const headers: HeadersInit = {
@@ -124,6 +124,65 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Add these methods INSIDE the ApiClient class, after the existing methods
+  async getAccountingProfitLoss(startDate: string, endDate: string): Promise<any> {
+    return this.get('/accounting/profit-loss', {
+      start_date: startDate,
+      end_date: endDate
+    });
+  }
+
+  async getJournalEntries(params?: {
+    limit?: number;
+    page?: number;
+    start_date?: string;
+    end_date?: string;
+    reference_type?: string;
+  }): Promise<any> {
+    return this.get('/accounting/journal-entries', params);
+  }
+
+  async getTrialBalance(asOfDate?: string): Promise<any> {
+    const params: any = {};
+    if (asOfDate) {
+      params.as_of_date = asOfDate;
+    }
+    return this.get('/accounting/trial-balance', params);
+  }
+
+  async getGeneralLedger(accountCode: string, params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> {
+    const queryParams: any = {};
+    if (params?.start_date) queryParams.start_date = params.start_date;
+    if (params?.end_date) queryParams.end_date = params.end_date;
+    
+    return this.get(`/accounting/general-ledger/${accountCode}`, queryParams);
+  }
 }
 
 export const apiClient = new ApiClient();
+
+// ============================================
+// ACCOUNTING API METHODS (Standalone exports)
+// ============================================
+
+export const accountingApi = {
+  getProfitLoss: async (startDate: string, endDate: string) => {
+    return apiClient.getAccountingProfitLoss(startDate, endDate);
+  },
+  
+  getJournalEntries: async (params?: any) => {
+    return apiClient.getJournalEntries(params);
+  },
+  
+  getTrialBalance: async (asOfDate?: string) => {
+    return apiClient.getTrialBalance(asOfDate);
+  },
+  
+  getGeneralLedger: async (accountCode: string, params?: any) => {
+    return apiClient.getGeneralLedger(accountCode, params);
+  },
+};

@@ -408,7 +408,7 @@ export class AccountingService {
   }
 
   /**
-   * Get profit and loss statement
+   * Get profit and loss statement - FIXED VERSION
    */
   static async getProfitLoss(businessId, startDate, endDate) {
     const client = await getClient();
@@ -416,7 +416,7 @@ export class AccountingService {
     try {
       // Calculate revenue (account codes 4000-4999, credit entries)
       const revenueQuery = `
-        SELECT 
+        SELECT
           ca.account_code,
           ca.account_name,
           SUM(jel.amount) as amount
@@ -433,9 +433,9 @@ export class AccountingService {
         ORDER BY ca.account_code
       `;
 
-      // Calculate COGS (account codes 5000-5999, debit entries)
+      // Calculate COGS (account code 5100 ONLY, debit entries)
       const cogsQuery = `
-        SELECT 
+        SELECT
           ca.account_code,
           ca.account_name,
           SUM(jel.amount) as amount
@@ -444,7 +444,27 @@ export class AccountingService {
         JOIN chart_of_accounts ca ON jel.account_id = ca.id
         WHERE je.business_id = $1
           AND je.journal_date BETWEEN $2::date AND $3::date
-          AND ca.account_code BETWEEN '5000' AND '5999'
+          AND ca.account_code = '5100'  -- FIXED: Only 5100!
+          AND jel.line_type = 'debit'
+          AND je.status = 'posted'
+          AND je.voided_at IS NULL
+        GROUP BY ca.account_code, ca.account_name
+        ORDER BY ca.account_code
+      `;
+
+      // Calculate Operating Expenses (account codes 5200-5999, debit entries)
+      const operatingExpensesQuery = `
+        SELECT
+          ca.account_code,
+          ca.account_name,
+          SUM(jel.amount) as amount
+        FROM journal_entry_lines jel
+        JOIN journal_entries je ON jel.journal_entry_id = je.id
+        JOIN chart_of_accounts ca ON jel.account_id = ca.id
+        WHERE je.business_id = $1
+          AND je.journal_date BETWEEN $2::date AND $3::date
+          AND ca.account_code BETWEEN '5200' AND '5999'  -- FIXED: 5200-5999
+          AND ca.account_code != '5100'  -- Exclude COGS
           AND jel.line_type = 'debit'
           AND je.status = 'posted'
           AND je.voided_at IS NULL
@@ -454,11 +474,11 @@ export class AccountingService {
 
       // Get counts for metadata
       const countsQuery = `
-        SELECT 
+        SELECT
           COUNT(DISTINCT je.id) as journal_entry_count,
           COUNT(DISTINCT pt.id) as transaction_count
         FROM journal_entries je
-        LEFT JOIN pos_transactions pt ON je.reference_id = pt.id::text 
+        LEFT JOIN pos_transactions pt ON je.reference_id = pt.id::text
           AND je.reference_type = 'pos_transaction'
         WHERE je.business_id = $1
           AND je.journal_date BETWEEN $2::date AND $3::date
@@ -466,16 +486,22 @@ export class AccountingService {
           AND je.voided_at IS NULL
       `;
 
-      const [revenueResult, cogsResult, countsResult] = await Promise.all([
+      const [revenueResult, cogsResult, operatingExpensesResult, countsResult] = await Promise.all([
         client.query(revenueQuery, [businessId, startDate, endDate]),
         client.query(cogsQuery, [businessId, startDate, endDate]),
+        client.query(operatingExpensesQuery, [businessId, startDate, endDate]),
         client.query(countsQuery, [businessId, startDate, endDate])
       ]);
 
       const totalRevenue = revenueResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
       const totalCOGS = cogsResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
+      const totalOperatingExpenses = operatingExpensesResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
+      
       const grossProfit = totalRevenue - totalCOGS;
       const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) : 0;
+      
+      const netProfit = grossProfit - totalOperatingExpenses;
+      const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) : 0;
 
       return {
         period: {
@@ -498,8 +524,18 @@ export class AccountingService {
             amount: parseFloat(row.amount)
           }))
         },
+        operating_expenses: {
+          total: totalOperatingExpenses,
+          breakdown: operatingExpensesResult.rows.map(row => ({
+            account_code: row.account_code,
+            account_name: row.account_name,
+            amount: parseFloat(row.amount)
+          }))
+        },
         gross_profit: grossProfit,
         gross_margin: grossMargin,
+        net_profit: netProfit,
+        net_margin: netMargin,
         _metadata: {
           journal_entry_count: parseInt(countsResult.rows[0]?.journal_entry_count) || 0,
           transaction_count: parseInt(countsResult.rows[0]?.transaction_count) || 0,
