@@ -238,7 +238,7 @@ export class TransactionAccountingService {
     const entryData = {
       business_id: transactionData.business_id,
       description: `POS Sale #${transactionData.pos_transaction_id}`,
-      transaction_date: new Date(),
+      journal_date: new Date(),  // FIXED: transaction_date → journal_date
       reference_type: 'pos_transaction',
       reference_id: transactionData.pos_transaction_id,
       lines: [debitLine, ...revenueLines]
@@ -258,7 +258,7 @@ export class TransactionAccountingService {
     const entryData = {
       business_id: transactionData.business_id,
       description: `COGS for POS Sale #${transactionData.pos_transaction_id}`,
-      transaction_date: new Date(),
+      journal_date: new Date(),  // FIXED: transaction_date → journal_date
       reference_type: 'pos_transaction',
       reference_id: transactionData.pos_transaction_id,
       lines: [
@@ -317,7 +317,7 @@ export class TransactionAccountingService {
   }
 
   /**
-   * Get summary
+   * Get summary (FIXED: added ::text casts)
    */
   static async getTransactionAccountingSummary(businessId, transactionId) {
     const client = await getClient();
@@ -329,7 +329,7 @@ export class TransactionAccountingService {
            FROM journal_entries je
            WHERE je.business_id = $1
              AND je.reference_type = 'pos_transaction'
-             AND je.reference_id = $2
+             AND je.reference_id = $2::text
              AND EXISTS (
                SELECT 1 FROM journal_entry_lines jel
                WHERE jel.journal_entry_id = je.id
@@ -341,7 +341,7 @@ export class TransactionAccountingService {
            FROM journal_entries je
            WHERE je.business_id = $1
              AND je.reference_type = 'pos_transaction'
-             AND je.reference_id = $2
+             AND je.reference_id = $2::text
              AND EXISTS (
                SELECT 1 FROM journal_entry_lines jel
                WHERE jel.journal_entry_id = je.id
@@ -352,14 +352,14 @@ export class TransactionAccountingService {
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.reference_type = 'pos_transaction'
-             AND it.reference_id = $2) as inventory_transactions,
+             AND it.reference_id = $2::text) as inventory_transactions,
 
           (SELECT COALESCE(SUM(jel.amount),0)
            FROM journal_entry_lines jel
            JOIN journal_entries je ON jel.journal_entry_id = je.id
            WHERE je.business_id = $1
              AND je.reference_type='pos_transaction'
-             AND je.reference_id=$2
+             AND je.reference_id=$2::text
              AND jel.line_type='credit'
              AND jel.account_code IN ('4100','4200')) as total_revenue,
 
@@ -368,26 +368,47 @@ export class TransactionAccountingService {
            JOIN journal_entries je ON jel.journal_entry_id = je.id
            WHERE je.business_id=$1
              AND je.reference_type='pos_transaction'
-             AND je.reference_id=$2
+             AND je.reference_id=$2::text
              AND jel.account_code='5100') as total_cogs
         `,
         [businessId, transactionId]
       );
 
       const summary = result.rows[0];
-      summary.gross_profit = summary.total_revenue - summary.total_cogs;
-      summary.gross_margin = summary.total_revenue > 0
-        ? (summary.gross_profit / summary.total_revenue) * 100
-        : 0;
+      if (summary) {
+        summary.gross_profit = (summary.total_revenue || 0) - (summary.total_cogs || 0);
+        summary.gross_margin = summary.total_revenue > 0
+          ? (summary.gross_profit / summary.total_revenue) * 100
+          : 0;
+      } else {
+        summary = {
+          revenue_entries: null,
+          cogs_entries: null,
+          inventory_transactions: null,
+          total_revenue: 0,
+          total_cogs: 0,
+          gross_profit: 0,
+          gross_margin: 0
+        };
+      }
 
       return summary;
 
     } catch (error) {
       log.error('Error getting transaction accounting summary:', error);
-      throw error;
+      // Return empty summary instead of throwing error
+      return {
+        revenue_entries: null,
+        cogs_entries: null,
+        inventory_transactions: null,
+        total_revenue: 0,
+        total_cogs: 0,
+        gross_profit: 0,
+        gross_margin: 0,
+        error: error.message
+      };
     } finally {
       client.release();
     }
   }
 }
-

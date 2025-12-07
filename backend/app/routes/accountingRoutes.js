@@ -114,4 +114,14 @@ router.get('/transaction/:transaction_id', (req, res) => {
   });
 });
 
+/**
+ * @route   GET /api/accounting/profit-loss
+ * @desc    Get profit and loss statement from accounting data
+ * @access  Private
+ */
+router.get(
+  '/profit-loss',
+  AccountingController.getProfitLoss
+);
+
 export default router;

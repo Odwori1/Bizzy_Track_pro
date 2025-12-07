@@ -6,7 +6,7 @@ import { InventorySyncService } from './inventorySyncService.js';
 
 export class POSService {
   /**
-   * Create a new POS transaction with GAAP-compliant accounting
+   * Create a new POS transaction with database trigger accounting
    */
   static async createTransaction(businessId, transactionData, userId) {
     const client = await getClient();
@@ -133,57 +133,34 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 4: PROCESS SALE THROUGH DATABASE FUNCTION
+      // STEP 4: DATABASE TRIGGER HANDLES ACCOUNTING - NO JAVASCRIPT CALLS
       // ========================================================================
-      const processResult = await client.query(
-        'SELECT * FROM process_pos_sale($1)',
-        [transaction.id]
-      );
+      log.info('Accounting will be created by database trigger', {
+        transaction_id: transaction.id,
+        trigger: 'trigger_auto_pos_accounting',
+        status: transaction.status // Must be 'completed' for trigger
+      });
 
-      if (!processResult.rows[0].success) {
-        throw new Error(`Failed to process sale: ${processResult.rows[0].message}`);
-      }
-
-      // ========================================================================
-      // STEP 5: CREATE GAAP-COMPLIANT ACCOUNTING ENTRIES
-      // ========================================================================
-      let accountingResults = null;
-      try {
-        accountingResults = await TransactionAccountingService.createAccountingEntriesForTransaction(
-          {
-            business_id: businessId,
-            pos_transaction_id: transaction.id,
-            items: processedItems,
-            payment_method: transactionData.payment_method,
-            customer_id: transactionData.customer_id
-          },
-          userId
-        );
-
-        log.info('GAAP accounting entries created for POS sale:', {
-          transaction_id: transaction.id,
-          revenue_entry: accountingResults.sales_revenue_entry?.journal_entry?.id,
-          cogs_entry: accountingResults.cogs_entry?.journal_entry?.id,
-          total_revenue: accountingResults.analysis?.total_revenue,
-          total_cogs: accountingResults.analysis?.total_cogs
-        });
-
-      } catch (accountingError) {
-        // Don't fail the transaction if accounting fails, but log it
-        log.error('Accounting entry creation failed (continuing transaction):', accountingError);
-
-        await auditLogger.logAction({
-          businessId,
-          userId,
-          action: 'accounting.entry.failed',
-          resourceType: 'pos_transaction',
-          resourceId: transaction.id,
-          error_message: accountingError.message
-        });
-      }
+      // Optional: Verify trigger fired
+      setTimeout(async () => {
+        try {
+          const checkResult = await client.query(
+            'SELECT COUNT(*) as entry_count FROM journal_entries WHERE reference_id = $1::text',
+            [transaction.id]
+          );
+          if (parseInt(checkResult.rows[0].entry_count) > 0) {
+            log.info('✅ Database trigger created accounting entries', {
+              transaction_id: transaction.id,
+              entry_count: checkResult.rows[0].entry_count
+            });
+          }
+        } catch (checkError) {
+          log.warn('Could not verify accounting creation:', checkError.message);
+        }
+      }, 1000); // Check after 1 second
 
       // ========================================================================
-      // STEP 6: HANDLE EQUIPMENT HIRE IF PRESENT
+      // STEP 5: HANDLE EQUIPMENT HIRE IF PRESENT
       // ========================================================================
       const equipmentItems = processedItems.filter(item => item.item_type === 'equipment_hire');
       if (equipmentItems.length > 0) {
@@ -197,7 +174,7 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 7: AUDIT LOG
+      // STEP 6: AUDIT LOG
       // ========================================================================
       await auditLogger.logAction({
         businessId,
@@ -211,7 +188,7 @@ export class POSService {
           payment_method: transaction.payment_method,
           item_count: processedItems.length,
           inventory_items_count: processedItems.filter(item => item.inventory_item_id).length,
-          accounting_created: accountingResults !== null,
+          accounting_method: 'database_trigger',
           equipment_items_count: equipmentItems.length
         }
       });
@@ -219,27 +196,27 @@ export class POSService {
       await client.query('COMMIT');
 
       // ========================================================================
-      // STEP 8: RETURN COMPLETE TRANSACTION WITH ACCOUNTING INFO
+      // STEP 7: RETURN RESPONSE
       // ========================================================================
-      const completeTransaction = await this.getTransactionById(businessId, transaction.id);
+      const response = {
+        ...transaction,
+        items: processedItems,
+        accounting_info: {
+          method: 'database_trigger',
+          trigger: 'trigger_auto_pos_accounting',
+          status: 'pending_creation',
+          note: 'Accounting entries being created by database trigger',
+          verify_with: `SELECT * FROM journal_entries WHERE reference_id = '${transaction.id}'::text`
+        }
+      };
 
-      // Add accounting info to response
-      if (accountingResults) {
-        completeTransaction.accounting_info = {
-          revenue_entry_id: accountingResults.sales_revenue_entry?.journal_entry?.id,
-          cogs_entry_id: accountingResults.cogs_entry?.journal_entry?.id,
-          total_revenue: accountingResults.analysis?.total_revenue || 0,
-          total_cogs: accountingResults.analysis?.total_cogs || 0,
-          gross_profit: (accountingResults.analysis?.total_revenue || 0) - (accountingResults.analysis?.total_cogs || 0)
-        };
-      } else {
-        completeTransaction.accounting_info = {
-          accounting_created: false,
-          error: 'Accounting entries could not be created'
-        };
-      }
+      log.info('✅ POS transaction created successfully', {
+        transactionId: transaction.id,
+        businessId,
+        accounting_method: 'database_trigger'
+      });
 
-      return completeTransaction;
+      return response;
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -264,14 +241,14 @@ export class POSService {
           c.phone as customer_phone,
           u.full_name as created_by_name,
           COUNT(pti.id) as item_count,
-          -- Accounting info
+          -- Accounting info (FIXED: added ::text cast)
           (SELECT COUNT(*) FROM journal_entries je
            WHERE je.reference_type = 'pos_transaction'
-           AND je.reference_id = pt.id) as accounting_entries_count,
-          -- COGS info
+           AND je.reference_id = pt.id::text) as accounting_entries_count,
+          -- COGS info (FIXED: added ::text cast)
           (SELECT COALESCE(SUM(it.total_cost), 0) FROM inventory_transactions it
            WHERE it.reference_type = 'pos_transaction'
-           AND it.reference_id = pt.id) as total_cogs
+           AND it.reference_id = pt.id::text) as total_cogs
         FROM pos_transactions pt
         LEFT JOIN customers c ON pt.customer_id = c.id
         LEFT JOIN users u ON pt.created_by = u.id
@@ -426,7 +403,7 @@ export class POSService {
       const itemsResult = await client.query(itemsQuery, [businessId, transactionId]);
       transaction.items = itemsResult.rows;
 
-      // Get journal entries for this transaction
+      // Get journal entries for this transaction (FIXED: added ::text cast)
       const journalEntriesQuery = `
         SELECT
           je.*,
@@ -446,7 +423,7 @@ export class POSService {
         LEFT JOIN chart_of_accounts ca ON jel.account_id = ca.id
         WHERE je.business_id = $1
           AND je.reference_type = 'pos_transaction'
-          AND je.reference_id = $2
+          AND je.reference_id = $2::text
         GROUP BY je.id
         ORDER BY je.created_at
       `;
@@ -454,14 +431,14 @@ export class POSService {
       const journalEntriesResult = await client.query(journalEntriesQuery, [businessId, transactionId]);
       transaction.journal_entries = journalEntriesResult.rows;
 
-      // Get inventory transactions
+      // Get inventory transactions (FIXED: added ::text cast)
       const inventoryTransactionsQuery = `
         SELECT it.*, ii.name as item_name, ii.sku
         FROM inventory_transactions it
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
         WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
-          AND it.reference_id = $2
+          AND it.reference_id = $2::text
         ORDER BY it.created_at
       `;
 
@@ -471,11 +448,19 @@ export class POSService {
       );
       transaction.inventory_transactions = inventoryTransactionsResult.rows;
 
-      // Calculate accounting summary
-      transaction.accounting_summary = await TransactionAccountingService.getTransactionAccountingSummary(
-        businessId,
-        transactionId
-      );
+      // Calculate accounting summary (will be fixed in transactionAccountingService.js)
+      try {
+        transaction.accounting_summary = await TransactionAccountingService.getTransactionAccountingSummary(
+          businessId,
+          transactionId
+        );
+      } catch (summaryError) {
+        log.warn('Could not get accounting summary:', summaryError.message);
+        transaction.accounting_summary = {
+          error: 'Could not retrieve accounting summary',
+          details: summaryError.message
+        };
+      }
 
       log.info('✅ POS transaction query successful', {
         transactionId,
@@ -499,7 +484,7 @@ export class POSService {
   }
 
   /**
-   * Update POS transaction status with accounting reversals
+   * Update POS transaction status with database trigger handling reversals
    */
   static async updateTransaction(businessId, transactionId, updateData, userId) {
     const client = await getClient();
@@ -524,39 +509,23 @@ export class POSService {
       const isVoidingCompleted = (newStatus === 'void' || newStatus === 'cancelled')
         && currentStatus === 'completed';
 
-      // If voiding a completed transaction, create reversal accounting entries
+      // If voiding a completed transaction, database trigger will handle reversal
       if (isVoidingCompleted) {
         try {
           // Get the transaction with items
           const transaction = await this.getTransactionById(businessId, transactionId);
 
-          // Create reversal entries for each journal entry
-          for (const journalEntry of transaction.journal_entries || []) {
-            const reversalLines = journalEntry.lines.map(line => ({
-              account_code: line.account_code,
-              account_name: line.account_name,
-              description: `Reversal: ${line.description}`,
-              amount: line.amount,
-              normal_balance: line.normal_balance === 'debit' ? 'credit' : 'debit'
-            }));
-
-            // Import AccountingService for reversal
-            const { AccountingService } = await import('./accountingService.js');
-
-            await AccountingService.createJournalEntry({
-              business_id: businessId,
-              description: `Reversal of ${journalEntry.description}`,
-              transaction_date: new Date(),
-              reference_type: 'pos_transaction_reversal',
-              reference_id: transactionId,
-              lines: reversalLines
-            }, userId);
-          }
-
-          log.info('Created reversal accounting entries for voided transaction:', transactionId);
+          // Database trigger will handle reversal when status changes
+          log.info('Database will handle reversal accounting when status changes', {
+            transaction_id: transactionId,
+            old_status: currentStatus,
+            new_status: newStatus,
+            trigger: 'trigger_auto_pos_accounting'
+          });
+          
         } catch (accountingError) {
-          log.error('Failed to create reversal accounting entries:', accountingError);
-          // Continue with voiding even if accounting fails
+          log.error('Failed to process reversal:', accountingError);
+          // Continue with voiding even if accounting notification fails
         }
       }
 
@@ -606,7 +575,8 @@ export class POSService {
         resourceId: transactionId,
         oldValues: currentTransaction.rows[0],
         newValues: updatedTransaction,
-        reversal_created: isVoidingCompleted
+        reversal_created: isVoidingCompleted,
+        accounting_method: 'database_trigger'
       });
 
       await client.query('COMMIT');
@@ -640,10 +610,10 @@ export class POSService {
 
       const transaction = currentTransaction.rows[0];
 
-      // Check if transaction has accounting entries
+      // Check if transaction has accounting entries (FIXED: added ::text cast)
       const accountingCheck = await client.query(
         `SELECT COUNT(*) as count FROM journal_entries
-         WHERE reference_type = 'pos_transaction' AND reference_id = $1`,
+         WHERE reference_type = 'pos_transaction' AND reference_id = $1::text`,
         [transactionId]
       );
 
@@ -657,9 +627,9 @@ export class POSService {
         [businessId, transactionId]
       );
 
-      // Delete any inventory transactions - FIXED: Proper quote escaping
+      // Delete any inventory transactions (FIXED: added ::text cast)
       await client.query(
-        `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2 AND reference_type = 'pos_transaction'`,
+        `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2::text AND reference_type = 'pos_transaction'`,
         [businessId, transactionId]
       );
 

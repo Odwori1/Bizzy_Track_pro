@@ -56,7 +56,7 @@ export class AccountingService {
 
       // Handle reference_id for manual entries
       let referenceId = entryData.reference_id;
-      
+
       if (!referenceId && entryData.reference_type === 'manual_entry') {
         referenceId = this.generateManualEntryUUID();
       }
@@ -401,6 +401,114 @@ export class AccountingService {
 
     } catch (error) {
       log.error('Accounting service error getting journal entries:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get profit and loss statement
+   */
+  static async getProfitLoss(businessId, startDate, endDate) {
+    const client = await getClient();
+
+    try {
+      // Calculate revenue (account codes 4000-4999, credit entries)
+      const revenueQuery = `
+        SELECT 
+          ca.account_code,
+          ca.account_name,
+          SUM(jel.amount) as amount
+        FROM journal_entry_lines jel
+        JOIN journal_entries je ON jel.journal_entry_id = je.id
+        JOIN chart_of_accounts ca ON jel.account_id = ca.id
+        WHERE je.business_id = $1
+          AND je.journal_date BETWEEN $2::date AND $3::date
+          AND ca.account_code BETWEEN '4000' AND '4999'
+          AND jel.line_type = 'credit'
+          AND je.status = 'posted'
+          AND je.voided_at IS NULL
+        GROUP BY ca.account_code, ca.account_name
+        ORDER BY ca.account_code
+      `;
+
+      // Calculate COGS (account codes 5000-5999, debit entries)
+      const cogsQuery = `
+        SELECT 
+          ca.account_code,
+          ca.account_name,
+          SUM(jel.amount) as amount
+        FROM journal_entry_lines jel
+        JOIN journal_entries je ON jel.journal_entry_id = je.id
+        JOIN chart_of_accounts ca ON jel.account_id = ca.id
+        WHERE je.business_id = $1
+          AND je.journal_date BETWEEN $2::date AND $3::date
+          AND ca.account_code BETWEEN '5000' AND '5999'
+          AND jel.line_type = 'debit'
+          AND je.status = 'posted'
+          AND je.voided_at IS NULL
+        GROUP BY ca.account_code, ca.account_name
+        ORDER BY ca.account_code
+      `;
+
+      // Get counts for metadata
+      const countsQuery = `
+        SELECT 
+          COUNT(DISTINCT je.id) as journal_entry_count,
+          COUNT(DISTINCT pt.id) as transaction_count
+        FROM journal_entries je
+        LEFT JOIN pos_transactions pt ON je.reference_id = pt.id::text 
+          AND je.reference_type = 'pos_transaction'
+        WHERE je.business_id = $1
+          AND je.journal_date BETWEEN $2::date AND $3::date
+          AND je.status = 'posted'
+          AND je.voided_at IS NULL
+      `;
+
+      const [revenueResult, cogsResult, countsResult] = await Promise.all([
+        client.query(revenueQuery, [businessId, startDate, endDate]),
+        client.query(cogsQuery, [businessId, startDate, endDate]),
+        client.query(countsQuery, [businessId, startDate, endDate])
+      ]);
+
+      const totalRevenue = revenueResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
+      const totalCOGS = cogsResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
+      const grossProfit = totalRevenue - totalCOGS;
+      const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) : 0;
+
+      return {
+        period: {
+          start_date: startDate,
+          end_date: endDate
+        },
+        revenue: {
+          total: totalRevenue,
+          breakdown: revenueResult.rows.map(row => ({
+            account_code: row.account_code,
+            account_name: row.account_name,
+            amount: parseFloat(row.amount)
+          }))
+        },
+        cogs: {
+          total: totalCOGS,
+          breakdown: cogsResult.rows.map(row => ({
+            account_code: row.account_code,
+            account_name: row.account_name,
+            amount: parseFloat(row.amount)
+          }))
+        },
+        gross_profit: grossProfit,
+        gross_margin: grossMargin,
+        _metadata: {
+          journal_entry_count: parseInt(countsResult.rows[0]?.journal_entry_count) || 0,
+          transaction_count: parseInt(countsResult.rows[0]?.transaction_count) || 0,
+          data_source: 'accounting_journal_entries'
+        }
+      };
+
+    } catch (error) {
+      log.error('Accounting service error getting profit loss:', error);
       throw error;
     } finally {
       client.release();

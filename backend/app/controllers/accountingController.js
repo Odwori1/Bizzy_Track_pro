@@ -337,6 +337,69 @@ export class AccountingController {
   }
 
   /**
+   * Get profit and loss statement - NEW METHOD
+   */
+  static async getProfitLoss(req, res) {
+    try {
+      // Get business_id from user (handle both camelCase and snake_case)
+      const business_id = req.user.businessId || req.user.business_id;
+      if (!business_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Business ID not found in user session'
+        });
+      }
+
+      // Get parameters
+      const { start_date, end_date } = req.query;
+
+      if (!start_date || !end_date) {
+        return res.status(400).json({
+          success: false,
+          error: 'Both start_date and end_date are required'
+        });
+      }
+
+      const startDate = new Date(start_date);
+      const endDate = new Date(end_date);
+
+      if (startDate > endDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'Start date cannot be after end date'
+        });
+      }
+
+      log.info('Getting profit and loss statement', {
+        business_id,
+        start_date,
+        end_date
+      });
+
+      // Use the new AccountingService method
+      const profitLoss = await AccountingService.getProfitLoss(
+        business_id,
+        startDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
+        endDate.toISOString().split('T')[0]
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: profitLoss,
+        message: 'Profit and loss statement generated successfully'
+      });
+
+    } catch (error) {
+      log.error('Error getting profit loss:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate profit and loss statement',
+        details: error.message
+      });
+    }
+  }
+
+  /**
    * Get inventory sync status
    */
   static async getSyncStatus(req, res) {
