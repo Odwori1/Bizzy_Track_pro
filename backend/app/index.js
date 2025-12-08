@@ -45,7 +45,12 @@ import categoriesRoutes from './routes/categories.js';
 import barcodeRoutes from './routes/barcode.js';
 import salesAnalyticsRoutes from './routes/salesAnalytics.js';
 
+//department routes
 import departmentRoutes from './routes/departmentRoutes.js';
+import jobDepartmentAssignmentRoutes from './routes/jobDepartmentAssignmentRoutes.js';
+import departmentBillingRoutes from './routes/departmentBillingRoutes.js';
+import departmentPerformanceRoutes from './routes/departmentPerformanceRoutes.js';
+
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
 import workforceRoutes from './routes/workforceRoutes.js';
 import jobRoutingRoutes from './routes/jobRoutingRoutes.js';
@@ -202,7 +207,14 @@ app.use('/api/analytics/sales', salesAnalyticsRoutes);
 // Add this with other protected routes (after authentication middleware)
 app.use('/api/accounting', accountingRoutes);
 
+
+//department routes
 app.use('/api/departments', departmentRoutes);
+app.use('/api/job-department-assignments', jobDepartmentAssignmentRoutes);
+app.use('/api/department-billing', departmentBillingRoutes);
+app.use('/api/department-performance', departmentPerformanceRoutes);
+
+
 app.use('/api/job-assignments', jobAssignmentRoutes);
 app.use('/api/workforce', workforceRoutes);
 app.use('/api/job-routing', jobRoutingRoutes);

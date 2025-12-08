@@ -215,6 +215,40 @@ const navigationSections = [
         icon: '📝',
         permission: 'expense:view',
       },
+      // Accounting Dropdown - REPLACES the single accounting item
+      {
+        name: 'Accounting System',
+        href: '/dashboard/management/finances/accounting',
+        icon: '📒',
+        permission: 'finance:view',
+        isDropdown: true, // Add this flag
+        dropdownItems: [
+          {
+            name: 'Dashboard',
+            href: '/dashboard/management/finances/accounting',
+            icon: '📊',
+            permission: 'finance:view',
+          },
+          {
+            name: 'Journal Entries',
+            href: '/dashboard/management/finances/accounting/journal-entries',
+            icon: '📝',
+            permission: 'finance:view',
+          },
+          {
+            name: 'Trial Balance',
+            href: '/dashboard/management/finances/accounting/trial-balance',
+            icon: '⚖️',
+            permission: 'finance:view',
+          },
+          {
+            name: 'General Ledger',
+            href: '/dashboard/management/finances/accounting/general-ledger',
+            icon: '📖',
+            permission: 'finance:view',
+          },
+        ]
+      },
       {
         name: 'Financial Reports',
         href: '/dashboard/management/finances/reports',
@@ -323,7 +357,8 @@ export const Sidebar: React.FC = () => {
                 <span className="mr-2">{section.icon}</span>
                 {section.title}
               </div>
-              <NavigationSection items={section.items} />
+              {/* Fixed: Pass color prop to NavigationSection */}
+              <NavigationSection items={section.items} color={section.color} />
             </div>
           ))}
         </nav>
