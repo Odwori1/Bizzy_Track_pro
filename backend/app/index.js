@@ -50,6 +50,8 @@ import departmentRoutes from './routes/departmentRoutes.js';
 import jobDepartmentAssignmentRoutes from './routes/jobDepartmentAssignmentRoutes.js';
 import departmentBillingRoutes from './routes/departmentBillingRoutes.js';
 import departmentPerformanceRoutes from './routes/departmentPerformanceRoutes.js';
+//staff routes
+import staffRoutes from './routes/staffRoutes.js';
 
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
 import workforceRoutes from './routes/workforceRoutes.js';
@@ -144,6 +146,7 @@ app.get('/api/health', async (req, res) => {
 
 // Public routes (no authentication required)
 app.use('/api/businesses', businessRoutes);
+app.use('/api/staff', staffRoutes);
 
 // =============================================================================
 // 🔵 EXTERNAL API ROUTES (API Key authentication only - NO JWT)
@@ -213,6 +216,7 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/job-department-assignments', jobDepartmentAssignmentRoutes);
 app.use('/api/department-billing', departmentBillingRoutes);
 app.use('/api/department-performance', departmentPerformanceRoutes);
+//staff routes
 
 
 app.use('/api/job-assignments', jobAssignmentRoutes);

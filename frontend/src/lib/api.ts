@@ -23,7 +23,7 @@ class ApiClient {
     });
 
     // FIX: Public endpoints that should NEVER have tokens
-    const publicEndpoints = ['/api/businesses/register', '/api/businesses/login'];
+    const publicEndpoints = ['/api/businesses/register', '/api/businesses/login', '/api/staff/login'];
     const isPublicEndpoint = publicEndpoints.some(publicEndpoint =>
       fullEndpoint.includes(publicEndpoint)
     );
@@ -158,7 +158,7 @@ class ApiClient {
     const queryParams: any = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
-    
+
     return this.get(`/accounting/general-ledger/${accountCode}`, queryParams);
   }
 }
@@ -173,15 +173,15 @@ export const accountingApi = {
   getProfitLoss: async (startDate: string, endDate: string) => {
     return apiClient.getAccountingProfitLoss(startDate, endDate);
   },
-  
+
   getJournalEntries: async (params?: any) => {
     return apiClient.getJournalEntries(params);
   },
-  
+
   getTrialBalance: async (asOfDate?: string) => {
     return apiClient.getTrialBalance(asOfDate);
   },
-  
+
   getGeneralLedger: async (accountCode: string, params?: any) => {
     return apiClient.getGeneralLedger(accountCode, params);
   },

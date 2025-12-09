@@ -6,6 +6,7 @@ export interface User {
   businessId: string;
   permissions: string[];
   timezone: string; // ADDED: to match backend response
+  isStaff?: boolean; // ADDED: to distinguish between staff and business users
 }
 
 export interface Business {

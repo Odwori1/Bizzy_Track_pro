@@ -9,7 +9,7 @@ interface AuthState {
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
-  login: (credentials: LoginData) => Promise<void>;
+  login: (credentials: LoginData, isStaffLogin?: boolean) => Promise<void>;
   register: (userData: RegisterData) => Promise<void>;
   logout: () => void;
   clearError: () => void;
@@ -25,64 +25,132 @@ export const useAuthStore = create<AuthState>()(
       loading: false,
       error: null,
 
-      login: async (credentials: LoginData) => {
+      // FIXED: Works with apiClient unwrapping response.data
+      login: async (credentials: LoginData, isStaffLogin: boolean = false) => {
         set({ loading: true, error: null });
-        try {
-          const result = await apiClient.post<AuthResponse>('/businesses/login', credentials);
+        console.log('🔐 Login attempt:', { email: credentials.email, isStaffLogin });
 
-          // FIX: Handle both response formats
-          const response = result as any;
-          const { user, business, token, timezoneInfo } = response;
+        try {
+          let endpoint = '/businesses/login';
+          if (isStaffLogin) {
+            endpoint = '/staff/login';
+            console.log('🔄 Using staff login endpoint:', endpoint);
+          }
+
+          // apiClient returns the UNWRAPPED data (just the "data" part)
+          const responseData = await apiClient.post<any>(endpoint, credentials);
+          
+          console.log('📥 apiClient response (unwrapped data):', responseData);
+          
+          // Check if we have the required data
+          if (!responseData) {
+            throw new Error('No response data received');
+          }
+
+          // For staff login, responseData should contain: user, business, token
+          // For business login, responseData might be different
+          const userData = responseData.user || responseData;
+          const businessData = responseData.business;
+          const token = responseData.token;
+          
+          console.log('🔍 Extracted from response:', {
+            userData: userData ? 'Present' : 'Missing',
+            businessData: businessData ? 'Present' : 'Missing',
+            token: token ? 'Present' : 'Missing'
+          });
+
+          if (!token) {
+            throw new Error('No authentication token received from server');
+          }
+
+          if (!userData.id || !userData.email) {
+            throw new Error('Invalid user data received');
+          }
 
           const transformedUser: User = {
-            id: user.id,
-            email: user.email,
-            fullName: user.fullName,
-            role: user.role,
-            businessId: user.business_id || business.id,
+            id: userData.id,
+            email: userData.email,
+            fullName: userData.full_name || userData.fullName || userData.email.split('@')[0],
+            role: userData.role || 'staff',
+            businessId: userData.business_id || (businessData?.id),
             permissions: [],
-            timezone: user.timezone
+            timezone: userData.timezone || 'UTC',
+            isStaff: isStaffLogin || userData.is_staff || false
           };
 
+          console.log('✅ Transformed user:', transformedUser);
+
           localStorage.setItem('token', token);
+          localStorage.setItem('user_type', isStaffLogin ? 'staff' : 'business');
+
           set({
             user: transformedUser,
-            business,
+            business: businessData || null,
             isAuthenticated: true,
-            loading: false
+            loading: false,
+            error: null
           });
+
+          console.log('🎉 Login successful!');
+          return;
+
         } catch (error: any) {
+          console.error('💥 Login error:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+          });
+          
+          let errorMessage = 'Login failed. Please check your credentials.';
+          
+          if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
+            errorMessage = 'Cannot connect to server. Please check if backend is running.';
+          } else if (error.message.includes('401') || error.message.includes('Invalid email or password')) {
+            errorMessage = 'Invalid email or password.';
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
           set({
-            error: error.message || 'Login failed',
+            error: errorMessage,
             loading: false
           });
-          throw error;
+          
+          throw new Error(errorMessage);
         }
       },
 
       register: async (userData: RegisterData) => {
         set({ loading: true, error: null });
         try {
-          const result = await apiClient.post<AuthResponse>('/businesses/register', userData);
+          // apiClient unwraps the response.data
+          const responseData = await apiClient.post<any>('/businesses/register', userData);
+          
+          const userDataFromResponse = responseData.user || responseData;
+          const businessData = responseData.business;
+          const token = responseData.token;
 
-          // FIX: Handle both response formats
-          const response = result as any;
-          const { user, business, token, timezoneInfo } = response;
+          if (!token) {
+            throw new Error('No token received from server');
+          }
 
           const transformedUser: User = {
-            id: user.id,
-            email: user.email,
-            fullName: user.fullName,
-            role: user.role,
-            businessId: user.business_id || business.id,
+            id: userDataFromResponse.id,
+            email: userDataFromResponse.email,
+            fullName: userDataFromResponse.fullName || userDataFromResponse.full_name,
+            role: userDataFromResponse.role,
+            businessId: userDataFromResponse.business_id || businessData?.id,
             permissions: [],
-            timezone: user.timezone
+            timezone: userDataFromResponse.timezone || 'UTC',
+            isStaff: false
           };
 
           localStorage.setItem('token', token);
+          localStorage.setItem('user_type', 'business');
+
           set({
             user: transformedUser,
-            business,
+            business: businessData || null,
             isAuthenticated: true,
             loading: false
           });
@@ -97,12 +165,15 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         localStorage.removeItem('token');
+        localStorage.removeItem('user_type');
         set({
           user: null,
           business: null,
           isAuthenticated: false,
-          loading: false
+          loading: false,
+          error: null
         });
+        console.log('👋 User logged out');
       },
 
       clearError: () => set({ error: null }),
@@ -110,7 +181,7 @@ export const useAuthStore = create<AuthState>()(
       checkAuth: async () => {
         const token = localStorage.getItem('token');
         console.log('🔐 checkAuth called, token exists:', !!token);
-        
+
         if (!token) {
           set({ isAuthenticated: false, user: null, business: null, loading: false });
           return;
@@ -118,26 +189,26 @@ export const useAuthStore = create<AuthState>()(
 
         set({ loading: true });
         try {
-          // Use a simple endpoint that requires auth to verify token
-          // Using dashboard overview as it's likely to exist and require auth
+          // Try a simple endpoint to verify token
           await apiClient.get('/dashboard/overview');
           console.log('✅ Token is valid, user authenticated');
           set({ isAuthenticated: true, loading: false });
         } catch (error) {
-          console.log('❌ Token invalid, logging out');
+          console.log('❌ Token invalid or expired, logging out');
           localStorage.removeItem('token');
-          set({ 
-            isAuthenticated: false, 
-            user: null, 
-            business: null, 
-            loading: false 
+          localStorage.removeItem('user_type');
+          set({
+            isAuthenticated: false,
+            user: null,
+            business: null,
+            loading: false
           });
         }
       },
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ 
+      partialize: (state) => ({
         user: state.user,
         business: state.business,
         isAuthenticated: state.isAuthenticated
