@@ -1,4 +1,5 @@
 import { ApiResponse, ApiError } from '@/types/api';
+import { cleanParams, cleanValue } from './api-utils';
 
 class ApiClient {
   private baseURL: string;
@@ -91,31 +92,53 @@ class ApiClient {
     }
   }
 
-  async get<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
-    const queryString = params ? '?' + new URLSearchParams(params).toString() : '';
+  async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
+    // Clean parameters before sending
+    const cleanedParams = cleanParams(params || {});
+    const queryString = Object.keys(cleanedParams).length > 0 
+      ? '?' + new URLSearchParams(cleanedParams as Record<string, string>).toString()
+      : '';
+    
+    console.log('GET request with cleaned params:', { endpoint, cleanedParams });
+    
     return this.request<T>(endpoint + queryString, {
       method: 'GET',
     });
   }
 
   async post<T>(endpoint: string, data?: any): Promise<T> {
+    // Clean data before sending
+    const cleanedData = cleanParams(data || {});
+    
+    console.log('POST request with cleaned data:', { endpoint, cleanedData });
+    
     return this.request<T>(endpoint, {
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
+      body: Object.keys(cleanedData).length > 0 ? JSON.stringify(cleanedData) : undefined,
     });
   }
 
   async put<T>(endpoint: string, data?: any): Promise<T> {
+    // Clean data before sending
+    const cleanedData = cleanParams(data || {});
+    
+    console.log('PUT request with cleaned data:', { endpoint, cleanedData });
+    
     return this.request<T>(endpoint, {
       method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
+      body: Object.keys(cleanedData).length > 0 ? JSON.stringify(cleanedData) : undefined,
     });
   }
 
   async patch<T>(endpoint: string, data?: any): Promise<T> {
+    // Clean data before sending
+    const cleanedData = cleanParams(data || {});
+    
+    console.log('PATCH request with cleaned data:', { endpoint, cleanedData });
+    
     return this.request<T>(endpoint, {
       method: 'PATCH',
-      body: data ? JSON.stringify(data) : undefined,
+      body: Object.keys(cleanedData).length > 0 ? JSON.stringify(cleanedData) : undefined,
     });
   }
 

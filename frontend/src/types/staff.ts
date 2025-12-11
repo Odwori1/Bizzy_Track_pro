@@ -9,6 +9,7 @@ export interface Staff {
   email: string;
   full_name: string;
   role: StaffRole;
+  role_id?: string | null;  // ADD THIS
   phone?: string | null;
   department_id?: string | null;
   department_name?: string | null;
@@ -40,12 +41,13 @@ export interface StaffFormData {
   email: string;
   full_name: string;
   role: StaffRole;
+  role_id?: string;  // ADD THIS - CRITICAL
   phone?: string;
   department_id?: string;
   hourly_rate?: number;
   notes?: string;
   generate_password?: boolean;
-  custom_password?: string;
+  custom_password?: string;  // Custom password when generate_password is false
   send_invitation?: boolean;
 }
 
@@ -53,6 +55,7 @@ export interface StaffInvitationData {
   email: string;
   full_name: string;
   role: StaffRole;
+  role_id?: string;  // ADD THIS
   department_id?: string;
 }
 
@@ -66,6 +69,7 @@ export interface StaffUpdateData {
   full_name?: string;
   phone?: string;
   role?: StaffRole;
+  role_id?: string;  // ADD THIS
   department_id?: string;
   hourly_rate?: number;
   notes?: string;

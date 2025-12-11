@@ -75,6 +75,43 @@ const navigationSections = [
     ],
   },
   {
+    id: 'staff',
+    title: 'Staff Management',
+    color: 'purple',
+    items: [
+      {
+        name: 'All Staff',
+        href: '/dashboard/management/staff',
+        icon: '👥',
+        permission: 'staff:read',
+      },
+      {
+        name: 'Add Staff',
+        href: '/dashboard/management/staff/create',
+        icon: '➕',
+        permission: 'staff:create',
+      },
+      {
+        name: 'Invitations',
+        href: '/dashboard/management/staff/invitations',
+        icon: '✉️',
+        permission: 'staff:create',
+      },
+      {
+        name: 'Departments',
+        href: '/dashboard/coordination/departments',
+        icon: '🏢',
+        permission: 'department:read',
+      },
+      {
+        name: 'Performance',
+        href: '/dashboard/coordination/performance',
+        icon: '📊',
+        permission: 'analytics:view',
+      },
+    ],
+  },
+  {
     id: 'analytics',
     title: 'Sales Analytics',
     color: 'purple',
@@ -319,6 +356,37 @@ const navigationSections = [
       },
     ],
   },
+  {
+    id: 'settings',
+    title: 'System Settings',
+    color: 'gray',
+    items: [
+      {
+        name: 'Business Settings',
+        href: '/dashboard/settings',
+        icon: '⚙️',
+        permission: 'business:settings:manage',
+      },
+      {
+        name: 'Permission Management',
+        href: '/dashboard/settings',
+        icon: '🔐',
+        permission: 'permission:manage',
+      },
+      {
+        name: 'Role Configuration',
+        href: '/dashboard/settings',
+        icon: '👥',
+        permission: 'role:manage',
+      },
+      {
+        name: 'Audit Logs',
+        href: '/dashboard/settings',
+        icon: '📋',
+        permission: 'audit:view',
+      },
+    ],
+  },
 ];
 
 // Color mapping for section headers
@@ -354,7 +422,20 @@ export const Sidebar: React.FC = () => {
                 ${colorClasses[section.color as keyof typeof colorClasses]}
                 mb-2
               `}>
-                <span className="mr-2">{section.icon}</span>
+                <span className="mr-2">
+                  {section.id === 'overview' ? '📊' :
+                   section.id === 'pos' ? '🛒' :
+                   section.id === 'products' ? '📦' :
+                   section.id === 'staff' ? '👥' :
+                   section.id === 'analytics' ? '📈' :
+                   section.id === 'operations' ? '⚙️' :
+                   section.id === 'business' ? '🏢' :
+                   section.id === 'inventory' ? '📦' :
+                   section.id === 'finances' ? '💰' :
+                   section.id === 'pricing' ? '🏷️' :
+                   section.id === 'security' ? '🔒' :
+                   section.id === 'settings' ? '⚙️' : '📊'}
+                </span>
                 {section.title}
               </div>
               {/* Fixed: Pass color prop to NavigationSection */}
@@ -365,9 +446,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* User Profile */}
-      <div className="border-t border-gray-200 p-4 bg-gray-50">
-        <UserProfile />
-      </div>
+      <UserProfile />
     </div>
   );
 }

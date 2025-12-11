@@ -164,3 +164,29 @@ export function isPastDate(dateInput: string | BackendDate | Date | null | undef
 
   return date.getTime() < todayOnly.getTime();
 }
+
+// For chart labels - simplified date format
+export const formatDateForChart = (dateData: any): string => {
+  if (!dateData) return '';
+
+  // Use backend's formatted string if available
+  if (typeof dateData === 'object' && dateData.formatted) {
+    const date = new Date(dateData.utc || dateData.local);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  // Fallback: parse string directly
+  if (typeof dateData === 'string') {
+    try {
+      const date = new Date(dateData);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+};
+
+// Alternative name for backward compatibility
+export const formatDateShort = formatDateForChart;

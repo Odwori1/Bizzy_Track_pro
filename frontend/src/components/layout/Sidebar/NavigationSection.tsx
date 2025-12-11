@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DropdownNavigation } from './DropdownNavigation';
+import { useAuthStore } from '@/store/authStore';
+import { hasPermission } from '@/lib/rolePermissions';
 
 interface NavItem {
   name: string;
@@ -25,10 +27,27 @@ interface NavigationSectionProps {
 
 export const NavigationSection: React.FC<NavigationSectionProps> = ({ items, color = 'gray' }) => {
   const pathname = usePathname();
+  const { user } = useAuthStore();
+
+  // Filter items based on user permissions
+  const filteredItems = items.filter(item => {
+    // If no permission required, show to all
+    if (!item.permission) return true;
+    
+    // If no user logged in, don't show protected items
+    if (!user) return false;
+    
+    // Check if user has the required permission
+    return hasPermission(user.role as any, item.permission);
+  });
+
+  if (filteredItems.length === 0) {
+    return null;
+  }
 
   return (
     <ul className="space-y-1">
-      {items.map((item) => {
+      {filteredItems.map((item) => {
         // Handle dropdown items
         if (item.isDropdown && item.dropdownItems) {
           return (

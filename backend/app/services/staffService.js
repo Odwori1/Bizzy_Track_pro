@@ -24,8 +24,9 @@ export class StaffService {
         throw new Error('Staff with this email already exists in your business');
       }
 
-      // Use provided password or generate random one
-      let password = staffData.password;
+      // =========== CRITICAL FIX: Accept both password and custom_password fields ===========
+      // Use provided password (from frontend) or generate random one
+      let password = staffData.password || staffData.custom_password;
       let tempPassword = null;
 
       if (!password) {
@@ -36,20 +37,58 @@ export class StaffService {
 
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Create staff user
+      // =========== CRITICAL FIX: Get role_id ===========
+      // Find role_id from role name if role_id not provided
+      let roleId = staffData.role_id;
+      const roleName = staffData.role || 'staff';
+
+      if (!roleId && roleName) {
+        // Try to find role_id from database
+        const roleResult = await client.query(
+          'SELECT id FROM roles WHERE business_id = $1 AND name = $2',
+          [businessId, roleName.toLowerCase()]
+        );
+
+        if (roleResult.rows.length > 0) {
+          roleId = roleResult.rows[0].id;
+        } else {
+          // If role doesn't exist, create it
+          log.warn(`Role "${roleName}" not found, creating it...`);
+          const newRoleId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+          await client.query(
+            `INSERT INTO roles (id, business_id, name, description, is_system_role, created_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())`,
+            [
+              newRoleId,
+              businessId,
+              roleName,
+              roleName === 'owner' ? 'Full system access with all permissions' :
+              roleName === 'manager' ? 'Management access without business settings' :
+              roleName === 'supervisor' ? 'Team supervision role' :
+              'Basic operational access',
+              true
+            ]
+          );
+          roleId = newRoleId;
+        }
+      }
+      // =========== END CRITICAL FIX ===========
+
+      // Create staff user WITH role_id
       const userResult = await client.query(
         `INSERT INTO users (
           email, password_hash, full_name, phone,
-          role, business_id, department_id,
+          role, role_id, business_id, department_id,
           is_active, is_staff, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, email, full_name, role, is_active, created_at`,
         [
           staffData.email,
           hashedPassword,
           staffData.full_name,
           staffData.phone || null,
-          staffData.role || 'staff',
+          roleName,
+          roleId,
           businessId,
           staffData.department_id || null,
           true,
@@ -60,9 +99,10 @@ export class StaffService {
 
       const user = userResult.rows[0];
 
-      // Only create invitation if no password was provided
+      // =========== FIX: Update invitation logic ===========
+      // Only create invitation if no password was provided (either password or custom_password)
       let invitationToken = null;
-      if (!staffData.password) {
+      if (!staffData.password && !staffData.custom_password) {
         invitationToken = crypto.randomBytes(32).toString('hex');
         const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
@@ -91,7 +131,8 @@ export class StaffService {
         newValues: {
           email: user.email,
           full_name: user.full_name,
-          role: user.role
+          role: user.role,
+          role_id: roleId
         }
       });
 
@@ -124,7 +165,7 @@ export class StaffService {
     try {
       let queryStr = `
         SELECT
-          u.id, u.email, u.full_name, u.phone, u.role,
+          u.id, u.email, u.full_name, u.phone, u.role, u.role_id,
           u.department_id, u.is_active, u.last_login_at,
           u.created_at, u.updated_at,
           d.name as department_name,
@@ -356,18 +397,35 @@ export class StaffService {
       const tempPassword = crypto.randomBytes(8).toString('hex');
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-      // Create user
+      // =========== CRITICAL FIX: Get role_id for invitation ===========
+      let roleId = inviteData.role_id;
+      const roleName = inviteData.role || 'staff';
+
+      if (!roleId && roleName) {
+        const roleResult = await client.query(
+          'SELECT id FROM roles WHERE business_id = $1 AND name = $2',
+          [businessId, roleName.toLowerCase()]
+        );
+
+        if (roleResult.rows.length > 0) {
+          roleId = roleResult.rows[0].id;
+        }
+      }
+      // =========== END CRITICAL FIX ===========
+
+      // Create user WITH role_id
       const userResult = await client.query(
         `INSERT INTO users (
-          email, password_hash, full_name, role, business_id,
+          email, password_hash, full_name, role, role_id, business_id,
           is_active, is_staff, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id, email, full_name, role`,
         [
           inviteData.email,
           hashedPassword,
           inviteData.full_name || '',
-          inviteData.role || 'staff',
+          roleName,
+          roleId,
           businessId,
           true,
           true,
@@ -404,7 +462,8 @@ export class StaffService {
         newValues: {
           email: user.email,
           full_name: user.full_name,
-          role: user.role
+          role: user.role,
+          role_id: roleId
         }
       });
 
@@ -587,14 +646,32 @@ export class StaffService {
   }
 
   /**
-   * Get staff roles
+   * Get staff roles - FIXED: Return actual UUIDs from database
    */
   static async getStaffRoles(businessId) {
-    return [
-      { id: 'admin', name: 'Administrator', description: 'Full system access' },
-      { id: 'manager', name: 'Manager', description: 'Department management' },
-      { id: 'supervisor', name: 'Supervisor', description: 'Team supervision' },
-      { id: 'staff', name: 'Staff', description: 'Regular staff member' }
-    ];
+    const client = await getClient();
+    try {
+      const result = await client.query(
+        `SELECT id, name, description
+         FROM roles
+         WHERE business_id = $1
+         ORDER BY
+           CASE name
+             WHEN 'owner' THEN 1
+             WHEN 'manager' THEN 2
+             WHEN 'supervisor' THEN 3
+             WHEN 'staff' THEN 4
+             ELSE 5
+           END`,
+        [businessId]
+      );
+
+      return result.rows;
+    } catch (error) {
+      log.error('Failed to fetch roles:', error.message);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

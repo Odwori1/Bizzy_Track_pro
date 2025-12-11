@@ -39,9 +39,9 @@ export const useAuthStore = create<AuthState>()(
 
           // apiClient returns the UNWRAPPED data (just the "data" part)
           const responseData = await apiClient.post<any>(endpoint, credentials);
-          
+
           console.log('📥 apiClient response (unwrapped data):', responseData);
-          
+
           // Check if we have the required data
           if (!responseData) {
             throw new Error('No response data received');
@@ -52,7 +52,7 @@ export const useAuthStore = create<AuthState>()(
           const userData = responseData.user || responseData;
           const businessData = responseData.business;
           const token = responseData.token;
-          
+
           console.log('🔍 Extracted from response:', {
             userData: userData ? 'Present' : 'Missing',
             businessData: businessData ? 'Present' : 'Missing',
@@ -100,9 +100,9 @@ export const useAuthStore = create<AuthState>()(
             name: error.name,
             stack: error.stack
           });
-          
+
           let errorMessage = 'Login failed. Please check your credentials.';
-          
+
           if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
             errorMessage = 'Cannot connect to server. Please check if backend is running.';
           } else if (error.message.includes('401') || error.message.includes('Invalid email or password')) {
@@ -110,12 +110,12 @@ export const useAuthStore = create<AuthState>()(
           } else if (error.message) {
             errorMessage = error.message;
           }
-          
+
           set({
             error: errorMessage,
             loading: false
           });
-          
+
           throw new Error(errorMessage);
         }
       },
@@ -125,7 +125,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           // apiClient unwraps the response.data
           const responseData = await apiClient.post<any>('/businesses/register', userData);
-          
+
           const userDataFromResponse = responseData.user || responseData;
           const businessData = responseData.business;
           const token = responseData.token;
@@ -180,7 +180,12 @@ export const useAuthStore = create<AuthState>()(
 
       checkAuth: async () => {
         const token = localStorage.getItem('token');
-        console.log('🔐 checkAuth called, token exists:', !!token);
+        const userType = localStorage.getItem('user_type');
+        
+        console.log('🔐 checkAuth called:', { 
+          hasToken: !!token, 
+          userType
+        });
 
         if (!token) {
           set({ isAuthenticated: false, user: null, business: null, loading: false });
@@ -188,13 +193,19 @@ export const useAuthStore = create<AuthState>()(
         }
 
         set({ loading: true });
+        
+        // Simple JWT token validation (just check format)
         try {
-          // Try a simple endpoint to verify token
-          await apiClient.get('/dashboard/overview');
-          console.log('✅ Token is valid, user authenticated');
-          set({ isAuthenticated: true, loading: false });
+          const tokenParts = token.split('.');
+          if (tokenParts.length === 3) {
+            // Valid JWT format
+            console.log('✅ Token format valid, user authenticated');
+            set({ isAuthenticated: true, loading: false });
+          } else {
+            throw new Error('Invalid token format');
+          }
         } catch (error) {
-          console.log('❌ Token invalid or expired, logging out');
+          console.log('❌ Token invalid, logging out');
           localStorage.removeItem('token');
           localStorage.removeItem('user_type');
           set({

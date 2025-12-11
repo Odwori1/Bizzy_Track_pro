@@ -1,18 +1,12 @@
 'use client';
 
 import { useAuthStore } from '@/store/authStore';
+import { getRoleDisplayName, getRoleBadgeColor } from '@/lib/rolePermissions';
 
-interface UserProfileProps {
-  user: any | null;
-  business: any | null;
-}
+export const UserProfile: React.FC = () => {
+  const { user, business } = useAuthStore();
 
-export const UserProfile: React.FC<UserProfileProps> = ({ user, business }) => {
-  const { user: authUser } = useAuthStore();
-  
-  // Use the user from props or from auth store
-  const displayUser = user || authUser;
-  if (!displayUser) return null;
+  if (!user) return null;
 
   // Get initials from fullName
   const getInitials = (fullName: string) => {
@@ -29,25 +23,28 @@ export const UserProfile: React.FC<UserProfileProps> = ({ user, business }) => {
       <div className="flex items-center space-x-3">
         <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
           <span className="text-blue-600 font-semibold text-sm">
-            {getInitials(displayUser.fullName)}
+            {getInitials(user.fullName || user.email)}
           </span>
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-gray-900 truncate">
-            {displayUser.fullName}
+            {user.fullName || user.email.split('@')[0]}
           </p>
           <p className="text-xs text-gray-500 truncate">
-            {business?.name || displayUser.email}
+            {business?.name || user.email}
           </p>
-          
+
           {/* Role display with staff indicator */}
-          {displayUser && (
-            <div className="mt-2 text-xs">
-              <span className="inline-block px-2 py-1 rounded-full bg-blue-100 text-blue-800">
-                {displayUser.role} {displayUser.isStaff ? '(Staff)' : '(Owner)'}
+          <div className="mt-2 text-xs">
+            <span className={`inline-block px-2 py-1 rounded-full ${getRoleBadgeColor(user.role as any)}`}>
+              {getRoleDisplayName(user.role as any)} {user.isStaff ? '(Staff)' : ''}
+            </span>
+            {user.isStaff && (
+              <span className="ml-2 text-xs text-gray-600">
+                Staff Account
               </span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
