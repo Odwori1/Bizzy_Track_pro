@@ -14,70 +14,102 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
 };
 
 // Permission categories based on backend structure (248 permissions total)
-// This is a FRONTEND representation of backend permissions for UI control
+// UPDATED TO MATCH ACTUAL DATABASE PERMISSIONS
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   owner: [
     'all' // Owner has all permissions (248 in backend)
   ],
   manager: [
-    // Dashboard
-    'dashboard:view', 'dashboard:analytics',
+    // Based on database: manager has 247 permissions (all except business settings)
+    // This is a representative subset - actual permissions come from backend
+    'dashboard:view',
     
     // Customer Management
+    'category:create', 'category:read', 'category:update', 'category:delete',
     'customer:create', 'customer:read', 'customer:update', 'customer:delete',
+    'customer_communication:create', 'customer_communication:read', 'customer_communication:update', 'customer_communication:delete',
     
-    // Service Management  
+    // Service Management
     'service:create', 'service:read', 'service:update', 'service:delete',
+    'service_category:create', 'service_category:read', 'service_category:update', 'service_category:delete',
     
     // Job Management
     'job:create', 'job:read', 'job:update', 'job:delete', 'job:assign',
+    'job_assignments:create', 'job_assignments:read', 'job_assignments:update', 'job_assignments:reassign',
     
     // Inventory
     'inventory:create', 'inventory:read', 'inventory:update', 'inventory:delete',
     
     // POS System
-    'pos:create', 'pos:read', 'pos:update', 'pos:delete', 'pos:process',
+    'pos:create', 'pos:read', 'pos:update', 'pos:delete', 'pos:refund', 'pos:void',
     
     // Financial
-    'invoice:create', 'invoice:read', 'invoice:update', 'invoice:delete',
-    'payment:create', 'payment:read', 'payment:update',
+    'invoice:create', 'invoice:read', 'invoice:update', 'invoice:delete', 'invoice:payment:record', 'invoice:send',
+    'expense:read',
+    'wallet:read',
     
     // Staff Management
-    'staff:read', 'staff:update', 'staff:create',
+    'staff:create', 'staff:read', 'staff:update',
+    'staff_profiles:read',
     
     // Departments
-    'department:read', 'department:update',
+    'departments:read',
+    'department_billing:read',
+    'department_roles:read',
     
     // Analytics & Reports
-    'analytics:view', 'reports:view', 'reports:generate'
+    'analytics:view',
+    'department_analytics:view',
+    
+    // Products
+    'products:read',
+    'package:read',
+    
+    // Suppliers
+    'suppliers:read',
+    
+    // Purchase Orders
+    'purchase_orders:read',
+    
+    // Equipment
+    'equipment:read', 'equipment:hire:read',
+    
+    // Assets
+    'asset:read', 'asset:maintenance:read',
+    
+    // Pricing
+    'pricing_rule:read', 'seasonal_pricing:read', 'price_history:read',
+    
+    // Timesheets
+    'timesheets:read', 'shifts:read'
   ],
   supervisor: [
-    // Based on current DB: 27 permissions
-    'dashboard:view',
-    'customer:read', 'customer:update',
-    'service:read',
-    'job:read', 'job:update', 'job:assign',
-    'inventory:read',
-    'pos:read', 'pos:create', 'pos:update',
-    'invoice:read',
-    'payment:read',
-    'staff:read',
-    'department:read'
+    // ACTUAL SUPERVISOR PERMISSIONS FROM DATABASE (27 permissions)
+    'category:create', 'category:read', 'category:update',
+    'customer:create', 'customer:read', 'customer:update',
+    'customer_communication:create', 'customer_communication:read', 'customer_communication:update',
+    'inventory:create', 'inventory:read', 'inventory:update',
+    'job:create', 'job:read', 'job:update',
+    'pos:create', 'pos:read', 'pos:update',
+    'service:create', 'service:read', 'service:update',
+    'service_category:create', 'service_category:read', 'service_category:update',
+    'staff:create', 'staff:read', 'staff:update'
   ],
   staff: [
-    // Basic read-only access (8 permissions in backend)
-    'dashboard:view',
+    // ACTUAL STAFF PERMISSIONS FROM DATABASE (8 permissions)
+    'category:read',
     'customer:read',
-    'service:read', 
-    'job:read',
+    'customer_communication:read',
     'inventory:read',
+    'job:read',
     'pos:read',
-    'invoice:read'
+    'service:read',
+    'service_category:read'
   ]
 };
 
 // ============================================
-// PERMISSION CHECKING UTILITIES
+// PERMISSION CHECKING UTILITIES - UPDATED WITH DEBUG
 // ============================================
 
 /**
@@ -86,18 +118,30 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
  * @param permission - Permission string to check
  */
 export function hasPermission(userRole: UserRole, permission: string): boolean {
-  if (userRole === 'owner') return true;
+  console.log(`🔍 [PERMISSION CHECK] Role: ${userRole}, Permission: ${permission}`);
   
+  if (userRole === 'owner') {
+    console.log(`✅ Owner always has permission`);
+    return true;
+  }
+
   // Check if permission exists in role's list
-  const hasExactPermission = ROLE_PERMISSIONS[userRole]?.includes(permission);
+  const rolePermissions = ROLE_PERMISSIONS[userRole] || [];
+  const hasExactPermission = rolePermissions.includes(permission);
   
+  console.log(`📊 Exact permission check: ${hasExactPermission}`);
+  console.log(`📋 Role permissions count: ${rolePermissions.length}`);
+
   // Check for wildcard permissions (e.g., 'customer:*' for any customer permission)
   if (!hasExactPermission && permission.includes(':')) {
     const [category, action] = permission.split(':');
     const wildcardPermission = `${category}:*`;
-    return ROLE_PERMISSIONS[userRole]?.includes(wildcardPermission) || false;
+    const hasWildcard = rolePermissions.includes(wildcardPermission);
+    console.log(`🎯 Wildcard check (${wildcardPermission}): ${hasWildcard}`);
+    return hasWildcard;
   }
-  
+
+  console.log(`🎯 Final result: ${hasExactPermission}`);
   return hasExactPermission;
 }
 
@@ -119,17 +163,17 @@ export function getFilteredNavigation(userRole: UserRole, navigationItems: any[]
   return navigationItems.filter(item => {
     // If no restrictions, show to all
     if (!item.requiredRole && !item.requiredPermission) return true;
-    
+
     // Check role requirement
     if (item.requiredRole) {
       return hasMinimumRole(userRole, item.requiredRole);
     }
-    
+
     // Check permission requirement
     if (item.requiredPermission) {
       return hasPermission(userRole, item.requiredPermission);
     }
-    
+
     return false;
   });
 }
@@ -182,8 +226,8 @@ export function getRoleBadgeColor(role: UserRole): string {
  * Example: canUserPerform('customer', 'create', 'manager') → true
  */
 export function canUserPerform(
-  resource: string, 
-  action: string, 
+  resource: string,
+  action: string,
   userRole: UserRole
 ): boolean {
   const permission = `${resource}:${action}`;

@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Badge } from '@/components/ui/Badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
+import {
   Search, Filter, Calendar, User, History, Eye,
   CheckCircle, XCircle, Clock, RefreshCw
 } from 'lucide-react';
@@ -29,16 +29,16 @@ export default function PermissionAuditLog({ logs }: PermissionAuditLogProps) {
 
   // Filter logs
   const filteredLogs = logs.filter(log => {
-    const matchesSearch = searchTerm === '' || 
+    const matchesSearch = searchTerm === '' ||
       log.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.resource_type.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesAction = selectedAction === 'all' || log.action === selectedAction;
-    
+
     const matchesDate = (!startDate || new Date(log.created_at) >= new Date(startDate)) &&
                        (!endDate || new Date(log.created_at) <= new Date(endDate));
-    
+
     return matchesSearch && matchesAction && matchesDate;
   });
 
@@ -96,7 +96,7 @@ export default function PermissionAuditLog({ logs }: PermissionAuditLogProps) {
               className="pl-10"
             />
           </div>
-          
+
           <Select value={selectedAction} onValueChange={setSelectedAction}>
             <SelectTrigger>
               <SelectValue placeholder="Filter by action" />
@@ -141,7 +141,7 @@ export default function PermissionAuditLog({ logs }: PermissionAuditLogProps) {
               <Card key={log.id} className="overflow-hidden">
                 <CardContent className="p-0">
                   {/* Log Header */}
-                  <div 
+                  <div
                     className="p-4 hover:bg-accent cursor-pointer transition-colors"
                     onClick={() => toggleExpand(log.id)}
                   >
@@ -162,7 +162,7 @@ export default function PermissionAuditLog({ logs }: PermissionAuditLogProps) {
                           {getActionBadge(log.action)}
                         </div>
                       </div>
-                      
+
                       <div className="text-right">
                         <div className="text-sm font-medium">{formatDate(log.created_at)}</div>
                         <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">

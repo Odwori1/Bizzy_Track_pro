@@ -31,6 +31,32 @@ export const CardHeader: React.FC<CardProps> = ({ children, className }) => {
   );
 };
 
+export const CardTitle: React.FC<CardProps> = ({ children, className }) => {
+  const combinedClassName = [
+    'text-xl font-semibold text-gray-900',
+    className
+  ].filter(Boolean).join(' ');
+
+  return (
+    <h3 className={combinedClassName}>
+      {children}
+    </h3>
+  );
+};
+
+export const CardDescription: React.FC<CardProps> = ({ children, className }) => {
+  const combinedClassName = [
+    'text-sm text-gray-600 mt-1',
+    className
+  ].filter(Boolean).join(' ');
+
+  return (
+    <p className={combinedClassName}>
+      {children}
+    </p>
+  );
+};
+
 export const CardContent: React.FC<CardProps> = ({ children, className }) => {
   const combinedClassName = [
     'px-6 py-4',

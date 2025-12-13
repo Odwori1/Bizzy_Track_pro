@@ -1,6 +1,6 @@
 import React from 'react';
 import { Metadata } from 'next';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Shield, Users, FolderTree, History, Settings } from 'lucide-react';
 
@@ -22,7 +22,7 @@ export default function SettingsLayout({
           Configure RBAC roles, ABAC user permissions, and business rules
         </p>
       </div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Sidebar Navigation */}
         <div className="lg:col-span-1">

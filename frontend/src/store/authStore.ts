@@ -91,6 +91,21 @@ export const useAuthStore = create<AuthState>()(
             error: null
           });
 
+          // AFTER successful login, fetch permissions
+          if (transformedUser.id) {
+            // Import permission store
+            const { fetchUserPermissions } = (await import('@/store/permissionStore')).usePermissionStore.getState();
+            
+            // Fetch permissions for the user
+            try {
+              await fetchUserPermissions(transformedUser.id);
+              console.log('✅ Permissions fetched for user:', transformedUser.id);
+            } catch (permError) {
+              console.warn('⚠️ Could not fetch permissions:', permError);
+              // Don't fail login if permissions fetch fails
+            }
+          }
+
           console.log('🎉 Login successful!');
           return;
 
@@ -154,6 +169,18 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             loading: false
           });
+
+          // AFTER successful registration, fetch permissions
+          if (transformedUser.id) {
+            try {
+              const { fetchUserPermissions } = (await import('@/store/permissionStore')).usePermissionStore.getState();
+              await fetchUserPermissions(transformedUser.id);
+              console.log('✅ Permissions fetched for registered user:', transformedUser.id);
+            } catch (permError) {
+              console.warn('⚠️ Could not fetch permissions for new user:', permError);
+            }
+          }
+
         } catch (error: any) {
           set({
             error: error.message || 'Registration failed',
@@ -181,9 +208,9 @@ export const useAuthStore = create<AuthState>()(
       checkAuth: async () => {
         const token = localStorage.getItem('token');
         const userType = localStorage.getItem('user_type');
-        
-        console.log('🔐 checkAuth called:', { 
-          hasToken: !!token, 
+
+        console.log('🔐 checkAuth called:', {
+          hasToken: !!token,
           userType
         });
 
@@ -193,7 +220,7 @@ export const useAuthStore = create<AuthState>()(
         }
 
         set({ loading: true });
-        
+
         // Simple JWT token validation (just check format)
         try {
           const tokenParts = token.split('.');

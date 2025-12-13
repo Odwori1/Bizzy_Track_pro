@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DropdownNavigation } from './DropdownNavigation';
 import { useAuthStore } from '@/store/authStore';
-import { hasPermission } from '@/lib/rolePermissions';
+import { normalizePermissionCheck } from '@/lib/permissionHierarchy';
+import { usePermissions } from '@/hooks/usePermissions'; // ADD THIS
+import { checkPermission } from '@/lib/permissionMapping';
 
 interface NavItem {
   name: string;
@@ -28,17 +30,30 @@ interface NavigationSectionProps {
 export const NavigationSection: React.FC<NavigationSectionProps> = ({ items, color = 'gray' }) => {
   const pathname = usePathname();
   const { user } = useAuthStore();
+  const { getAllPermissionNames } = usePermissions(); // ADD THIS
+
+  // Get actual user permissions from backend
+  const userPermissionNames = getAllPermissionNames();
+
+  console.log('🔍 NavigationSection - User permissions:', {
+    userId: user?.id,
+    permissionCount: userPermissionNames.length,
+    permissions: userPermissionNames
+  });
 
   // Filter items based on user permissions
   const filteredItems = items.filter(item => {
     // If no permission required, show to all
     if (!item.permission) return true;
-    
+
     // If no user logged in, don't show protected items
     if (!user) return false;
+
+    // Check if user has the required permission using hierarchy
+    const hasAccess = checkPermission(userPermissionNames, item.permission);
     
-    // Check if user has the required permission
-    return hasPermission(user.role as any, item.permission);
+    console.log(`🔍 Checking permission: ${item.permission} - Result: ${hasAccess}`);
+    return hasAccess;
   });
 
   if (filteredItems.length === 0) {

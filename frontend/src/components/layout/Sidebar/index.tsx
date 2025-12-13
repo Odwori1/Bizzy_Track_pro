@@ -1,7 +1,10 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { NavigationSection } from './NavigationSection';
 import { UserProfile } from './UserProfile';
+import { usePermissions } from '@/hooks/usePermissions'; // ADD THIS
+import { checkPermission } from '@/lib/permissionMapping'; // ADD THIS
 
 // Color-coded sections for better visual organization
 const navigationSections = [
@@ -58,7 +61,7 @@ const navigationSections = [
         name: 'Categories',
         href: '/dashboard/management/products/categories',
         icon: '🏷️',
-        permission: 'category:view',
+        permission: 'service_category:read', // CHANGED FROM 'category:view'
       },
       {
         name: 'Suppliers',
@@ -120,7 +123,7 @@ const navigationSections = [
         name: 'Sales Dashboard',
         href: '/dashboard/analytics/sales',
         icon: '📈',
-        permission: 'analytics:view',
+        permission: 'analytics:view', // Supervisor doesn't have - will hide
       },
       {
         name: 'Sales Reports',
@@ -132,7 +135,7 @@ const navigationSections = [
         name: 'Performance Metrics',
         href: '/dashboard/analytics/sales/performance',
         icon: '🎯',
-        permission: 'analytics:view',
+        permission: 'analytics:view', // Supervisor doesn't have - will hide
       },
     ],
   },
@@ -145,13 +148,13 @@ const navigationSections = [
         name: 'Barcode Lookup',
         href: '/dashboard/operations/barcode/lookup',
         icon: '📱',
-        permission: 'barcode:view',
+        permission: 'products:read', // TEMPORARY: Use products:read since barcode:view doesn't exist
       },
       {
         name: 'Barcode Scanner',
         href: '/dashboard/operations/barcode/scanner',
         icon: '🔍',
-        permission: 'barcode:scan',
+        permission: 'products:read', // TEMPORARY
       },
     ],
   },
@@ -303,13 +306,13 @@ const navigationSections = [
         name: 'Pricing Rules',
         href: '/dashboard/management/pricing/rules',
         icon: '💰',
-        permission: 'pricing:view',
+        permission: 'pricing_rule:read', // CHANGED FROM 'pricing:view'
       },
       {
         name: 'Seasonal Pricing',
         href: '/dashboard/management/pricing/seasonal',
         icon: '📅',
-        permission: 'pricing:view',
+        permission: 'seasonal_pricing:read', // CHANGED FROM 'pricing:view'
       },
       {
         name: 'Bulk Operations',
@@ -321,7 +324,7 @@ const navigationSections = [
         name: 'Price History',
         href: '/dashboard/management/pricing/history',
         icon: '📊',
-        permission: 'pricing:view',
+        permission: 'price_history:read', // CHANGED FROM 'pricing:view'
       },
       {
         name: 'Evaluation Tool',
@@ -403,6 +406,53 @@ const colorClasses = {
   red: 'text-red-700 border-red-200 bg-red-50',
 };
 
+// FilteredSection component that checks permissions before rendering
+const FilteredSection = ({ section }: { section: any }) => {
+  const { getAllPermissionNames } = usePermissions();
+  const [hasVisibleItems, setHasVisibleItems] = useState(false);
+  const userPermissionNames = getAllPermissionNames();
+
+  // Check if any item in this section is visible
+  useEffect(() => {
+    const hasItems = section.items.some((item: any) => {
+      if (!item.permission) return true;
+      return checkPermission(userPermissionNames, item.permission);
+    });
+    setHasVisibleItems(hasItems);
+  }, [section.items, userPermissionNames]);
+
+  if (!hasVisibleItems) {
+    return null;
+  }
+
+  return (
+    <div className="mb-6">
+      <div className={`
+        flex items-center px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-lg border
+        ${colorClasses[section.color as keyof typeof colorClasses]}
+        mb-2
+      `}>
+        <span className="mr-2">
+          {section.id === 'overview' ? '📊' :
+           section.id === 'pos' ? '🛒' :
+           section.id === 'products' ? '📦' :
+           section.id === 'staff' ? '👥' :
+           section.id === 'analytics' ? '📈' :
+           section.id === 'operations' ? '⚙️' :
+           section.id === 'business' ? '🏢' :
+           section.id === 'inventory' ? '📦' :
+           section.id === 'finances' ? '💰' :
+           section.id === 'pricing' ? '🏷️' :
+           section.id === 'security' ? '🔒' :
+           section.id === 'settings' ? '⚙️' : '📊'}
+        </span>
+        {section.title}
+      </div>
+      <NavigationSection items={section.items} color={section.color} />
+    </div>
+  );
+};
+
 export const Sidebar: React.FC = () => {
   return (
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
@@ -416,31 +466,7 @@ export const Sidebar: React.FC = () => {
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-3">
           {navigationSections.map((section) => (
-            <div key={section.id} className="mb-6">
-              <div className={`
-                flex items-center px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-lg border
-                ${colorClasses[section.color as keyof typeof colorClasses]}
-                mb-2
-              `}>
-                <span className="mr-2">
-                  {section.id === 'overview' ? '📊' :
-                   section.id === 'pos' ? '🛒' :
-                   section.id === 'products' ? '📦' :
-                   section.id === 'staff' ? '👥' :
-                   section.id === 'analytics' ? '📈' :
-                   section.id === 'operations' ? '⚙️' :
-                   section.id === 'business' ? '🏢' :
-                   section.id === 'inventory' ? '📦' :
-                   section.id === 'finances' ? '💰' :
-                   section.id === 'pricing' ? '🏷️' :
-                   section.id === 'security' ? '🔒' :
-                   section.id === 'settings' ? '⚙️' : '📊'}
-                </span>
-                {section.title}
-              </div>
-              {/* Fixed: Pass color prop to NavigationSection */}
-              <NavigationSection items={section.items} color={section.color} />
-            </div>
+            <FilteredSection key={section.id} section={section} />
           ))}
         </nav>
       </div>

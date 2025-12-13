@@ -30,7 +30,7 @@ export default function CategoriesPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const data = await apiClient.get<Category[]>('/categories');
+      const data = await apiClient.get<Category[]>('/service-categories');
       setCategories(data);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch categories');
@@ -42,7 +42,7 @@ export default function CategoriesPage() {
   const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
     if (confirm(`Are you sure you want to delete "${categoryName}"? This will affect all products in this category.`)) {
       try {
-        await apiClient.delete(`/categories/${categoryId}`);
+        await apiClient.delete(`/service-categories/${categoryId}`);
         fetchCategories(); // Refresh the list
       } catch (err: any) {
         alert(err.message || 'Failed to delete category');
@@ -117,8 +117,8 @@ export default function CategoriesPage() {
               {searchTerm ? 'No categories found' : 'No categories yet'}
             </div>
             <p className="text-gray-400 mb-4">
-              {searchTerm 
-                ? 'Try adjusting your search terms' 
+              {searchTerm
+                ? 'Try adjusting your search terms'
                 : 'Get started by creating your first category'
               }
             </p>
@@ -153,8 +153,8 @@ export default function CategoriesPage() {
                       Edit
                     </Button>
                   </Link>
-                  <Button 
-                    variant="danger" 
+                  <Button
+                    variant="danger"
                     size="sm"
                     onClick={() => handleDeleteCategory(category.id, category.name)}
                   >
@@ -201,7 +201,7 @@ export default function CategoriesPage() {
           </div>
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
             <div className="text-2xl font-bold text-purple-600">
-              {filteredCategories.reduce((sum, cat) => sum + parseInt(cat.product_count), 0)}
+              {filteredCategories.reduce((sum, cat) => sum + (parseInt(cat.product_count) || 0), 0)}
             </div>
             <div className="text-sm text-gray-600">Total Products</div>
           </div>
