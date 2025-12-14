@@ -161,16 +161,16 @@ export default function RolePermissionEditor({ roleId, onUpdate }: RolePermissio
   const totalCount = permissions.length;
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="border-2 border-blue-200 shadow-lg">
+      <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100/50 border-b">
         <div className="flex justify-between items-start">
           <div>
-            <CardTitle className="capitalize">{roleName} Role Permissions</CardTitle>
-            <CardDescription>
+            <CardTitle className="capitalize text-blue-800">{roleName} Role Permissions</CardTitle>
+            <CardDescription className="text-blue-600">
               Configure which permissions are granted to the {roleName} role
             </CardDescription>
           </div>
-          <Badge variant={selectedCount === totalCount ? "default" : "secondary"}>
+          <Badge variant="default" className="bg-blue-600">
             {selectedCount} / {totalCount} selected
           </Badge>
         </div>

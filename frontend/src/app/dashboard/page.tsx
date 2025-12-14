@@ -3,9 +3,6 @@
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import Link from 'next/link';
-import { CurrencyTest } from '@/components/test/CurrencyTest';
-import { DebugPermissions } from '@/components/DebugPermissions';
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
@@ -21,11 +18,8 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* Debug Permissions Component - Add this section */}
-      <DebugPermissions />
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Security Overview Card - Week 16 Features */}
+        {/* Security Overview Card */}
         <Card>
           <CardHeader>
             <h3 className="text-lg font-semibold text-gray-900">Security Overview</h3>
@@ -95,7 +89,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Week 16 Security Features Section */}
+      {/* Security Features Section */}
       <Card>
         <CardHeader>
           <h2 className="text-xl font-bold text-gray-900">Security & Compliance</h2>

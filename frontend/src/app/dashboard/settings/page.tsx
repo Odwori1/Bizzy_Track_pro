@@ -49,7 +49,7 @@ export default function SettingsPage() {
         setFilteredCategories(categories);
       } else {
         const searchTerm = categorySearch.toLowerCase();
-        const filtered = categories.filter(cat => 
+        const filtered = categories.filter(cat =>
           cat.category.toLowerCase().includes(searchTerm) ||
           cat.sample_description.toLowerCase().includes(searchTerm)
         );
@@ -140,23 +140,23 @@ export default function SettingsPage() {
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-5 mb-8">
-            <TabsTrigger value="roles" className="flex items-center gap-2">
+            <TabsTrigger value="roles" className="flex items-center gap-2 data-[state=active]:bg-blue-100 data-[state=active]:text-blue-700 data-[state=active]:border-blue-300">
               <FolderTree className="h-4 w-4" />
               Roles (RBAC)
             </TabsTrigger>
-            <TabsTrigger value="users" className="flex items-center gap-2">
+            <TabsTrigger value="users" className="flex items-center gap-2 data-[state=active]:bg-green-100 data-[state=active]:text-green-700 data-[state=active]:border-green-300">
               <Users className="h-4 w-4" />
               User Overrides (ABAC)
             </TabsTrigger>
-            <TabsTrigger value="categories" className="flex items-center gap-2">
+            <TabsTrigger value="categories" className="flex items-center gap-2 data-[state=active]:bg-purple-100 data-[state=active]:text-purple-700 data-[state=active]:border-purple-300">
               <FolderTree className="h-4 w-4" />
               Categories
             </TabsTrigger>
-            <TabsTrigger value="audit" className="flex items-center gap-2">
+            <TabsTrigger value="audit" className="flex items-center gap-2 data-[state=active]:bg-amber-100 data-[state=active]:text-amber-700 data-[state=active]:border-amber-300">
               <History className="h-4 w-4" />
               Audit Log
             </TabsTrigger>
-            <TabsTrigger value="rules" className="flex items-center gap-2">
+            <TabsTrigger value="rules" className="flex items-center gap-2 data-[state=active]:bg-indigo-100 data-[state=active]:text-indigo-700 data-[state=active]:border-indigo-300">
               <Settings className="h-4 w-4" />
               Business Rules
             </TabsTrigger>
@@ -186,15 +186,15 @@ export default function SettingsPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               {roles.map((role) => {
                 const isSelected = selectedRole === role.id;
-                
+
                 return (
                   <div
                     key={role.id}
                     className={`
-                      bg-white rounded-lg border-2 p-4 
+                      bg-white rounded-lg border-2 p-4
                       transition-all duration-200
-                      ${isSelected 
-                        ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-300 ring-offset-1' 
+                      ${isSelected
+                        ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-300 ring-offset-1'
                         : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                       }
                       cursor-pointer select-none
@@ -216,15 +216,15 @@ export default function SettingsPage() {
                         {role.permission_count} perms
                       </Badge>
                     </div>
-                    
+
                     <p className="text-sm text-gray-600 mb-3 line-clamp-2">
                       {role.description}
                     </p>
-                    
+
                     <div className="text-xs text-gray-500">
                       {role.is_system_role ? 'System Role' : 'Custom Role'}
                     </div>
-                    
+
                     {isSelected && (
                       <div className="mt-2 text-xs text-blue-600 font-medium flex items-center">
                         <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
@@ -284,7 +284,7 @@ export default function SettingsPage() {
                   Add Override
                 </Button>
               </div>
-              
+
               {/* Search for users - WORKING */}
               <div className="mt-4 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -295,7 +295,7 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
-            
+
             <UserPermissionManager onUpdate={handlePermissionUpdate} />
           </TabsContent>
 
@@ -313,7 +313,7 @@ export default function SettingsPage() {
                   {categories.length} categories
                 </div>
               </div>
-              
+
               {/* Search categories - WORKING */}
               <div className="mt-4 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -342,8 +342,8 @@ export default function SettingsPage() {
                       <Badge variant="outline">
                         {category.permission_count} permissions
                       </Badge>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => handleCategoryView(category.category)}
                       >
@@ -355,7 +355,7 @@ export default function SettingsPage() {
                 </Card>
               ))}
             </div>
-            
+
             {categorySearch && filteredCategories.length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 No categories found for "{categorySearch}"
@@ -377,7 +377,7 @@ export default function SettingsPage() {
                   {auditLogs.length} log entries
                 </div>
               </div>
-              
+
               {/* Audit log search - WORKING */}
               <div className="mt-4 flex gap-2">
                 <div className="relative flex-1">
@@ -393,7 +393,7 @@ export default function SettingsPage() {
                 </Button>
               </div>
             </div>
-            
+
             <PermissionAuditLog logs={auditLogs} />
           </TabsContent>
 
@@ -422,7 +422,7 @@ export default function SettingsPage() {
                         Grant permissions only during specific hours
                       </p>
                     </div>
-                    <Button 
+                    <Button
                       size="sm"
                       onClick={() => console.log('Add time rule clicked')}
                     >
@@ -438,7 +438,7 @@ export default function SettingsPage() {
                         Restrict permissions to specific locations
                       </p>
                     </div>
-                    <Button 
+                    <Button
                       size="sm"
                       onClick={() => console.log('Add location rule clicked')}
                     >
@@ -454,7 +454,7 @@ export default function SettingsPage() {
                         Allow permissions only on specific days
                       </p>
                     </div>
-                    <Button 
+                    <Button
                       size="sm"
                       onClick={() => console.log('Add day rule clicked')}
                     >

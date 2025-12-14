@@ -50,6 +50,7 @@ import departmentRoutes from './routes/departmentRoutes.js';
 import jobDepartmentAssignmentRoutes from './routes/jobDepartmentAssignmentRoutes.js';
 import departmentBillingRoutes from './routes/departmentBillingRoutes.js';
 import departmentPerformanceRoutes from './routes/departmentPerformanceRoutes.js';
+import departmentWorkflowRoutes from './routes/departmentWorkflowRoutes.js';
 //staff routes
 import staffRoutes from './routes/staffRoutes.js';
 //staff permissions
@@ -218,6 +219,7 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/job-department-assignments', jobDepartmentAssignmentRoutes);
 app.use('/api/department-billing', departmentBillingRoutes);
 app.use('/api/department-performance', departmentPerformanceRoutes);
+app.use('/api/department-workflow', departmentWorkflowRoutes);
 //staff routes
 //permission routes
 app.use('/api/permissions', permissionRoutes);
