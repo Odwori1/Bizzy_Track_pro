@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { DropdownNavigation } from './DropdownNavigation';
 import { useAuthStore } from '@/store/authStore';
 import { normalizePermissionCheck } from '@/lib/permissionHierarchy';
-import { usePermissions } from '@/hooks/usePermissions'; // ADD THIS
+import { usePermissions } from '@/hooks/usePermissions';
 import { checkPermission } from '@/lib/permissionMapping';
 
 interface NavItem {
@@ -30,19 +30,26 @@ interface NavigationSectionProps {
 export const NavigationSection: React.FC<NavigationSectionProps> = ({ items, color = 'gray' }) => {
   const pathname = usePathname();
   const { user } = useAuthStore();
-  const { getAllPermissionNames } = usePermissions(); // ADD THIS
+  const { getAllPermissionNames } = usePermissions();
 
   // Get actual user permissions from backend
   const userPermissionNames = getAllPermissionNames();
 
-  console.log('🔍 NavigationSection - User permissions:', {
+  console.log('🔍 NavigationSection - User info:', {
     userId: user?.id,
-    permissionCount: userPermissionNames.length,
-    permissions: userPermissionNames
+    userRole: user?.role,
+    isOwner: user?.role === 'owner',
+    permissionCount: userPermissionNames.length
   });
 
   // Filter items based on user permissions
   const filteredItems = items.filter(item => {
+    // CRITICAL FIX: OWNER BYPASS - If user is owner, show everything
+    if (user && user.role === 'owner') {
+      console.log(`👑 Owner bypass for item: ${item.name}`);
+      return true;
+    }
+    
     // If no permission required, show to all
     if (!item.permission) return true;
 
@@ -51,7 +58,7 @@ export const NavigationSection: React.FC<NavigationSectionProps> = ({ items, col
 
     // Check if user has the required permission using hierarchy
     const hasAccess = checkPermission(userPermissionNames, item.permission);
-    
+
     console.log(`🔍 Checking permission: ${item.permission} - Result: ${hasAccess}`);
     return hasAccess;
   });
@@ -104,4 +111,4 @@ export const NavigationSection: React.FC<NavigationSectionProps> = ({ items, col
       })}
     </ul>
   );
-};
+}

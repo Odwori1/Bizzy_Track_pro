@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useJobs } from '@/hooks/useJobs';
 import { useJobActions } from '@/hooks/useJobs';
 import { Job, JobFilters } from '@/types/jobs';
@@ -13,6 +14,7 @@ import { useCurrency } from '@/lib/currency';
 import { posEngine } from '@/lib/pos-engine';
 
 export default function JobsPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<JobStats>({
     total: 0,
     pending: 0,
@@ -106,6 +108,12 @@ export default function JobsPage() {
     } finally {
       setAddingToCart(null);
     }
+  };
+
+  // Handle department assignment
+  const handleAssignToDepartment = (job: Job) => {
+    // Navigate to workflow assignment creation
+    router.push(`/dashboard/coordination/workflow/create?jobId=${job.id}`);
   };
 
   // Format date for display
@@ -280,6 +288,17 @@ export default function JobsPage() {
                     </div>
                   )}
                   <div className="flex space-x-2 mt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleAssignToDepartment(job)}
+                      title="Assign to Department"
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Assign
+                    </Button>
                     {job.status === 'completed' && job.total_amount && (
                       <Button
                         onClick={() => handleAddJobFeeToCart(job)}

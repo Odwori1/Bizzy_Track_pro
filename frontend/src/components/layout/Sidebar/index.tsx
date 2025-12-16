@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { NavigationSection } from './NavigationSection';
 import { UserProfile } from './UserProfile';
-import { usePermissions } from '@/hooks/usePermissions'; // ADD THIS
-import { checkPermission } from '@/lib/permissionMapping'; // ADD THIS
+import { usePermissions } from '@/hooks/usePermissions';
+import { checkPermission } from '@/lib/permissionMapping';
+import { useAuthStore } from '@/store/authStore'; // ADDED: For owner detection
 
 // Color-coded sections for better visual organization
 const navigationSections = [
@@ -100,11 +101,31 @@ const navigationSections = [
         icon: '✉️',
         permission: 'staff:create',
       },
+      // REMOVED: 'Departments' and 'Performance' - moved to coordination section
+    ],
+  },
+  {
+    id: 'coordination',
+    title: 'Department Coordination',
+    color: 'cyan',
+    items: [
       {
         name: 'Departments',
         href: '/dashboard/coordination/departments',
         icon: '🏢',
         permission: 'department:read',
+      },
+      {
+        name: 'Workflow',
+        href: '/dashboard/coordination/workflow',
+        icon: '🔄',
+        permission: 'workflow:view',
+      },
+      {
+        name: 'Billing',
+        href: '/dashboard/coordination/billing',
+        icon: '💰',
+        permission: 'billing:view',
       },
       {
         name: 'Performance',
@@ -340,6 +361,12 @@ const navigationSections = [
     color: 'red',
     items: [
       {
+        name: 'Business Settings',
+        href: '/dashboard/security/business-settings', // CHANGED PATH
+        icon: '⚙️',
+        permission: 'business:settings:manage',
+      },
+      {
         name: 'Permission Audits',
         href: '/dashboard/security/audits',
         icon: '🔍',
@@ -356,6 +383,12 @@ const navigationSections = [
         href: '/dashboard/security/analytics',
         icon: '📈',
         permission: 'analytics:view',
+      },
+      {
+        name: 'Security Scans',
+        href: '/dashboard/security/scans',
+        icon: '🔐',
+        permission: 'security:scan',
       },
     ],
   },
@@ -404,22 +437,31 @@ const colorClasses = {
   emerald: 'text-emerald-700 border-emerald-200 bg-emerald-50',
   amber: 'text-amber-700 border-amber-200 bg-amber-50',
   red: 'text-red-700 border-red-200 bg-red-50',
+  cyan: 'text-cyan-700 border-cyan-200 bg-cyan-50',
 };
 
 // FilteredSection component that checks permissions before rendering
 const FilteredSection = ({ section }: { section: any }) => {
   const { getAllPermissionNames } = usePermissions();
+  const { user } = useAuthStore(); // GET USER FOR OWNER CHECK
   const [hasVisibleItems, setHasVisibleItems] = useState(false);
   const userPermissionNames = getAllPermissionNames();
 
   // Check if any item in this section is visible
   useEffect(() => {
+    // CRITICAL FIX: OWNER BYPASS - If user is owner, show everything
+    if (user && user.role === 'owner') {
+      setHasVisibleItems(true);
+      return;
+    }
+    
+    // For non-owners, apply permission checks
     const hasItems = section.items.some((item: any) => {
       if (!item.permission) return true;
       return checkPermission(userPermissionNames, item.permission);
     });
     setHasVisibleItems(hasItems);
-  }, [section.items, userPermissionNames]);
+  }, [section.items, userPermissionNames, user]);
 
   if (!hasVisibleItems) {
     return null;
@@ -437,6 +479,7 @@ const FilteredSection = ({ section }: { section: any }) => {
            section.id === 'pos' ? '🛒' :
            section.id === 'products' ? '📦' :
            section.id === 'staff' ? '👥' :
+           section.id === 'coordination' ? '🔄' :
            section.id === 'analytics' ? '📈' :
            section.id === 'operations' ? '⚙️' :
            section.id === 'business' ? '🏢' :
