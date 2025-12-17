@@ -14,11 +14,14 @@ import { RoleAssignment } from '@/components/staff/RoleAssignment';
 import { DepartmentAssignment } from '@/components/staff/DepartmentAssignment';
 import { getRoleDisplayName, getRoleBadgeColor } from '@/lib/rolePermissions';
 import { formatDate } from '@/lib/date-format';
+import { safeExtractId, isValidUuid } from '@/lib/api-utils';
 
 export default function StaffDetailsPage() {
   const router = useRouter();
   const params = useParams();
-  const staffId = params.id as string;
+  
+  // SAFELY EXTRACT THE ID WITH OUR NEW UTILITY
+  const rawStaffId = safeExtractId(params.id);
   
   const { user, isAuthenticated, loading: authLoading } = useAuthStore();
   const [staff, setStaff] = useState<Staff | null>(null);
@@ -37,18 +40,54 @@ export default function StaffDetailsPage() {
       return;
     }
 
+    // FIX: Validate the staff ID before making any API calls
+    if (!rawStaffId) {
+      console.error('No staff ID provided in URL');
+      setError('Staff ID is missing from the URL. Please check the URL and try again.');
+      setLoading(false);
+      return;
+    }
+
+    // FIX: Check if it's a valid UUID, not a route name
+    if (!isValidUuid(rawStaffId)) {
+      console.error('Invalid staff ID format in URL:', rawStaffId);
+      setError(`Invalid staff ID format: "${rawStaffId}". This appears to be a route name, not a staff ID. Please navigate to a valid staff member.`);
+      setLoading(false);
+      return;
+    }
+
     fetchStaff();
-  }, [staffId, isAuthenticated, authLoading, user, router]);
+  }, [rawStaffId, isAuthenticated, authLoading, user, router]);
 
   const fetchStaff = async () => {
+    if (!rawStaffId) {
+      setError('No staff ID provided');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      const staffData = await staffApi.getStaffById(staffId);
-      setStaff(staffData);
       setError(null);
+      
+      console.log('Fetching staff with ID:', rawStaffId);
+      const staffData = await staffApi.getStaffById(rawStaffId);
+      setStaff(staffData);
     } catch (err: any) {
       console.error('Failed to fetch staff:', err);
-      setError(err.message || 'Failed to load staff details');
+      
+      // Provide user-friendly error messages based on error type
+      if (err.message.includes('departments') || err.message.includes('Invalid UUID')) {
+        setError(`Unable to load staff details. The staff ID "${rawStaffId}" appears to be invalid. Please check the URL and try again.`);
+      } else if (err.message.includes('404') || err.message.includes('Not Found')) {
+        setError(`Staff member with ID "${rawStaffId}" was not found. They may have been deleted or you may not have permission to view them.`);
+      } else if (err.message.includes('401') || err.message.includes('403')) {
+        setError('You do not have permission to view this staff member.');
+      } else if (err.message.includes('500')) {
+        setError('Server error occurred while loading staff details. Please try again later.');
+      } else {
+        setError(err.message || 'Failed to load staff details');
+      }
     } finally {
       setLoading(false);
     }
@@ -66,14 +105,24 @@ export default function StaffDetailsPage() {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-700">{error}</p>
-          <Button
-            variant="outline"
-            onClick={() => router.push('/dashboard/management/staff')}
-            className="mt-2"
-          >
-            Back to Staff List
-          </Button>
+          <h3 className="text-lg font-semibold text-red-800 mb-2">Error Loading Staff</h3>
+          <p className="text-red-700 mb-4">{error}</p>
+          <p className="text-sm text-red-600 mb-4">
+            URL Parameter: <code className="bg-red-100 px-2 py-1 rounded">{rawStaffId || 'None'}</code>
+          </p>
+          <div className="space-x-2">
+            <Button
+              variant="outline"
+              onClick={() => router.push('/dashboard/management/staff')}
+            >
+              ← Back to Staff List
+            </Button>
+            <Button
+              onClick={fetchStaff}
+            >
+              Try Again
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -118,7 +167,7 @@ export default function StaffDetailsPage() {
             Manage {staff.full_name}'s account and permissions
           </p>
         </div>
-        
+
         <div className="flex space-x-2">
           <Link href={`/dashboard/management/staff/${staff.id}/edit`}>
             <Button variant="outline">
@@ -189,7 +238,7 @@ export default function StaffDetailsPage() {
           <div className="space-y-6">
             {/* Staff Card */}
             <StaffCard staff={staff} showActions={false} />
-            
+
             {/* Additional Details */}
             <div className="bg-white rounded-lg border p-6">
               <h3 className="text-lg font-semibold text-gray-800 mb-4">Account Details</h3>
@@ -198,26 +247,26 @@ export default function StaffDetailsPage() {
                   <p className="text-sm text-gray-600 mb-1">Account Created</p>
                   <p className="font-medium">{formatDate(staff.created_at)}</p>
                 </div>
-                
+
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Last Updated</p>
                   <p className="font-medium">{formatDate(staff.updated_at)}</p>
                 </div>
-                
+
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Account Status</p>
                   <span className={`px-2 py-1 text-xs rounded-full ${staff.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                     {staff.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
-                
+
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Role</p>
                   <span className={`px-2 py-1 text-xs rounded-full ${getRoleBadgeColor(staff.role as any)}`}>
                     {getRoleDisplayName(staff.role as any)}
                   </span>
                 </div>
-                
+
                 {staff.notes && (
                   <div className="md:col-span-2">
                     <p className="text-sm text-gray-600 mb-1">Notes</p>
@@ -234,16 +283,16 @@ export default function StaffDetailsPage() {
         )}
 
         {activeTab === 'role' && (
-          <RoleAssignment 
-            staff={staff} 
+          <RoleAssignment
+            staff={staff}
             onRoleAssigned={handleRoleAssigned}
             onCancel={() => setActiveTab('overview')}
           />
         )}
 
         {activeTab === 'department' && (
-          <DepartmentAssignment 
-            staff={staff} 
+          <DepartmentAssignment
+            staff={staff}
             onDepartmentAssigned={handleDepartmentAssigned}
             onCancel={() => setActiveTab('overview')}
           />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'; // ADDED: useSearchParams
 import { DepartmentForm } from '@/components/department/DepartmentForm';
 import { useDepartment } from '@/hooks/useDepartment';
 import { Button } from '@/components/ui/Button';
@@ -8,7 +8,11 @@ import Link from 'next/link';
 
 export default function CreateDepartmentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams(); // ADDED: Get query params
   const { createDepartment, loading } = useDepartment();
+
+  // ADDED: Get parent department ID from URL query
+  const parentDepartmentId = searchParams.get('parent');
 
   const handleSuccess = () => {
     router.push('/dashboard/coordination/departments');
@@ -27,6 +31,12 @@ export default function CreateDepartmentPage() {
             <h1 className="text-2xl font-bold text-gray-900">Create New Department</h1>
             <p className="text-gray-600 mt-1">
               Add a new department to organize your business operations
+              {/* ADDED: Show if creating child department */}
+              {parentDepartmentId && (
+                <span className="ml-2 text-blue-600 font-medium">
+                  (Creating child department)
+                </span>
+              )}
             </p>
           </div>
           <Link href="/dashboard/coordination/departments">
@@ -35,10 +45,11 @@ export default function CreateDepartmentPage() {
         </div>
       </div>
 
-      {/* Form */}
+      {/* ADDED: Pass parentDepartmentId to DepartmentForm */}
       <DepartmentForm
         onSuccess={handleSuccess}
         onCancel={handleCancel}
+        parentDepartmentId={parentDepartmentId}
       />
 
       {/* Loading Overlay */}

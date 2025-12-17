@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from '@/lib/api';
-import { cleanStaffFilters, cleanUuidParam } from '@/lib/api-utils';
+import { cleanStaffFilters, cleanStaffIdParam, safeExtractId, isValidUuid } from '@/lib/api-utils';
 import {
   Staff,
   StaffFormData,
@@ -35,38 +35,64 @@ class StaffApiService {
     // Use cleaned filters
     const cleanedFilters = cleanStaffFilters(filters);
     console.log('Getting staff with cleaned filters:', cleanedFilters);
-    
+
     return apiClient.get<Staff[]>('/staff', cleanedFilters);
   }
 
   async getStaffById(id: string): Promise<Staff> {
-    // Clean the ID to prevent "undefined" UUID errors
-    const cleanedId = cleanUuidParam(id);
+    // USE THE FIXED CLEANER SPECIFICALLY FOR STAFF IDs
+    const cleanedId = cleanStaffIdParam(id);
+    
     if (!cleanedId) {
-      throw new Error('Invalid staff ID');
+      console.error('getStaffById: Invalid staff ID after cleaning:', id);
+      throw new Error(`Invalid staff ID: "${id}". Please check the URL and ensure it contains a valid staff ID.`);
     }
     
-    return apiClient.get<Staff>(`/staff/${cleanedId}`);
+    console.log('Fetching staff with ID:', { original: id, cleaned: cleanedId });
+    
+    try {
+      const result = await apiClient.get<Staff>(`/staff/${cleanedId}`);
+      console.log('getStaffById: Successfully fetched staff:', result.id);
+      return result;
+    } catch (error: any) {
+      console.error('getStaffById: API call failed:', { 
+        id: cleanedId, 
+        error: error.message,
+        status: error.status 
+      });
+      throw error;
+    }
   }
 
   async updateStaff(id: string, data: StaffUpdateData): Promise<Staff> {
-    // Clean the ID and data
-    const cleanedId = cleanUuidParam(id);
+    // USE THE FIXED CLEANER
+    const cleanedId = cleanStaffIdParam(id);
+    
     if (!cleanedId) {
-      throw new Error('Invalid staff ID');
+      console.error('updateStaff: Invalid staff ID:', id);
+      throw new Error(`Invalid staff ID: ${id}`);
     }
     
-    return apiClient.put<Staff>(`/staff/${cleanedId}`, data);
+    console.log('Updating staff with ID:', { original: id, cleaned: cleanedId });
+    
+    try {
+      return await apiClient.put<Staff>(`/staff/${cleanedId}`, data);
+    } catch (error: any) {
+      console.error('updateStaff error:', { id: cleanedId, error: error.message });
+      throw error;
+    }
   }
 
   async deleteStaff(id: string): Promise<Staff> {
-    // Clean the ID
-    const cleanedId = cleanUuidParam(id);
+    // USE THE FIXED CLEANER
+    const cleanedId = cleanStaffIdParam(id);
+    
     if (!cleanedId) {
-      throw new Error('Invalid staff ID');
+      console.error('deleteStaff: Invalid staff ID:', id);
+      throw new Error(`Invalid staff ID: ${id}`);
     }
     
-    return apiClient.delete<Staff>(`/staff/${cleanedId}`);
+    return await apiClient.delete<Staff>(`/staff/${cleanedId}`);
   }
 
   // ==================== INVITATION SYSTEM ====================
@@ -75,13 +101,15 @@ class StaffApiService {
   }
 
   async resendInvitation(staffId: string): Promise<any> {
-    // Clean the ID
-    const cleanedId = cleanUuidParam(staffId);
+    // USE THE FIXED CLEANER
+    const cleanedId = cleanStaffIdParam(staffId);
+    
     if (!cleanedId) {
-      throw new Error('Invalid staff ID');
+      console.error('resendInvitation: Invalid staff ID:', staffId);
+      throw new Error(`Invalid staff ID: ${staffId}`);
     }
     
-    return apiClient.post(`/staff/${cleanedId}/resend-invitation`);
+    return await apiClient.post(`/staff/${cleanedId}/resend-invitation`);
   }
 
   // ==================== ROLES & PERMISSIONS ====================
@@ -90,28 +118,36 @@ class StaffApiService {
   }
 
   async assignRole(staffId: string, roleId: string): Promise<any> {
-    // Clean both IDs
-    const cleanedStaffId = cleanUuidParam(staffId);
-    const cleanedRoleId = cleanUuidParam(roleId);
-    
+    // USE THE FIXED CLEANER FOR STAFF ID
+    const cleanedStaffId = cleanStaffIdParam(staffId);
+    const cleanedRoleId = cleanStaffIdParam(roleId); // Use same function for role IDs
+
     if (!cleanedStaffId || !cleanedRoleId) {
+      console.error('assignRole: Invalid IDs:', { staffId, roleId });
       throw new Error('Invalid staff ID or role ID');
     }
-    
-    return apiClient.post(`/staff/${cleanedStaffId}/assign-role`, { roleId: cleanedRoleId });
+
+    return await apiClient.post(`/staff/${cleanedStaffId}/assign-role`, { 
+      roleId: cleanedRoleId 
+    });
   }
 
   // ==================== PERFORMANCE & ANALYTICS ====================
   async getStaffPerformance(staffId: string, filters?: any): Promise<StaffPerformanceMetrics> {
-    // Clean staff ID and filters
-    const cleanedStaffId = cleanUuidParam(staffId);
+    // USE THE FIXED CLEANER
+    const cleanedStaffId = cleanStaffIdParam(staffId);
+    
     if (!cleanedStaffId) {
-      throw new Error('Invalid staff ID');
+      console.error('getStaffPerformance: Invalid staff ID:', staffId);
+      throw new Error(`Invalid staff ID: ${staffId}`);
     }
     
     const cleanedFilters = cleanStaffFilters(filters);
-    
-    return apiClient.get<StaffPerformanceMetrics>(`/staff/${cleanedStaffId}/performance`, cleanedFilters);
+
+    return await apiClient.get<StaffPerformanceMetrics>(
+      `/staff/${cleanedStaffId}/performance`, 
+      cleanedFilters
+    );
   }
 
   async getStaffDashboard(): Promise<StaffDashboardData> {
@@ -120,38 +156,57 @@ class StaffApiService {
 
   // ==================== DEPARTMENT ASSIGNMENTS ====================
   async assignToDepartment(staffId: string, departmentId: string): Promise<any> {
-    // Clean both IDs
-    const cleanedStaffId = cleanUuidParam(staffId);
-    const cleanedDeptId = cleanUuidParam(departmentId);
-    
+    // USE THE FIXED CLEANER
+    const cleanedStaffId = cleanStaffIdParam(staffId);
+    const cleanedDeptId = cleanStaffIdParam(departmentId); // Use same function
+
     if (!cleanedStaffId || !cleanedDeptId) {
+      console.error('assignToDepartment: Invalid IDs:', { staffId, departmentId });
       throw new Error('Invalid staff ID or department ID');
     }
+
+    return await apiClient.put(`/staff/${cleanedStaffId}`, {
+      department_id: cleanedDeptId
+    });
+  }
+
+  async unassignFromDepartment(staffId: string): Promise<any> {
+    // USE THE FIXED CLEANER
+    const cleanedStaffId = cleanStaffIdParam(staffId);
     
-    return apiClient.post(`/staff/${cleanedStaffId}/assign-department`, { 
-      departmentId: cleanedDeptId 
+    if (!cleanedStaffId) {
+      console.error('unassignFromDepartment: Invalid staff ID:', staffId);
+      throw new Error(`Invalid staff ID: ${staffId}`);
+    }
+
+    return await apiClient.put(`/staff/${cleanedStaffId}`, {
+      department_id: null
     });
   }
 
   async getDepartmentStaff(departmentId: string): Promise<Staff[]> {
-    // Clean department ID
-    const cleanedDeptId = cleanUuidParam(departmentId);
-    if (!cleanedDeptId) {
-      throw new Error('Invalid department ID');
-    }
+    // USE THE FIXED CLEANER
+    const cleanedDeptId = cleanStaffIdParam(departmentId);
     
-    return apiClient.get<Staff[]>(`/departments/${cleanedDeptId}/staff`);
+    if (!cleanedDeptId) {
+      console.error('getDepartmentStaff: Invalid department ID:', departmentId);
+      throw new Error(`Invalid department ID: ${departmentId}`);
+    }
+
+    return await apiClient.get<Staff[]>(`/departments/${cleanedDeptId}/staff`);
   }
 
   // ==================== BULK OPERATIONS ====================
   async bulkUpdateStaff(updates: Array<{ id: string; data: StaffUpdateData }>): Promise<any[]> {
     // Clean each update
-    const cleanedUpdates = updates.map(update => ({
-      id: cleanUuidParam(update.id),
-      data: update.data
-    })).filter(update => update.id); // Remove invalid IDs
-    
-    return Promise.all(cleanedUpdates.map(update => 
+    const cleanedUpdates = updates
+      .map(update => ({
+        id: cleanStaffIdParam(update.id),
+        data: update.data
+      }))
+      .filter(update => update.id); // Remove invalid IDs
+
+    return Promise.all(cleanedUpdates.map(update =>
       this.updateStaff(update.id!, update.data)
     ));
   }
@@ -159,7 +214,7 @@ class StaffApiService {
   async exportStaffList(filters?: StaffFilters): Promise<Blob> {
     const cleanedFilters = cleanStaffFilters(filters);
     const queryString = new URLSearchParams(cleanedFilters as any).toString();
-    
+
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002'}/api/staff/export?${queryString}`,
       {

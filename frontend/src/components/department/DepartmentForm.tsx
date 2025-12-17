@@ -6,14 +6,14 @@ import { useStaff } from '@/hooks/useStaff';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-// Import Select correctly - check if it's exported as Select or select
-import { Select } from '@/components/ui/select';  // Assuming it's exported as Select
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/Textarea';
 
 interface DepartmentFormProps {
   department?: Department;
   onSuccess?: () => void;
   onCancel?: () => void;
+  parentDepartmentId?: string | null;
 }
 
 const DEPARTMENT_TYPES = [
@@ -32,7 +32,8 @@ const DEPARTMENT_TYPES = [
 export const DepartmentForm: React.FC<DepartmentFormProps> = ({
   department,
   onSuccess,
-  onCancel
+  onCancel,
+  parentDepartmentId = null
 }) => {
   const router = useRouter();
   const { createDepartment, updateDepartment, departments, loading: deptLoading, error: deptError, clearError } = useDepartment();
@@ -43,7 +44,7 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
     name: department?.name || '',
     code: department?.code || '',
     description: department?.description || '',
-    parent_department_id: department?.parent_department_id || null,
+    parent_department_id: department?.parent_department_id || parentDepartmentId || null,
     cost_center_code: department?.cost_center_code || '',
     department_type: department?.department_type || 'service',
     color_hex: department?.color_hex || '#3B82F6',
@@ -57,40 +58,106 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
   const [parentDepartments, setParentDepartments] = useState<Array<{id: string, name: string}>>([]);
   const [availableStaff, setAvailableStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [colorInputMode, setColorInputMode] = useState<'hex' | 'name'>('hex');
+  const [colorValidation, setColorValidation] = useState<{isValid: boolean; message: string | null}>({
+    isValid: true,
+    message: null
+  });
 
-  // Load parent departments for dropdown
-  useEffect(() => {
-    const availableParents = departments
-      .filter(dept => !department || dept.id !== department.id) // Can't be parent of itself
-      .map(dept => ({ id: dept.id, name: dept.name }));
-    setParentDepartments(availableParents);
-  }, [departments, department]);
+  // Function to validate if a string is a valid CSS color
+  const isValidColor = (color: string): boolean => {
+    if (!color) return false;
+    
+    // Test if it's a valid hex color
+    const hexRegex = /^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/;
+    if (hexRegex.test(color)) return true;
+    
+    // Test if it's a valid CSS color name by creating a temporary element
+    const tempElement = document.createElement('div');
+    tempElement.style.color = color;
+    tempElement.style.display = 'none';
+    document.body.appendChild(tempElement);
+    const computedColor = tempElement.style.color;
+    document.body.removeChild(tempElement);
+    
+    // If the browser didn't recognize it, it will be empty or unchanged
+    return computedColor !== '' && computedColor !== 'inherit';
+  };
 
-  // Load staff data
-  useEffect(() => {
-    const loadStaff = async () => {
-      try {
-        await fetchStaff();
-      } catch (error) {
-        console.error('Failed to load staff:', error);
+  // Convert color name to hex
+  const convertColorToHex = (color: string): string => {
+    if (!color || color.trim() === '') return '#3B82F6';
+    
+    // If already hex, return as is
+    if (color.startsWith('#')) return color;
+    
+    // Try to convert color name to hex
+    const tempElement = document.createElement('div');
+    tempElement.style.color = color;
+    tempElement.style.display = 'none';
+    document.body.appendChild(tempElement);
+    const computedColor = tempElement.style.color;
+    document.body.removeChild(tempElement);
+    
+    // If conversion worked, return as hex
+    if (computedColor && computedColor !== '') {
+      // Convert rgb() to hex
+      if (computedColor.startsWith('rgb')) {
+        const rgb = computedColor.match(/\d+/g);
+        if (rgb && rgb.length >= 3) {
+          const r = parseInt(rgb[0]).toString(16).padStart(2, '0');
+          const g = parseInt(rgb[1]).toString(16).padStart(2, '0');
+          const b = parseInt(rgb[2]).toString(16).padStart(2, '0');
+          return `#${r}${g}${b}`.toUpperCase();
+        }
       }
-    };
-    loadStaff();
-  }, [fetchStaff]);
-
-  // Filter available staff (staff not assigned to any department or assigned to this department)
-  useEffect(() => {
-    if (staff && staff.length > 0) {
-      const filtered = staff.filter(staffMember =>
-        !staffMember.department_id ||
-        staffMember.department_id === department?.id
-      );
-      setAvailableStaff(filtered);
+      // If already hex format
+      if (computedColor.startsWith('#')) return computedColor;
     }
-  }, [staff, department?.id]);
+    
+    // Fallback to default
+    return '#3B82F6';
+  };
+
+  const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    
+    // Update form data immediately for color picker
+    if (e.target.type === 'color') {
+      setFormData(prev => ({ ...prev, color_hex: value }));
+      setColorValidation({ isValid: true, message: null });
+      setColorInputMode('hex');
+      return;
+    }
+    
+    // For text input, validate and convert if needed
+    const isValid = isValidColor(value);
+    
+    if (isValid) {
+      const hexValue = convertColorToHex(value);
+      setFormData(prev => ({ ...prev, color_hex: hexValue }));
+      setColorValidation({ 
+        isValid: true, 
+        message: value.startsWith('#') ? 'Valid hex color' : `Using: ${hexValue}`
+      });
+      setColorInputMode(value.startsWith('#') ? 'hex' : 'name');
+    } else {
+      setColorValidation({ 
+        isValid: false, 
+        message: 'Enter a valid color name (e.g., "red", "blue") or hex code (#RRGGBB)'
+      });
+      // Still update form data but mark as invalid
+      setFormData(prev => ({ ...prev, color_hex: value }));
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
+
+    if (name === 'color_hex') {
+      handleColorChange(e as React.ChangeEvent<HTMLInputElement>);
+      return;
+    }
 
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked;
@@ -122,13 +189,11 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
     setFormData(prev => {
       const currentStaffIds = prev.staff_ids || [];
       if (currentStaffIds.includes(staffId)) {
-        // Remove staff member
         return {
           ...prev,
           staff_ids: currentStaffIds.filter(id => id !== staffId)
         };
       } else {
-        // Add staff member
         return {
           ...prev,
           staff_ids: [...currentStaffIds, staffId]
@@ -150,6 +215,10 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
       setFormError('Department type is required');
       return false;
     }
+    if (!colorValidation.isValid) {
+      setFormError('Please enter a valid color');
+      return false;
+    }
     return true;
   };
 
@@ -159,6 +228,13 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
     clearError();
     setLoading(true);
 
+    // Ensure color is in hex format before submitting
+    const finalColorHex = convertColorToHex(formData.color_hex);
+    const formDataToSubmit = {
+      ...formData,
+      color_hex: finalColorHex
+    };
+
     if (!validateForm()) {
       setLoading(false);
       return;
@@ -166,9 +242,9 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
 
     try {
       if (isEditMode && department) {
-        await updateDepartment(department.id, formData);
+        await updateDepartment(department.id, formDataToSubmit);
       } else {
-        await createDepartment(formData);
+        await createDepartment(formDataToSubmit);
       }
 
       if (onSuccess) {
@@ -188,7 +264,44 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
     { value: 'false', label: 'Inactive Department' },
   ];
 
-  // Get staff assigned to this department
+  // Load parent departments for dropdown
+  useEffect(() => {
+    const availableParents = departments
+      .filter(dept => !department || dept.id !== department.id)
+      .map(dept => ({ id: dept.id, name: dept.name }));
+    setParentDepartments(availableParents);
+
+    if (parentDepartmentId && !department?.parent_department_id) {
+      const parentDept = departments.find(dept => dept.id === parentDepartmentId);
+      if (parentDept) {
+        console.log(`Creating child department under: ${parentDept.name}`);
+      }
+    }
+  }, [departments, department, parentDepartmentId]);
+
+  // Load staff data
+  useEffect(() => {
+    const loadStaff = async () => {
+      try {
+        await fetchStaff();
+      } catch (error) {
+        console.error('Failed to load staff:', error);
+      }
+    };
+    loadStaff();
+  }, [fetchStaff]);
+
+  // Filter available staff
+  useEffect(() => {
+    if (staff && staff.length > 0) {
+      const filtered = staff.filter(staffMember =>
+        !staffMember.department_id ||
+        staffMember.department_id === department?.id
+      );
+      setAvailableStaff(filtered);
+    }
+  }, [staff, department?.id]);
+
   const assignedStaff = staff?.filter(s => s.department_id === department?.id) || [];
 
   return (
@@ -196,6 +309,11 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
       <CardHeader>
         <CardTitle>
           {isEditMode ? 'Edit Department' : 'Create New Department'}
+          {parentDepartmentId && !department && (
+            <div className="text-sm font-normal text-gray-600 mt-1">
+              Creating child department
+            </div>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -203,6 +321,20 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
           {(formError || deptError) && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
               {formError || deptError}
+            </div>
+          )}
+
+          {parentDepartmentId && !department && formData.parent_department_id && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-4">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-blue-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clipRule="evenodd" />
+                </svg>
+                <span className="font-medium text-blue-800">Creating Child Department</span>
+              </div>
+              <p className="text-sm text-blue-600 mt-1">
+                This department will be created as a child of the selected parent department.
+              </p>
             </div>
           )}
 
@@ -260,6 +392,9 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
                   }))
                 ]}
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Select "No Parent" for top-level department, or choose a parent to create hierarchy
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -274,25 +409,84 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
               />
             </div>
 
+            {/* Color Input Section - Enhanced for name/hex support */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700">
                 Color
               </label>
-              <div className="flex items-center space-x-2">
-                <Input
-                  type="color"
-                  name="color_hex"
-                  value={formData.color_hex}
-                  onChange={handleChange}
-                  className="w-12 h-10 p-1"
-                />
-                <Input
-                  name="color_hex"
-                  value={formData.color_hex}
-                  onChange={handleChange}
-                  placeholder="#3B82F6"
-                  className="flex-1"
-                />
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Input
+                    type="color"
+                    name="color_picker"
+                    value={formData.color_hex}
+                    onChange={handleColorChange}
+                    className="w-12 h-10 p-1 cursor-pointer"
+                    title="Click to pick a color"
+                  />
+                  <div className="flex-1">
+                    <Input
+                      name="color_hex"
+                      value={formData.color_hex}
+                      onChange={handleChange}
+                      placeholder="e.g., #3B82F6 or 'blue' or 'teal'"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                
+                {/* Color preview and validation feedback */}
+                <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-2">
+                    <div 
+                      className="w-8 h-8 rounded border border-gray-300"
+                      style={{ backgroundColor: formData.color_hex }}
+                      title="Color preview"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      {colorInputMode === 'name' ? 'Name' : 'Hex'}
+                    </span>
+                  </div>
+                  
+                  {/* Validation message */}
+                  {colorValidation.message && (
+                    <div className={`text-sm ${colorValidation.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                      {colorValidation.message}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Color examples */}
+                <div className="mt-1">
+                  <p className="text-xs text-gray-500 mb-1">
+                    Try: <span className="font-medium">"red"</span>, <span className="font-medium">"blue"</span>, 
+                    <span className="font-medium"> "green"</span>, <span className="font-medium">"purple"</span>, 
+                    or any CSS color name
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {['red', 'blue', 'green', 'purple', 'orange', 'teal', 'gray'].map(color => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, color_hex: color }));
+                          setColorValidation({ 
+                            isValid: true, 
+                            message: `Using: ${convertColorToHex(color)}` 
+                          });
+                          setColorInputMode('name');
+                        }}
+                        className="px-2 py-1 text-xs rounded border hover:opacity-90 transition-opacity"
+                        style={{ 
+                          backgroundColor: color,
+                          color: ['yellow', 'white', 'lightyellow', 'lightcyan'].includes(color) ? 'black' : 'white'
+                        }}
+                      >
+                        {color}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -347,7 +541,6 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Staff Assignment</h3>
 
             <div className="space-y-4">
-              {/* Current Staff */}
               {department && assignedStaff.length > 0 && (
                 <div>
                   <h4 className="font-medium text-gray-700 mb-2">Current Staff in Department</h4>
@@ -390,7 +583,6 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
                 </div>
               )}
 
-              {/* Available Staff for Assignment */}
               {availableStaff.length > 0 && (
                 <div>
                   <h4 className="font-medium text-gray-700 mb-2">
@@ -435,7 +627,6 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
                 </div>
               )}
 
-              {/* No Staff Available */}
               {availableStaff.length === 0 && (
                 <div className="text-center py-8 border rounded bg-gray-50">
                   <svg className="w-12 h-12 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -459,7 +650,6 @@ export const DepartmentForm: React.FC<DepartmentFormProps> = ({
                 </div>
               )}
 
-              {/* Selected Staff Count */}
               {formData.staff_ids && formData.staff_ids.length > 0 && (
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
                   <div className="flex items-center">

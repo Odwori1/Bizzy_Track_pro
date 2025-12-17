@@ -2,9 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Staff, StaffFormData, StaffRole } from '@/types/staff';
 import { staffApi } from '@/lib/api/staff';
+import { apiClient } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore } from '@/store/authStore';
 import { getAssignableRoles } from '@/lib/rolePermissions';
+
+interface Department {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+}
 
 interface StaffFormProps {
   staff?: Staff; // For editing mode
@@ -25,11 +33,14 @@ export const StaffForm: React.FC<StaffFormProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [availableRoles, setAvailableRoles] = useState<{id: string, name: string, description: string}[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingRoles, setLoadingRoles] = useState(false);
+  const [loadingDepartments, setLoadingDepartments] = useState(false);
 
-  // Fetch available roles on component mount (for new staff only)
+  // Fetch available roles and departments on component mount
   useEffect(() => {
-    const fetchRoles = async () => {
+    const fetchData = async () => {
+      // Fetch roles
       setLoadingRoles(true);
       try {
         const roles = await staffApi.getStaffRoles();
@@ -53,11 +64,22 @@ export const StaffForm: React.FC<StaffFormProps> = ({
       } finally {
         setLoadingRoles(false);
       }
+
+      // Fetch departments
+      setLoadingDepartments(true);
+      try {
+        const deptData = await apiClient.get<Department[]>('/departments');
+        console.log('Fetched departments:', deptData);
+        setDepartments(deptData);
+      } catch (error) {
+        console.error('Failed to fetch departments:', error);
+        setError('Failed to load departments. You can still create staff without department assignment.');
+      } finally {
+        setLoadingDepartments(false);
+      }
     };
 
-    if (!isEditMode) {
-      fetchRoles();
-    }
+    fetchData();
   }, [isEditMode]);
 
   // Available roles for current user to assign
@@ -98,6 +120,14 @@ export const StaffForm: React.FC<StaffFormProps> = ({
       ...prev,
       role: roleName as StaffRole,
       role_id: selectedRole?.id || ''
+    }));
+  };
+
+  // Handle department change
+  const handleDepartmentChange = (departmentId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      department_id: departmentId
     }));
   };
 
@@ -222,6 +252,12 @@ export const StaffForm: React.FC<StaffFormProps> = ({
       text: strengthTexts[score] || 'Very Weak'
     };
   };
+
+  // Filter active departments for the dropdown
+  const activeDepartments = departments.filter(dept => dept.is_active);
+  
+  // Find selected department name for display
+  const selectedDepartment = departments.find(dept => dept.id === formData.department_id);
 
   const passwordStrength = getPasswordStrength(formData.custom_password);
 
@@ -355,16 +391,67 @@ export const StaffForm: React.FC<StaffFormProps> = ({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Department ID
+              Department
             </label>
-            <input
-              type="text"
-              name="department_id"
-              value={formData.department_id || ''}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Department ID"
-            />
+            {loadingDepartments ? (
+              <select
+                disabled
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
+              >
+                <option>Loading departments...</option>
+              </select>
+            ) : activeDepartments.length === 0 ? (
+              <div className="space-y-2">
+                <select
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
+                >
+                  <option>No departments available</option>
+                </select>
+                <p className="text-xs text-gray-500">
+                  Create departments in the coordination section first
+                </p>
+                <a
+                  href="/dashboard/coordination/departments"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  Go to Departments →
+                </a>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <select
+                  name="department_id"
+                  value={formData.department_id || ''}
+                  onChange={(e) => handleDepartmentChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">No Department (Not assigned)</option>
+                  {activeDepartments.map(dept => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name} ({dept.code}) {!dept.is_active && '- Inactive'}
+                    </option>
+                  ))}
+                </select>
+                {selectedDepartment && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected: {selectedDepartment.name}
+                    {!selectedDepartment.is_active && ' (Inactive)'}
+                  </p>
+                )}
+                <div className="flex justify-between items-center mt-1">
+                  <a
+                    href="/dashboard/coordination/departments"
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    Manage Departments →
+                  </a>
+                  <span className="text-xs text-gray-500">
+                    {activeDepartments.length} active department(s)
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

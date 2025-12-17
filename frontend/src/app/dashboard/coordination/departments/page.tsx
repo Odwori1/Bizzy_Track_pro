@@ -21,6 +21,7 @@ export default function DepartmentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
 
   // Statistics states
   const [totalDepartments, setTotalDepartments] = useState(0);
@@ -110,6 +111,80 @@ export default function DepartmentsPage() {
     setHierarchyData(displayHierarchyData);
   }, [displayHierarchyData]);
 
+  // Get departments for the current view - Shows direct children when viewing a parent
+  const displayDepartments = useMemo(() => {
+    let depts;
+    
+    if (selectedParentId) {
+      // Show ALL direct children of selected parent
+      depts = filteredDepartments.filter(dept => dept.parent_department_id === selectedParentId);
+    } else {
+      // Show ALL top-level departments (no parent)
+      depts = filteredDepartments.filter(dept => !dept.parent_department_id);
+    }
+    
+    // Apply inactive filter
+    return depts.filter(dept => showInactive || dept.is_active);
+  }, [filteredDepartments, selectedParentId, showInactive]);
+
+  // Get child counts for all departments - Counts direct children only
+  const childCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    departments.forEach(dept => {
+      if (dept.parent_department_id) {
+        counts.set(dept.parent_department_id, (counts.get(dept.parent_department_id) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [departments]);
+
+  // Get total descendant count (all levels) for a department
+  const getTotalDescendantCount = useMemo(() => {
+    const countDescendants = (parentId: string): number => {
+      const children = departments.filter(dept => dept.parent_department_id === parentId);
+      let total = children.length;
+      children.forEach(child => {
+        total += countDescendants(child.id);
+      });
+      return total;
+    };
+    return countDescendants;
+  }, [departments]);
+
+  // Get the selected parent department
+  const selectedParentDepartment = useMemo(() => {
+    if (!selectedParentId) return null;
+    return departments.find(dept => dept.id === selectedParentId);
+  }, [departments, selectedParentId]);
+
+  // Get breadcrumb trail for navigation
+  const breadcrumbTrail = useMemo(() => {
+    const trail: Department[] = [];
+    
+    if (!selectedParentId) return trail;
+    
+    // Build trail by finding parent chain
+    let currentDept = selectedParentDepartment;
+    while (currentDept) {
+      trail.unshift(currentDept);
+      if (currentDept.parent_department_id) {
+        currentDept = departments.find(d => d.id === currentDept!.parent_department_id);
+      } else {
+        currentDept = null;
+      }
+    }
+    
+    return trail;
+  }, [departments, selectedParentId, selectedParentDepartment]);
+
+  // Get orphaned departments (departments with parent IDs that don't exist)
+  const orphanedDepartments = useMemo(() => {
+    return filteredDepartments.filter(dept => 
+      dept.parent_department_id && 
+      !departments.find(d => d.id === dept.parent_department_id)
+    );
+  }, [filteredDepartments, departments]);
+
   const handleToggleExpand = (departmentId: string) => {
     setExpandedDepartments(prev => {
       const newSet = new Set(prev);
@@ -124,12 +199,26 @@ export default function DepartmentsPage() {
 
   const handleRefresh = () => {
     setRefreshTrigger(prev => prev + 1);
+    setSelectedParentId(null);
   };
 
-  // Departments to display in grid view
-  const displayDepartments = useMemo(() => {
-    return filteredDepartments.filter(dept => showInactive || dept.is_active);
-  }, [filteredDepartments, showInactive]);
+  const handleViewChildren = (parentId: string) => {
+    setSelectedParentId(parentId);
+  };
+
+  const handleBackToParent = () => {
+    if (selectedParentDepartment?.parent_department_id) {
+      // Go back to grandparent
+      setSelectedParentId(selectedParentDepartment.parent_department_id);
+    } else {
+      // Go back to top-level
+      setSelectedParentId(null);
+    }
+  };
+
+  const handleBreadcrumbClick = (departmentId: string | null) => {
+    setSelectedParentId(departmentId);
+  };
 
   // Hierarchy data to display
   const displayHierarchy = useMemo(() => {
@@ -255,12 +344,78 @@ export default function DepartmentsPage() {
         </div>
       </Card>
 
+      {/* Breadcrumb Navigation */}
+      {(selectedParentId || breadcrumbTrail.length > 0) && (
+        <div className="flex items-center space-x-2 text-sm bg-blue-50 p-3 rounded-lg">
+          <button
+            onClick={() => handleBreadcrumbClick(null)}
+            className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+          >
+            All Departments
+          </button>
+          
+          {breadcrumbTrail.map((dept, index) => (
+            <div key={dept.id} className="flex items-center">
+              <span className="text-gray-400 mx-1">/</span>
+              {index === breadcrumbTrail.length - 1 ? (
+                <div className="flex items-center">
+                  <div 
+                    className="w-6 h-6 rounded-full flex items-center justify-center mr-2 text-xs font-medium text-white flex-shrink-0"
+                    style={dept.color_hex ? { backgroundColor: dept.color_hex } : { backgroundColor: '#6b7280' }}
+                  >
+                    {dept.name.split(' ').filter(part => part.length > 0).map(part => part.charAt(0).toUpperCase()).slice(0, 2).join('')}
+                  </div>
+                  <span className="text-gray-700 font-medium truncate">
+                    {dept.name}
+                  </span>
+                  <span className="ml-2 text-gray-500 text-xs">
+                    ({childCounts.get(dept.id) || 0} direct children)
+                  </span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleBreadcrumbClick(dept.id)}
+                  className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-xs"
+                >
+                  {dept.name}
+                </button>
+              )}
+            </div>
+          ))}
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={selectedParentId ? handleBackToParent : () => handleBreadcrumbClick(null)}
+            className="ml-auto"
+          >
+            {selectedParentId ? '← Back' : '← Back to All'}
+          </Button>
+        </div>
+      )}
+
       {/* Department Count and Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="text-sm text-gray-600">
-          Showing {displayDepartments.length} of {departments.length} departments
-          {searchTerm && ` for "${searchTerm}"`}
-          {statusFilter !== 'all' && ` (${statusFilter})`}
+          {selectedParentId ? (
+            <>
+              Showing {displayDepartments.length} direct child department{displayDepartments.length !== 1 ? 's' : ''} of "{selectedParentDepartment?.name}"
+              {childCounts.get(selectedParentId) > 0 && (
+                <span className="ml-2 text-blue-600">
+                  (Total descendants: {getTotalDescendantCount(selectedParentId)})
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              Showing {displayDepartments.length} of {departments.length} departments
+              {searchTerm && ` for "${searchTerm}"`}
+              {statusFilter !== 'all' && ` (${statusFilter})`}
+              <span className="ml-2">
+                ({displayDepartments.length} top-level, {filteredDepartments.length - displayDepartments.length} child departments)
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
@@ -288,30 +443,87 @@ export default function DepartmentsPage() {
           <Card>
             <div className="text-center py-12">
               <div className="text-4xl mb-4">🏢</div>
-              <h3 className="text-lg font-medium text-gray-900">No departments found</h3>
+              <h3 className="text-lg font-medium text-gray-900">
+                {selectedParentId ? 'No child departments found' : 'No departments found'}
+              </h3>
               <p className="mt-1 text-gray-500">
-                {searchTerm || statusFilter !== 'all'
+                {selectedParentId
+                  ? 'This department doesn\'t have any child departments yet.'
+                  : searchTerm || statusFilter !== 'all'
                   ? 'Try changing your search or filter criteria'
                   : 'Get started by creating your first department.'}
               </p>
               <div className="mt-6">
-                <Link href="/dashboard/coordination/departments/create">
-                  <Button variant="primary">
-                    Create Department
+                {selectedParentId ? (
+                  <Button variant="outline" onClick={handleBackToParent}>
+                    ← Back
                   </Button>
-                </Link>
+                ) : (
+                  <Link href="/dashboard/coordination/departments/create">
+                    <Button variant="primary">
+                      Create Department
+                    </Button>
+                  </Link>
+                )}
               </div>
             </div>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {displayDepartments.map((department: Department) => (
-              <DepartmentCard
-                key={department.id}
-                department={department}
-                onDelete={handleRefresh}
-              />
-            ))}
+          <div className="space-y-8">
+            {/* Main Department Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {displayDepartments.map((department: Department) => {
+                const directChildCount = childCounts.get(department.id) || 0;
+                const hasChildren = directChildCount > 0;
+                const isLeafNode = directChildCount === 0;
+                
+                return (
+                  <DepartmentCard
+                    key={department.id}
+                    department={department}
+                    onDelete={handleRefresh}
+                    hasChildren={hasChildren}
+                    onViewChildren={() => handleViewChildren(department.id)}
+                    isChildView={!!selectedParentId}
+                    childCount={directChildCount}
+                    isLeafNode={isLeafNode}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Orphaned Departments Section - Only show at top level */}
+            {!selectedParentId && orphanedDepartments.length > 0 && (
+              <div className="mt-8 pt-8 border-t border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <span className="text-amber-600 mr-2">⚠</span>
+                  Orphaned Departments
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    (Parent department not found)
+                  </span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 opacity-75">
+                  {orphanedDepartments.map((department: Department) => {
+                    const directChildCount = childCounts.get(department.id) || 0;
+                    const hasChildren = directChildCount > 0;
+                    const isLeafNode = directChildCount === 0;
+                    
+                    return (
+                      <DepartmentCard
+                        key={department.id}
+                        department={department}
+                        onDelete={handleRefresh}
+                        hasChildren={hasChildren}
+                        onViewChildren={() => handleViewChildren(department.id)}
+                        isChildView={true}
+                        childCount={directChildCount}
+                        isLeafNode={isLeafNode}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )
       ) : (

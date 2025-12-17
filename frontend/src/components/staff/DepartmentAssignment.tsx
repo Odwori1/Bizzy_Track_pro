@@ -18,10 +18,10 @@ interface DepartmentAssignmentProps {
   onCancel?: () => void;
 }
 
-export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({ 
-  staff, 
+export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
+  staff,
   onDepartmentAssigned,
-  onCancel 
+  onCancel
 }) => {
   const [loading, setLoading] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -61,12 +61,12 @@ export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
     try {
       // Find department name for success message
       const selectedDept = departments.find(dept => dept.id === selectedDepartmentId);
-      
-      // Use the staff API to assign department
+
+      // USE THE CORRECT API METHOD: assignToDepartment uses PUT /staff/:id
       await staffApi.assignToDepartment(staff.id, selectedDepartmentId);
-      
+
       setSuccess(`Successfully assigned to ${selectedDept?.name || 'department'}`);
-      
+
       if (onDepartmentAssigned) {
         onDepartmentAssigned(selectedDepartmentId, selectedDept?.name || '');
       }
@@ -85,12 +85,12 @@ export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
     setError(null);
 
     try {
-      // To remove department assignment, we update the staff with null department_id
-      await staffApi.updateStaff(staff.id, { department_id: null });
-      
+      // USE THE NEW unassignFromDepartment method
+      await staffApi.unassignFromDepartment(staff.id);
+
       setSelectedDepartmentId('');
       setSuccess('Department assignment removed');
-      
+
       if (onDepartmentAssigned) {
         onDepartmentAssigned('', '');
       }
@@ -138,7 +138,7 @@ export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
               </div>
             )}
           </div>
-          
+
           {staff.department_id && (
             <Button
               variant="danger"
@@ -170,7 +170,7 @@ export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Select Department
           </label>
-          
+
           {departments.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p>No departments available</p>
@@ -200,7 +200,7 @@ export const DepartmentAssignment: React.FC<DepartmentAssignmentProps> = ({
                   </p>
                 </div>
               </div>
-              
+
               {getDepartmentHierarchy(departments).map(dept => (
                 <div
                   key={dept.id}

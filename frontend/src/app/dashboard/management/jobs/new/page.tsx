@@ -8,8 +8,8 @@ import { Input } from '@/components/ui/Input';
 import Link from 'next/link';
 import { useJobActions } from '@/hooks/useJobs';
 import { apiClient } from '@/lib/api';
-import { CheckCircle, AlertCircle } from 'lucide-react';
-import { useCurrency } from '@/lib/currency';   // ✅ FIXED IMPORT
+import { CheckCircle, AlertCircle, Building } from 'lucide-react';
+import { useCurrency } from '@/lib/currency';
 
 interface Customer {
   id: string;
@@ -23,6 +23,13 @@ interface Service {
   name: string;
   base_price: string;
   duration_minutes: number;
+}
+
+interface Department {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
 }
 
 interface PackageJobData {
@@ -56,18 +63,20 @@ interface JobFormData {
   scheduled_date: string;
   estimated_duration_minutes: string;
   location: string;
+  department_id: string; // NEW: Department assignment field
 }
 
 export default function NewJobPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { createJob } = useJobActions();
-  const { format } = useCurrency();  // ✅ USING CORRECT HOOK
+  const { format } = useCurrency();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [services, setServices] = useState<Service[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]); // NEW: Departments state
   const [dataLoading, setDataLoading] = useState(true);
   const [packageJobData, setPackageJobData] = useState<PackageJobData | null>(null);
 
@@ -83,7 +92,8 @@ export default function NewJobPage() {
     priority: 'medium',
     scheduled_date: '',
     estimated_duration_minutes: '',
-    location: ''
+    location: '',
+    department_id: '' // NEW: Initialize department_id
   });
 
   useEffect(() => {
@@ -129,13 +139,15 @@ export default function NewJobPage() {
       try {
         setDataLoading(true);
 
-        const [customersData, servicesData] = await Promise.all([
+        const [customersData, servicesData, departmentsData] = await Promise.all([
           apiClient.get<Customer[]>('/api/customers'),
-          apiClient.get<Service[]>('/api/services')
+          apiClient.get<Service[]>('/api/services'),
+          apiClient.get<Department[]>('/departments?active=true') // NEW: Fetch active departments
         ]);
 
         setCustomers(customersData);
         setServices(servicesData);
+        setDepartments(departmentsData.filter(dept => dept.is_active)); // NEW: Set departments
       } catch (err) {
         console.error('Failed to fetch data:', err);
         setError('Failed to load customers and services');
@@ -189,6 +201,35 @@ export default function NewJobPage() {
       const result = await createJob(jobData);
 
       if (result.success) {
+        const jobId = result.data?.id || result.data?._id;
+        
+        if (jobId && formData.department_id) {
+          // NEW: Create department assignment if department is selected
+          try {
+            const assignmentData = {
+              job_id: jobId,
+              department_id: formData.department_id,
+              assignment_type: 'primary',
+              priority: formData.priority,
+              assigned_to: null,
+              estimated_completion_date: formData.scheduled_date 
+                ? new Date(new Date(formData.scheduled_date).getTime() + 
+                    parseInt(formData.estimated_duration_minutes || '60') * 60000).toISOString()
+                : null,
+              status: 'assigned',
+              notes: `Auto-assigned from job creation. ${formData.description || ''}`,
+            };
+
+            console.log('Creating department assignment:', assignmentData);
+            await apiClient.post('/job-department-assignments', assignmentData);
+            console.log('Department assignment created successfully');
+          } catch (assignError: any) {
+            console.warn('Failed to create department assignment:', assignError);
+            // Don't fail the entire job creation if department assignment fails
+            // Job was still created successfully
+          }
+        }
+
         router.push('/dashboard/management/jobs');
         router.refresh();
       } else {
@@ -229,6 +270,9 @@ export default function NewJobPage() {
       return service ? service.name : 'Unknown Service';
     });
   };
+
+  // Find selected department for display
+  const selectedDepartment = departments.find(dept => dept.id === formData.department_id);
 
   return (
     <div className="space-y-6">
@@ -421,6 +465,49 @@ export default function NewJobPage() {
                   />
                 </div>
 
+                {/* NEW: Department Assignment Field */}
+                <div className="space-y-2 md:col-span-2">
+                  <label htmlFor="department_id" className="block text-sm font-medium text-gray-700">
+                    Assign to Department (Week 9.2)
+                  </label>
+                  <div className="space-y-2">
+                    <select
+                      id="department_id"
+                      name="department_id"
+                      value={formData.department_id}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      disabled={loading || departments.length === 0}
+                    >
+                      <option value="">No Department (Assign Later)</option>
+                      {departments.map((department) => (
+                        <option key={department.id} value={department.id}>
+                          {department.name} ({department.code})
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {selectedDepartment && (
+                      <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-100 rounded text-sm text-green-700">
+                        <Building size={16} />
+                        <span>Job will be auto-assigned to: <strong>{selectedDepartment.name}</strong></span>
+                      </div>
+                    )}
+
+                    {departments.length === 0 && (
+                      <div className="text-xs text-gray-500">
+                        No departments available. Create departments in{' '}
+                        <a 
+                          href="/dashboard/coordination/departments" 
+                          className="text-blue-600 hover:underline"
+                        >
+                          Coordination → Departments
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="space-y-2 md:col-span-2">
                   <label htmlFor="description" className="block text-sm font-medium text-gray-700">
                     Description
@@ -437,6 +524,39 @@ export default function NewJobPage() {
                   />
                 </div>
               </div>
+
+              {/* Week 9.2 Integration Info */}
+              {formData.department_id && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Building className="text-blue-500 mt-0.5" size={20} />
+                    <div>
+                      <h4 className="font-medium text-blue-800 mb-1">Week 9.2 Department Coordination</h4>
+                      <p className="text-sm text-blue-700 mb-2">
+                        This job will be integrated with the hospital-style workflow system:
+                      </p>
+                      <ul className="text-xs text-blue-600 space-y-1">
+                        <li className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                          <span>Auto-assigned to department workflow dashboard</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                          <span>Ready for department handoffs and coordination</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                          <span>Will appear in consolidated billing</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                          <span>Tracks department performance metrics</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end space-x-4 pt-6 border-t">
                 <Link href="/dashboard/management/jobs">
