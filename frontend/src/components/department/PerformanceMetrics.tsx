@@ -68,11 +68,25 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
     return 'text-red-600';
   };
 
-  // Format hours
-  const formatHours = (hours: number) => {
-    if (hours < 1) return `${Math.round(hours * 60)}m`;
-    if (hours < 24) return `${hours.toFixed(1)}h`;
-    return `${(hours / 24).toFixed(1)}d`;
+  // Format hours - FIXED VERSION
+  const formatHours = (hours: any) => {
+    // Convert to number first
+    const numHours = parseFloat(hours);
+    
+    // Check if it's a valid number
+    if (isNaN(numHours)) return 'N/A';
+    
+    if (numHours < 1) {
+      const minutes = Math.round(numHours * 60);
+      return `${Math.abs(minutes)}${minutes < 0 ? 'm late' : 'm'}`;
+    }
+    if (numHours < 24) return `${numHours.toFixed(1)}h`;
+    return `${(numHours / 24).toFixed(1)}d`;
+  };
+
+  // Format percentage with proper handling
+  const formatPercentage = (value: number) => {
+    return `${value.toFixed(1)}%`;
   };
 
   return (
@@ -85,24 +99,24 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
             <div className="p-4 bg-blue-50 rounded-lg">
               <div className="text-xs text-blue-600 uppercase tracking-wider mb-1">Avg Efficiency</div>
               <div className={`text-2xl font-bold ${getEfficiencyColor(overall.avg_efficiency)}`}>
-                {overall.avg_efficiency.toFixed(1)}%
+                {formatPercentage(overall.avg_efficiency)}
               </div>
             </div>
-            
+
             <div className="p-4 bg-green-50 rounded-lg">
               <div className="text-xs text-green-600 uppercase tracking-wider mb-1">Completion Rate</div>
               <div className={`text-2xl font-bold ${getCompletionColor(overall.avg_completion_rate)}`}>
-                {overall.avg_completion_rate.toFixed(1)}%
+                {formatPercentage(overall.avg_completion_rate)}
               </div>
             </div>
-            
+
             <div className="p-4 bg-purple-50 rounded-lg">
               <div className="text-xs text-purple-600 uppercase tracking-wider mb-1">Total Revenue</div>
               <div className="text-2xl font-bold text-gray-900">
                 {format(overall.total_revenue)}
               </div>
             </div>
-            
+
             <div className="p-4 bg-orange-50 rounded-lg">
               <div className="text-xs text-orange-600 uppercase tracking-wider mb-1">Avg Time</div>
               <div className="text-2xl font-bold text-gray-900">
@@ -183,17 +197,17 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-semibold ${getEfficiencyColor(dept.efficiency)}`}>
-                        {dept.efficiency?.toFixed(1) || '0'}%
+                      <div className={`text-sm font-semibold ${getEfficiencyColor(dept.efficiency || 0)}`}>
+                        {formatPercentage(dept.efficiency || 0)}
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className={`text-sm font-semibold mr-2 ${getCompletionColor(dept.completion_rate)}`}>
-                          {dept.completion_rate?.toFixed(1) || '0'}%
+                        <div className={`text-sm font-semibold mr-2 ${getCompletionColor(dept.completion_rate || 0)}`}>
+                          {formatPercentage(dept.completion_rate || 0)}
                         </div>
                         <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div
@@ -203,7 +217,7 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
                         {dept.completed_assignments || 0}/{dept.total_assignments || 0}
@@ -212,19 +226,19 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
                         {dept.in_progress_assignments || 0} in progress
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {formatHours(dept.avg_completion_hours || 0)}
+                        {formatHours(dept.avg_completion_hours)}
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
                         {format(dept.total_revenue || 0)}
                       </div>
                     </td>
-                    
+
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`text-sm font-medium ${(dept.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {format(dept.profit || 0)}
@@ -257,7 +271,7 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
                   <>
                     <div className="text-xl font-bold text-gray-900">{topDept.department_name}</div>
                     <div className={`text-lg font-semibold ${getEfficiencyColor(topDept.efficiency || 0)}`}>
-                      {topDept.efficiency?.toFixed(1) || '0'}% efficiency
+                      {formatPercentage(topDept.efficiency || 0)} efficiency
                     </div>
                   </>
                 );
@@ -278,7 +292,7 @@ export const PerformanceMetrics: React.FC<PerformanceMetricsProps> = ({
                   <>
                     <div className="text-xl font-bold text-gray-900">{fastestDept.department_name}</div>
                     <div className="text-lg font-semibold text-gray-900">
-                      {formatHours(fastestDept.avg_completion_hours || 0)} avg time
+                      {formatHours(fastestDept.avg_completion_hours)} avg time
                     </div>
                   </>
                 );

@@ -15,6 +15,7 @@ import customerCommunicationRoutes from './routes/customerCommunicationRoutes.js
 
 import discountRuleRoutes from './routes/discountRuleRoutes.js';
 import jobRoutes from './routes/jobRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 import userFeatureToggleRoutes from './routes/userFeatureToggleRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
@@ -179,6 +180,7 @@ app.use('/api/customer-communications', customerCommunicationRoutes);
 
 app.use('/api/discount-rules', discountRuleRoutes);
 app.use('/api/jobs', jobRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/user-feature-toggles', userFeatureToggleRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);

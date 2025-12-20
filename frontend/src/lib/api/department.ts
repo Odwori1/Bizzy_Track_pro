@@ -220,15 +220,15 @@ export const departmentApi = {
   async acceptHandoff(handoffId: string, notes?: string): Promise<DepartmentWorkflowHandoff> {
     const cleanedId = cleanUuidParam(handoffId);
     const data = notes ? { notes } : {};
-    
+
     try {
       return await apiClient.put<DepartmentWorkflowHandoff>(`/department-workflow/${cleanedId}/accept`, data);
     } catch (error: any) {
       console.error('API Error accepting handoff:', error);
-      
+
       // Extract meaningful error message
       let errorMessage = 'Failed to accept handoff';
-      
+
       if (error.data?.error) {
         errorMessage = error.data.error;
       } else if (error.data?.message) {
@@ -236,20 +236,20 @@ export const departmentApi = {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       // Enhance specific backend error messages
-      if (errorMessage.includes('already assigned') || 
+      if (errorMessage.includes('already assigned') ||
           errorMessage.includes('Job already assigned')) {
         errorMessage = `Cannot accept handoff: Job is already assigned to this department with the same assignment type.`;
       }
-      
+
       const enhancedError = new Error(errorMessage);
       Object.assign(enhancedError, {
         status: error.status,
         data: error.data,
         originalError: error
       });
-      
+
       throw enhancedError;
     }
   },
@@ -330,9 +330,11 @@ export const departmentApi = {
     department_id: string;
     job_id: string;
     description: string;
-    amount: number;
     quantity?: number;
     unit_price?: number;
+    total_amount?: number;
+    billing_type?: string;
+    cost_amount?: number;
     tax_rate?: number;
   }): Promise<DepartmentBillingEntry> {
     const cleanedData = cleanParams(data);
@@ -364,6 +366,32 @@ export const departmentApi = {
   async getDepartmentPerformanceById(departmentId: string): Promise<DepartmentPerformanceMetrics> {
     const cleanedDeptId = cleanUuidParam(departmentId);
     return apiClient.get<DepartmentPerformanceMetrics>(`/department-performance/department/${cleanedDeptId}`);
+  },
+
+  // ==================== JOBS FOR BILLING ====================
+
+  /**
+   * Get jobs suitable for billing
+   */
+  async getJobsForBilling(): Promise<any[]> {
+    try {
+      const response = await apiClient.get<any[]>('/jobs/for-billing');
+      return response;
+    } catch (error: any) {
+      console.error('API Error fetching jobs for billing:', error);
+      
+      // Extract meaningful error message
+      const errorMessage = extractErrorMessage(error);
+      const enhancedError = new Error(errorMessage);
+      
+      Object.assign(enhancedError, {
+        status: error.status,
+        data: error.data,
+        originalError: error
+      });
+      
+      throw enhancedError;
+    }
   },
 
   // ==================== UTILITY METHODS ====================

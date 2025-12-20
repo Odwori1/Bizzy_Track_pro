@@ -3,6 +3,7 @@ import { JobDepartmentAssignment } from '@/types/department';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { formatDate } from '@/lib/date-format';
+import { useDepartmentWorkflow } from '@/hooks/useDepartmentWorkflow';
 
 interface WorkflowAssignmentCardProps {
   assignment: JobDepartmentAssignment;
@@ -17,6 +18,8 @@ export const WorkflowAssignmentCard: React.FC<WorkflowAssignmentCardProps> = ({
   onStatusUpdate,
   onHandoff,
 }) => {
+  const { completeDepartmentWork, loading: workLoading } = useDepartmentWorkflow();
+
   // Status badge colors
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -52,22 +55,22 @@ export const WorkflowAssignmentCard: React.FC<WorkflowAssignmentCardProps> = ({
   // Format duration
   const formatDuration = (minutes: number | string | null | undefined): string => {
     if (!minutes && minutes !== 0) return '0m'; // Handle null/undefined
-    
+
     const numericMinutes = typeof minutes === 'string' ? parseFloat(minutes) : minutes;
-    
+
     if (isNaN(numericMinutes)) return '0m';
-    
+
     if (numericMinutes < 60) {
       return `${Math.round(numericMinutes)}m`;
     }
-    
+
     const hours = numericMinutes / 60;
     const remainingMinutes = numericMinutes % 60;
-    
+
     if (remainingMinutes === 0) {
       return `${Math.round(hours)}h`;
     }
-    
+
     return `${Math.floor(hours)}h ${Math.round(remainingMinutes)}m`;
   };
 
@@ -226,9 +229,34 @@ export const WorkflowAssignmentCard: React.FC<WorkflowAssignmentCardProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onStatusUpdate(safeAssignment.id, 'completed')}
+                  onClick={async () => {
+                    // Ask for work details
+                    const hours = prompt('How many hours were worked?', '8');
+                    const description = prompt('Brief description of work completed:', 
+                      safeAssignment.notes || 'Completed department work');
+                    
+                    if (hours && description) {
+                      const hourlyRate = prompt('Hourly rate for this work?', '150');
+                      
+                      if (hourlyRate) {
+                        await completeDepartmentWork(
+                          safeAssignment.id,
+                          safeAssignment.department_id,
+                          safeAssignment.job_id,
+                          description,
+                          parseFloat(hours),
+                          parseFloat(hourlyRate)
+                        );
+                        
+                        if (onStatusUpdate) {
+                          onStatusUpdate(safeAssignment.id, 'completed');
+                        }
+                      }
+                    }
+                  }}
+                  disabled={workLoading}
                 >
-                  Mark Complete
+                  {workLoading ? 'Completing...' : 'Mark Complete & Bill'}
                 </Button>
               )}
               {safeAssignment.status === 'in_progress' && onHandoff && (

@@ -1,26 +1,50 @@
 import React from 'react';
 import { DepartmentWorkflowHandoff } from '@/types/department';
-import { formatDate } from '@/lib/date-format';
+import { formatDisplayDate } from '@/lib/date-format';
 
 interface WorkflowTimelineProps {
-  handoffs: DepartmentWorkflowHandoff[];
+  handoffs?: DepartmentWorkflowHandoff[];  // Make optional
   currentAssignmentId?: string;
 }
 
 export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
-  handoffs,
+  handoffs = [],  // Default value
   currentAssignmentId,
 }) => {
-  // Sort handoffs by created_at
-  const sortedHandoffs = [...handoffs].sort((a, b) => {
-    const dateA = typeof a.created_at === 'string' ? a.created_at : a.created_at?.utc || '';
-    const dateB = typeof b.created_at === 'string' ? b.created_at : b.created_at?.utc || '';
-    return new Date(dateA).getTime() - new Date(dateB).getTime();
+  // SAFETY CHECK: Ensure handoffs is always an array
+  const safeHandoffs = Array.isArray(handoffs) ? handoffs : [];
+  
+  // Sort handoffs by created_at - with safety checks
+  const sortedHandoffs = [...safeHandoffs].sort((a, b) => {
+    try {
+      const getDate = (handoff: DepartmentWorkflowHandoff): string => {
+        if (!handoff) return '';
+        if (typeof handoff.created_at === 'string') return handoff.created_at;
+        if (handoff.created_at?.utc) return handoff.created_at.utc;
+        if (handoff.handoff_at) {
+          if (typeof handoff.handoff_at === 'string') return handoff.handoff_at;
+          if (handoff.handoff_at?.utc) return handoff.handoff_at.utc;
+        }
+        return '';
+      };
+
+      const dateA = getDate(a);
+      const dateB = getDate(b);
+      
+      if (!dateA || !dateB) return 0;
+      return new Date(dateA).getTime() - new Date(dateB).getTime();
+    } catch (error) {
+      console.error('Error sorting handoffs:', error);
+      return 0;
+    }
   });
 
+  // Rest of the component remains the same with safety checks...
   // Get status icon and color
-  const getStatusConfig = (status: string) => {
-    switch (status) {
+  const getStatusConfig = (status?: string) => {
+    const safeStatus = status || 'unknown';
+    
+    switch (safeStatus.toLowerCase()) {
       case 'completed':
         return {
           icon: (
@@ -76,18 +100,45 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   // Format handoff date
   const formatHandoffDate = (handoff: DepartmentWorkflowHandoff) => {
-    const dateStr = typeof handoff.handoff_at === 'string' 
-      ? handoff.handoff_at 
-      : handoff.handoff_at?.utc || '';
-    return formatDate(dateStr);
+    try {
+      const dateStr = handoff.handoff_at 
+        ? (typeof handoff.handoff_at === 'string'
+          ? handoff.handoff_at
+          : handoff.handoff_at?.utc || '')
+        : handoff.created_at
+          ? (typeof handoff.created_at === 'string'
+            ? handoff.created_at
+            : handoff.created_at?.utc || '')
+          : '';
+      
+      return formatDisplayDate(dateStr);
+    } catch (error) {
+      console.error('Error formatting handoff date:', error, handoff);
+      return 'Date not available';
+    }
   };
 
   // Format department color
   const getDepartmentColor = (handoff: DepartmentWorkflowHandoff, isFromDept: boolean) => {
-    const color = isFromDept 
-      ? (handoff as any).from_department_color || '#6b7280'
-      : (handoff as any).to_department_color || '#6b7280';
-    return color;
+    try {
+      // Try to get color from the handoff object
+      const color = isFromDept
+        ? (handoff as any).from_department_color || '#6b7280'
+        : (handoff as any).to_department_color || '#6b7280';
+      return color;
+    } catch (error) {
+      return '#6b7280'; // Default gray
+    }
+  };
+
+  // Safe string access
+  const safeGet = (obj: any, key: string, defaultValue: string = '') => {
+    try {
+      const value = obj?.[key];
+      return value ? String(value) : defaultValue;
+    } catch (error) {
+      return defaultValue;
+    }
   };
 
   return (
@@ -102,15 +153,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="mt-2">No workflow history yet</p>
+            <p className="text-sm text-gray-400 mt-1">Create a handoff to see timeline here</p>
           </div>
         </div>
       ) : (
         sortedHandoffs.map((handoff, index) => {
-          const statusConfig = getStatusConfig(handoff.handoff_status);
+          const statusConfig = getStatusConfig(handoff.handoff_status || handoff.status);
           const isLast = index === sortedHandoffs.length - 1;
 
           return (
-            <div key={handoff.id} className="relative pl-12 py-6">
+            <div key={handoff.id || `handoff-${index}`} className="relative pl-12 py-6">
               {/* Timeline dot */}
               <div className={`absolute left-3 top-8 w-3 h-3 rounded-full border-2 border-white ${statusConfig.bgColor}`}>
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -124,7 +176,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center space-x-3">
                     <div className={`px-2 py-1 rounded-full text-xs font-medium ${statusConfig.borderColor}`}>
-                      {handoff.handoff_status.toUpperCase()}
+                      {safeGet(handoff, 'handoff_status', safeGet(handoff, 'status', 'Unknown')).toUpperCase()}
                     </div>
                     <div className="text-sm text-gray-600">
                       {formatHandoffDate(handoff)}
@@ -146,7 +198,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     />
                     <div>
                       <div className="text-xs text-gray-500">From</div>
-                      <div className="font-medium">{handoff.from_department_name}</div>
+                      <div className="font-medium">
+                        {safeGet(handoff, 'from_department_name', 'Unknown Department')}
+                      </div>
                     </div>
                   </div>
 
@@ -163,7 +217,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     />
                     <div>
                       <div className="text-xs text-gray-500">To</div>
-                      <div className="font-medium">{handoff.to_department_name}</div>
+                      <div className="font-medium">
+                        {safeGet(handoff, 'to_department_name', 'Unknown Department')}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -172,11 +228,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <div className="text-xs text-gray-500 uppercase tracking-wider">Handoff By</div>
-                    <div className="font-medium">{handoff.handoff_by_name}</div>
+                    <div className="font-medium">
+                      {safeGet(handoff, 'handoff_by_name', safeGet(handoff, 'created_by_name', 'Unknown'))}
+                    </div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-500 uppercase tracking-wider">Handoff To</div>
-                    <div className="font-medium">{handoff.handoff_to_name || 'Not assigned'}</div>
+                    <div className="font-medium">
+                      {safeGet(handoff, 'handoff_to_name', 'Not assigned')}
+                    </div>
                   </div>
                 </div>
 
@@ -184,7 +244,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 {handoff.handoff_notes && (
                   <div className="mt-3 p-2 bg-white/50 rounded">
                     <div className="text-xs text-gray-500 mb-1">Notes</div>
-                    <div className="text-sm">{handoff.handoff_notes}</div>
+                    <div className="text-sm">{safeGet(handoff, 'handoff_notes')}</div>
                   </div>
                 )}
 
@@ -193,9 +253,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   <div className="mt-3">
                     <div className="text-xs text-gray-500 mb-1">Required Actions</div>
                     <div className="text-sm">
-                      {typeof handoff.required_actions === 'object' 
+                      {typeof handoff.required_actions === 'object'
                         ? JSON.stringify(handoff.required_actions, null, 2)
-                        : handoff.required_actions}
+                        : safeGet(handoff, 'required_actions')}
                     </div>
                   </div>
                 )}
@@ -204,10 +264,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 {(handoff.accepted_at || handoff.completed_at) && (
                   <div className="mt-3 text-xs text-gray-500">
                     {handoff.accepted_at && (
-                      <div>Accepted: {formatDate(handoff.accepted_at)}</div>
+                      <div>Accepted: {formatDisplayDate(
+                        typeof handoff.accepted_at === 'string' 
+                          ? handoff.accepted_at 
+                          : handoff.accepted_at?.utc || ''
+                      )}</div>
                     )}
                     {handoff.completed_at && (
-                      <div>Completed: {formatDate(handoff.completed_at)}</div>
+                      <div>Completed: {formatDisplayDate(
+                        typeof handoff.completed_at === 'string' 
+                          ? handoff.completed_at 
+                          : handoff.completed_at?.utc || ''
+                      )}</div>
                     )}
                   </div>
                 )}

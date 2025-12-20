@@ -82,7 +82,7 @@ export interface JobDepartmentAssignment {
     formatted: string;
     timestamp: number;
   };
-  
+
   // Joined fields
   job_number?: string;
   job_title?: string;
@@ -123,7 +123,7 @@ export interface DepartmentWorkflowHandoff {
     formatted: string;
     timestamp: number;
   };
-  
+
   // Joined fields
   from_department_name?: string;
   to_department_name?: string;
@@ -140,24 +140,29 @@ export interface DepartmentBillingEntry {
   department_id: string;
   job_id: string;
   description: string;
-  amount: number;
   quantity: number;
   unit_price: number;
+  total_amount: number;  // ✅ CORRECTED: This is the actual field from backend
+  billing_type?: string;  // Added from backend response
+  cost_amount?: number;   // Added from backend response
+  is_billable?: boolean;  // Added from backend response
   tax_rate: number;
   tax_amount: number;
-  total_amount: number;
   billing_date: string;
   invoice_id: string | null;
   created_by: string;
   created_at: string;
-  
+
   // Joined fields
   department_name?: string;
   department_code?: string;
   job_number?: string;
   job_title?: string;
   invoice_number?: string | null;
+  invoice_status?: string;  // Added from backend response
   created_by_name?: string;
+  customer_first_name?: string;  // Added from backend response
+  customer_last_name?: string;   // Added from backend response
 }
 
 export interface ConsolidatedBill {
@@ -172,13 +177,46 @@ export interface ConsolidatedBill {
   status: string;
   created_at: string;
   
+  // Service price information - ADDED FOR PRICING STRATEGY
+  service_price?: number;
+  job_final_price?: number;
+  job_number?: string;
+  job_title?: string;
+  job_status?: string;
+  customer_first_name?: string;
+  customer_last_name?: string;
+  department_count?: number;
+  billing_entry_count?: number;
+  total_cost?: number;
+  profit?: number;
+
   // Department breakdown
   department_breakdown: Array<{
+    id?: string;  // Added from backend response
     department_id: string;
     department_name: string;
     amount: number;
     percentage: number;
+    quantity?: number;  // Added from backend
+    unit_price?: number;  // Added from backend
+    billing_type?: string;  // Added from backend
   }>;
+  
+  // Invoice details from backend
+  invoice?: {
+    id: string;
+    invoice_number: string;
+    invoice_date: any;
+    due_date: any;
+    subtotal: string;
+    tax_amount: string;
+    discount_amount: string;
+    total_amount: string;
+    amount_paid: string;
+    balance_due: string;
+    status: string;
+    notes: string;
+  };
 }
 
 // ==================== PERFORMANCE METRICS TYPES ====================
@@ -248,9 +286,11 @@ export interface DepartmentBillingFormData {
   department_id: string;
   job_id: string;
   description: string;
-  amount: number;
-  quantity?: number;
-  unit_price?: number;
+  quantity: number;
+  unit_price: number;
+  total_amount: number;
+  billing_type?: string;
+  cost_amount?: number;
   tax_rate?: number;
   billing_date?: string;
 }
@@ -323,4 +363,13 @@ export interface DepartmentStaffAssignment {
   staff_name: string;
   role: string;
   assigned_at: string;
+}
+
+// ==================== BILLING SUMMARY TYPES ====================
+export interface BillingSummary {
+  total_entries: number;
+  total_amount: number;
+  total_cost: number;
+  billable_entries: number;
+  billable_amount: number;
 }

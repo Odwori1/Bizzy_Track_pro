@@ -119,6 +119,7 @@ export class DepartmentBillingService {
           j.job_number,
           j.title as job_title,
           j.status as job_status,
+          j.final_price as service_price,  -- ADDED: Get service price
           c.first_name as customer_first_name,
           c.last_name as customer_last_name,
           COUNT(DISTINCT jda.department_id) as department_count,
@@ -135,7 +136,7 @@ export class DepartmentBillingService {
             FROM job_department_assignments
             WHERE business_id = $1
             GROUP BY job_id
-            HAVING COUNT(DISTINCT department_id) > 1
+            HAVING COUNT(DISTINCT department_id) > 0
           )
       `;
 
@@ -163,7 +164,7 @@ export class DepartmentBillingService {
       }
 
       const finalQuery = masterTicketsQuery + whereClause + `
-        GROUP BY j.id, j.job_number, j.title, j.status, c.first_name, c.last_name
+        GROUP BY j.id, j.job_number, j.title, j.status, j.final_price, c.first_name, c.last_name
         ORDER BY j.created_at DESC
       `;
 
@@ -204,11 +205,20 @@ export class DepartmentBillingService {
 
         const invoiceResult = await client.query(invoiceQuery, [businessId, job.job_id]);
 
+        // Calculate department total and profit
+        const departmentTotal = breakdownResult.rows.reduce((sum, entry) => 
+          sum + parseFloat(entry.total_amount || 0), 0
+        );
+        const servicePrice = parseFloat(job.service_price) || 0;
+        const profit = servicePrice - departmentTotal;
+
         consolidatedBills.push({
           ...job,
+          department_total: departmentTotal,
+          service_price: servicePrice,
+          profit: profit,
           department_breakdown: breakdownResult.rows,
-          invoice: invoiceResult.rows[0] || null,
-          profit: job.total_amount - job.total_cost
+          invoice: invoiceResult.rows[0] || null
         });
       }
 
@@ -339,6 +349,7 @@ export class DepartmentBillingService {
 
   /**
    * Generate consolidated bill for a job with multiple departments
+   * FIXED: Now uses SERVICE PRICE instead of department costs
    */
   static async generateConsolidatedBill(businessId, jobId, userId) {
     const client = await getClient();
@@ -346,17 +357,34 @@ export class DepartmentBillingService {
     try {
       await client.query('BEGIN');
 
-      // Verify job exists and belongs to business
-      const jobCheck = await client.query(
-        'SELECT * FROM jobs WHERE id = $1 AND business_id = $2',
-        [jobId, businessId]
-      );
+      // Get job details WITH SERVICE PRICE - FIXED QUERY
+      const jobQuery = await client.query(`
+        SELECT 
+          j.*,
+          s.base_price as service_base_price,
+          s.name as service_name,
+          c.first_name as customer_first_name,
+          c.last_name as customer_last_name
+        FROM jobs j
+        JOIN services s ON j.service_id = s.id
+        JOIN customers c ON j.customer_id = c.id
+        WHERE j.id = $1 AND j.business_id = $2
+      `, [jobId, businessId]);
 
-      if (jobCheck.rows.length === 0) {
+      if (jobQuery.rows.length === 0) {
         throw new Error('Job not found or access denied');
       }
 
-      // Check if there are department assignments (allow single department too)
+      const job = jobQuery.rows[0];
+      
+      // Use final_price if available, otherwise use service.base_price
+      const servicePrice = parseFloat(job.final_price) || parseFloat(job.service_base_price) || 0;
+      
+      if (servicePrice === 0) {
+        throw new Error('Service price not found. Please set a price for this service.');
+      }
+
+      // Check if there are department assignments
       const deptAssignments = await client.query(
         `SELECT COUNT(DISTINCT department_id) as dept_count
          FROM job_department_assignments
@@ -370,7 +398,7 @@ export class DepartmentBillingService {
 
       // Get all department billing entries for this job
       const billingEntries = await client.query(
-        `SELECT 
+        `SELECT
           dbe.*,
           d.name as department_name,
           d.code as department_code
@@ -381,28 +409,14 @@ export class DepartmentBillingService {
         [businessId, jobId]
       );
 
-      if (billingEntries.rows.length === 0) {
-        throw new Error('No billing entries found for this job');
-      }
-
-      // Create consolidated invoice
-      const totalAmount = billingEntries.rows.reduce((sum, entry) => sum + parseFloat(entry.total_amount), 0);
-      const totalCost = billingEntries.rows.reduce((sum, entry) => sum + parseFloat(entry.cost_amount || 0), 0);
-
-      // Generate appropriate invoice number
-      const invoiceCount = await client.query(
-        'SELECT COUNT(*) FROM invoices WHERE business_id = $1',
-        [businessId]
+      // Calculate department total costs (for profit analysis)
+      const departmentTotal = billingEntries.rows.reduce((sum, entry) => 
+        sum + parseFloat(entry.total_amount || 0), 0
       );
-
-      const prefix = deptAssignments.rows[0].dept_count > 1 ? 'CONS' : 'DEPT';
-      const invoiceNumber = `${prefix}-${(parseInt(invoiceCount.rows[0].count) + 1).toString().padStart(4, '0')}`;
-
-      // Create appropriate notes
-      const departmentCount = deptAssignments.rows[0].dept_count;
-      const notes = departmentCount > 1 
-        ? `Consolidated bill for job ${jobCheck.rows[0].job_number} with ${billingEntries.rows.length} department charges across ${departmentCount} departments`
-        : `Department bill for job ${jobCheck.rows[0].job_number} with ${billingEntries.rows.length} charges`;
+      const totalCost = billingEntries.rows.reduce((sum, entry) => 
+        sum + parseFloat(entry.cost_amount || 0), 0
+      );
+      const profit = servicePrice - departmentTotal;
 
       // Check if invoice already exists for this job
       const existingInvoiceQuery = await client.query(
@@ -414,7 +428,22 @@ export class DepartmentBillingService {
         throw new Error('An invoice already exists for this job. Please use the existing invoice or delete it first.');
       }
 
-      // Create invoice - removed balance_due from INSERT statement
+      // Generate appropriate invoice number
+      const invoiceCount = await client.query(
+        'SELECT COUNT(*) FROM invoices WHERE business_id = $1',
+        [businessId]
+      );
+
+      const prefix = deptAssignments.rows[0].dept_count > 1 ? 'CONS' : 'DEPT';
+      const invoiceNumber = `${prefix}-${(parseInt(invoiceCount.rows[0].count) + 1).toString().padStart(4, '0')}`;
+
+      // Create detailed notes showing both service price and department costs
+      const notes = `Consolidated bill for job ${job.job_number || jobId}.
+Service: ${job.service_name || 'Unknown'} | Service Price: ${servicePrice}
+Department Costs: ${departmentTotal} | Profit: ${profit}
+${billingEntries.rows.length} department charge(s) across ${deptAssignments.rows[0].dept_count} department(s)`;
+
+      // Create invoice WITH SERVICE PRICE - FIXED
       const invoiceResult = await client.query(
         `INSERT INTO invoices (
           business_id, invoice_number, job_id, customer_id,
@@ -427,11 +456,11 @@ export class DepartmentBillingService {
           businessId,
           invoiceNumber,
           jobId,
-          jobCheck.rows[0].customer_id,
+          job.customer_id,
           new Date().toISOString(),
           new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days from now
-          totalAmount,
-          totalAmount,
+          servicePrice,  // FIXED: Use SERVICE PRICE, not department total
+          servicePrice,  // FIXED: Use SERVICE PRICE, not department total
           0,  // amount_paid
           'draft',
           notes,
@@ -449,8 +478,7 @@ export class DepartmentBillingService {
         [invoice.id, businessId, jobId]
       );
 
-      // Create line items for the invoice
-      // Remove total_price from INSERT as it's a generated column
+      // Create line items for the invoice (with correct pricing)
       for (const entry of billingEntries.rows) {
         await client.query(
           `INSERT INTO invoice_line_items (
@@ -461,13 +489,28 @@ export class DepartmentBillingService {
           )`,
           [
             invoice.id,
-            `${entry.department_code}: ${entry.description}`,
+            `${entry.department_code}: ${entry.description} (Department Cost)`,
             entry.quantity,
             entry.unit_price
-            // total_price is calculated automatically by the database
           ]
         );
       }
+
+      // Also add a line item for the service itself
+      await client.query(
+        `INSERT INTO invoice_line_items (
+          invoice_id, service_id, description,
+          quantity, unit_price
+        ) VALUES (
+          $1, $2, $3, 1, $4
+        )`,
+        [
+          invoice.id,
+          job.service_id,
+          `${job.service_name} - Service Fee`,
+          servicePrice
+        ]
+      );
 
       await auditLogger.logAction({
         businessId,
@@ -477,7 +520,9 @@ export class DepartmentBillingService {
         resourceId: invoice.id,
         newValues: {
           invoice_number: invoiceNumber,
-          total_amount: totalAmount,
+          service_price: servicePrice,
+          department_costs: departmentTotal,
+          profit: profit,
           department_count: billingEntries.rows.length,
           job_id: jobId
         }
@@ -487,18 +532,22 @@ export class DepartmentBillingService {
 
       return {
         invoice,
+        service_price: servicePrice,
+        department_total: departmentTotal,
+        profit: profit,
         department_breakdown: billingEntries.rows,
         summary: {
-          total_amount: totalAmount,
-          total_cost: totalCost,
-          profit: totalAmount - totalCost,
-          department_count: billingEntries.rows.length,
+          service_price: servicePrice,
+          department_costs: departmentTotal,
+          profit: profit,
+          department_count: deptAssignments.rows[0].dept_count,
           billing_entries_count: billingEntries.rows.length,
-          is_consolidated: departmentCount > 1
+          is_consolidated: deptAssignments.rows[0].dept_count > 1
         }
       };
     } catch (error) {
       await client.query('ROLLBACK');
+      console.error('Error generating consolidated bill:', error);
       throw error;
     } finally {
       client.release();

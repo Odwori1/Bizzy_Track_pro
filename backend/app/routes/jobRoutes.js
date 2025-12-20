@@ -8,6 +8,7 @@ import {
   updateJobSchema,
   updateJobStatusSchema
 } from '../schemas/jobSchemas.js';
+import { getClient } from '../utils/database.js';
 
 const router = express.Router();
 
@@ -38,6 +39,77 @@ router.use(authenticate, setRLSContext);
 
 // GET /api/jobs - Get all jobs (requires job:read permission)
 router.get('/', requirePermission('job:read'), jobController.getAll);
+
+// GET /api/jobs/for-billing - Get jobs suitable for billing (requires job:read permission)
+router.get('/for-billing', requirePermission('job:read'), async (req, res) => {
+  console.log('=== /jobs/for-billing called ===');
+  console.log('Full user object:', JSON.stringify(req.user, null, 2));
+  
+  const client = await getClient();
+  
+  try {
+    // Try to get business ID in multiple ways
+    const businessId = req.user?.business_id || req.user?.businessId;
+    
+    console.log('business_id from req.user:', req.user?.business_id);
+    console.log('businessId from req.user:', req.user?.businessId);
+    console.log('Selected businessId:', businessId);
+    
+    if (!businessId) {
+      console.error('ERROR: No business ID found in any format');
+      return res.status(400).json({
+        success: false,
+        error: 'Business ID not found in user context',
+        debug: {
+          userKeys: Object.keys(req.user || {}),
+          hasBusinessId: !!req.user?.businessId,
+          hasBusiness_id: !!req.user?.business_id,
+          fullUser: req.user
+        }
+      });
+    }
+
+    console.log(`Fetching jobs for business: ${businessId}`);
+
+    const query = `
+      SELECT
+        j.id,
+        j.job_number,
+        j.title,
+        j.status,
+        j.final_price,
+        s.name as service_name,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name
+      FROM jobs j
+      JOIN services s ON j.service_id = s.id
+      JOIN customers c ON j.customer_id = c.id
+      WHERE j.business_id = $1
+        AND j.status IN ('in-progress', 'completed', 'pending')
+      ORDER BY j.created_at DESC
+      LIMIT 10
+    `;
+
+    console.log('Executing query with businessId:', businessId);
+    const { rows } = await client.query(query, [businessId]);
+
+    console.log(`Found ${rows.length} jobs`);
+
+    res.json({
+      success: true,
+      data: rows
+    });
+  } catch (error) {
+    console.error('❌ ERROR in /jobs/for-billing:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch jobs',
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
 
 // GET /api/jobs/:id - Get job by ID (requires job:read permission)
 router.get('/:id', requirePermission('job:read'), jobController.getById);

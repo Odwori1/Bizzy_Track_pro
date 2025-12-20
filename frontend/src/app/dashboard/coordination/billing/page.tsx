@@ -4,15 +4,20 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ConsolidatedBillComponent } from '@/components/department/ConsolidatedBill';
+import { BillingEntryForm } from '@/components/department/BillingEntryForm';
+import { Modal } from '@/components/ui/Modal';
 import { useDepartment } from '@/hooks/useDepartment';
 import { useCurrency } from '@/lib/currency';
-import { formatDisplayDate } from '@/lib/date-format'; // Import date formatting
+import { formatDisplayDate } from '@/lib/date-format';
 import { ConsolidatedBill, DepartmentBillingEntry } from '@/types/department';
 
 export default function BillingPage() {
   const [activeTab, setActiveTab] = useState<'consolidated' | 'entries' | 'generate'>('consolidated');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [servicePrices, setServicePrices] = useState<Record<string, number>>({});
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedEntryToEdit, setSelectedEntryToEdit] = useState<DepartmentBillingEntry | null>(null);
 
   const {
     consolidatedBills,
@@ -49,13 +54,13 @@ export default function BillingPage() {
     return [];
   };
 
-  // Calculate totals with proper null/undefined handling
+  // Calculate totals with proper null/undefined handling - FIXED VERSION
   const calculateTotals = (entries: any[] | null | undefined) => {
     const safeEntries = ensureArray(entries);
 
     return safeEntries.reduce(
       (acc, entry) => ({
-        totalAmount: acc.totalAmount + (parseFloat(entry.amount) || parseFloat(entry.total_amount) || 0),
+        totalAmount: acc.totalAmount + (parseFloat(entry.total_amount) || 0),
         totalTax: acc.totalTax + (parseFloat(entry.tax_amount) || 0),
         totalPaid: acc.totalPaid + (parseFloat(entry.amount_paid) || 0),
         totalDue: acc.totalDue + (parseFloat(entry.balance_due) || 0)
@@ -68,7 +73,7 @@ export default function BillingPage() {
   const calculateCounts = () => {
     if (activeTab === 'consolidated') {
       const safeBills = ensureArray(consolidatedBills);
-      const pending = safeBills.filter(bill => bill.status === 'pending').length;
+      const pending = safeBills.filter(bill => bill.status === 'pending' || bill.status === 'draft').length;
       const paid = safeBills.filter(bill => bill.status === 'paid').length;
       const count = safeBills.length;
       const totals = calculateTotals(safeBills);
@@ -83,7 +88,6 @@ export default function BillingPage() {
         due: totals.totalDue
       };
     } else {
-      // FIXED: Ensure billingEntries is an array before calling .filter()
       const safeEntries = ensureArray(billingEntries);
       const pending = safeEntries.filter(entry => !entry.invoice_id).length;
       const invoiced = safeEntries.filter(entry => entry.invoice_id).length;
@@ -126,17 +130,21 @@ export default function BillingPage() {
       const jobNumber = uniqueJobs.find(j => j.id === selectedJobId)?.number || 'Unknown';
       const userChoice = confirm(
         `A consolidated bill already exists for Job ${jobNumber}.\n\n` +
-        `Bill #: ${existingBill.bill_number || existingBill.id}\n` +
+        `Bill #: ${existingBill.invoice_number || existingBill.id}\n` +
         `Status: ${existingBill.status || 'Unknown'}\n\n` +
         'Would you like to view the existing bill instead?\n' +
         '(Click OK to view, Cancel to generate new bill)'
       );
-      
+
       if (userChoice) {
-        // User wants to view existing bill - could navigate to bill details
-        console.log('Should navigate to existing bill:', existingBill.id);
-        // For now, just show a message
-        alert('Bill viewing feature will be implemented. Existing bill ID: ' + existingBill.id);
+        // User wants to view existing bill
+        if (existingBill.invoice_id) {
+          handleViewInvoice(existingBill.invoice_id);
+        } else if (existingBill.id) {
+          handleViewInvoice(existingBill.id);
+        } else {
+          alert('Cannot find invoice ID for this bill');
+        }
         return;
       }
     }
@@ -144,44 +152,32 @@ export default function BillingPage() {
     try {
       console.log('Attempting to generate bill for job:', selectedJobId);
       await generateConsolidatedBill(selectedJobId);
-      
+
       // Refresh the consolidated bills list
       await fetchConsolidatedBilling();
-      
+
       // Switch to consolidated view
       setActiveTab('consolidated');
-      
+
       // Show success message
       alert('Consolidated bill generated successfully!');
     } catch (error: any) {
       console.error('Failed to generate bill:', error);
-      
+
       // Extract error message
       let errorMessage = error.message || 'Failed to generate bill';
-      
+
       // Check for specific backend error messages
-      if (errorMessage.includes('invoice already exists') || 
+      if (errorMessage.includes('invoice already exists') ||
           errorMessage.includes('An invoice already exists')) {
-        
+
         const jobNumber = uniqueJobs.find(j => j.id === selectedJobId)?.number || 'Unknown';
         errorMessage = `An invoice already exists for Job ${jobNumber}. Please use the existing invoice.`;
-        
-        // Offer to view existing invoices
-        const userChoice = confirm(
-          errorMessage + '\n\n' +
-          'Would you like to view existing invoices for this job?\n' +
-          '(Click OK to view, Cancel to stay here)'
-        );
-        
-        if (userChoice) {
-          // Could navigate to invoices page filtered by this job
-          console.log('Should navigate to invoices for job:', selectedJobId);
-        }
       }
-      
+
       // Set error state for display
       setGenerationError(errorMessage);
-      
+
       // Also show alert for immediate feedback
       alert(`Error: ${errorMessage}`);
     }
@@ -190,13 +186,36 @@ export default function BillingPage() {
   // Handle export
   const handleExportBill = (billId: string) => {
     console.log('Exporting bill:', billId);
-    // Implement export functionality
+    alert('Export feature will be implemented');
   };
 
-  // Handle view invoice
-  const handleViewInvoice = (billId: string) => {
-    console.log('Viewing invoice for bill:', billId);
-    // Navigate to invoice details
+  // Handle view invoice - Updated function with validation
+  const handleViewInvoice = (invoiceId: string) => {
+    if (!invoiceId || invoiceId === 'undefined' || invoiceId === 'null') {
+      console.error('Invalid invoice ID:', invoiceId);
+      alert('Invalid invoice ID');
+      return;
+    }
+    
+    console.log('Opening invoice:', invoiceId);
+    // Open in new tab
+    window.open(`/dashboard/management/invoices/${invoiceId}`, '_blank');
+  };
+
+  // Generate bill for specific job
+  const handleGenerateBillForJob = async (jobId: string) => {
+    try {
+      setSelectedJobId(jobId);
+      await generateConsolidatedBill(jobId);
+      
+      // Refresh data
+      await fetchBillingEntries();
+      await fetchConsolidatedBilling();
+      
+      alert('Bill generated successfully!');
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    }
   };
 
   // Get unique jobs from consolidated bills
@@ -207,13 +226,14 @@ export default function BillingPage() {
     return Array.from(jobIds).map(jobId => {
       const bill = safeBills.find(b => b.job_id === jobId);
       const hasExistingBill = !!bill;
-      
+
       return {
         id: jobId!,
         number: bill?.job_number || 'Unknown',
         title: bill?.job_title || 'No title',
         hasExistingBill,
         existingBillId: bill?.id,
+        existingBillNumber: bill?.invoice_number,
         existingBillStatus: bill?.status
       };
     });
@@ -234,6 +254,17 @@ export default function BillingPage() {
           <p className="text-gray-600 mt-1">
             Manage consolidated billing and department charges
           </p>
+        </div>
+        <div className="flex space-x-2">
+          <Button
+            variant="primary"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Create Billing Entry
+          </Button>
         </div>
       </div>
 
@@ -416,9 +447,9 @@ export default function BillingPage() {
             </Card>
           ) : (
             <div className="space-y-6">
-              {safeConsolidatedBills.map((bill: ConsolidatedBill) => (
+              {safeConsolidatedBills.map((bill: ConsolidatedBill, index: number) => (
                 <ConsolidatedBillComponent
-                  key={`consolidated-bill-${bill.id}`}
+                  key={`consolidated-bill-${bill.job_id || bill.invoice?.id || `bill-${index}`}`}
                   bill={bill}
                   onExport={handleExportBill}
                   onViewInvoice={handleViewInvoice}
@@ -453,6 +484,14 @@ export default function BillingPage() {
                 <p className="mt-1 text-gray-500">
                   Department charges will appear here when they're created
                 </p>
+                <div className="mt-6">
+                  <Button
+                    variant="primary"
+                    onClick={() => setShowCreateModal(true)}
+                  >
+                    Create Billing Entry
+                  </Button>
+                </div>
               </div>
             </Card>
           ) : (
@@ -471,13 +510,22 @@ export default function BillingPage() {
                         Description
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount
+                        Quantity
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Unit Price
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Total
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -503,30 +551,70 @@ export default function BillingPage() {
                         </td>
 
                         <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
+                          <div className="text-sm text-gray-900 max-w-xs truncate">
                             {entry.description}
                           </div>
+                          <div className="text-xs text-gray-500">
+                            {entry.billing_type || 'service'}
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {entry.quantity || 1}
+                        </td>
+
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {format(entry.unit_price || 0)}
                         </td>
 
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-semibold text-gray-900">
-                            {format(entry.total_amount || entry.amount)}
+                            {format(entry.total_amount)}
                           </div>
+                          {entry.cost_amount && (
+                            <div className="text-xs text-gray-500">
+                              Cost: {format(entry.cost_amount)}
+                            </div>
+                          )}
                         </td>
 
+                        {/* Status Column - Updated with link to invoice */}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            entry.invoice_id
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {entry.invoice_id ? 'Invoiced' : 'Pending'}
-                          </span>
+                          {entry.invoice_id ? (
+                            <div>
+                              <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                Invoiced
+                              </span>
+                              <button
+                                onClick={() => handleViewInvoice(entry.invoice_id)}
+                                className="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                              >
+                                View Invoice
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
+                              Pending
+                            </span>
+                          )}
                         </td>
 
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {/* FIXED: Use proper date formatting utility */}
                           {formatDisplayDate(entry.billing_date)}
+                        </td>
+
+                        {/* Actions Column */}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {!entry.invoice_id && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleGenerateBillForJob(entry.job_id)}
+                              disabled={loading}
+                            >
+                              Generate Bill
+                            </Button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -553,7 +641,7 @@ export default function BillingPage() {
                   value={selectedJobId || ''}
                   onChange={(e) => {
                     setSelectedJobId(e.target.value || null);
-                    setGenerationError(null); // Clear error when changing selection
+                    setGenerationError(null);
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
@@ -561,14 +649,14 @@ export default function BillingPage() {
                   {uniqueJobs.map(job => (
                     <option key={job.id} value={job.id}>
                       {job.number} - {job.title}
-                      {job.hasExistingBill ? ' (Has existing bill)' : ''}
+                      {job.hasExistingBill ? ` (Has bill: ${job.existingBillNumber})` : ''}
                     </option>
                   ))}
                 </select>
                 <p className="mt-1 text-sm text-gray-500">
                   Select a job that has completed department work to generate a consolidated bill
                 </p>
-                
+
                 {/* Warning for jobs with existing bills */}
                 {selectedJobId && uniqueJobs.find(j => j.id === selectedJobId)?.hasExistingBill && (
                   <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
@@ -590,11 +678,11 @@ export default function BillingPage() {
               {/* Preview */}
               {selectedJobId && (
                 <div className="border rounded-lg p-4 bg-gray-50">
-                  <h3 className="font-medium text-gray-900 mb-2">Preview</h3>
+                  <h3 className="font-medium text-gray-900 mb-2">Billing Preview</h3>
                   <div className="text-sm text-gray-600">
-                    Bill will include all department charges for the selected job
+                    The consolidated bill will use the service price as the customer charge.
+                    Department costs will be tracked internally for profit analysis.
                   </div>
-                  {/* Here you could show a preview of department charges */}
                 </div>
               )}
 
@@ -620,6 +708,33 @@ export default function BillingPage() {
             </div>
           </div>
         </Card>
+      )}
+
+      {/* Billing Entry Form Modal */}
+      {showCreateModal && (
+        <Modal
+          title="Create Billing Entry"
+          onClose={() => {
+            setShowCreateModal(false);
+            setSelectedEntryToEdit(null);
+          }}
+          size="lg"
+        >
+          <BillingEntryForm
+            onSuccess={() => {
+              setShowCreateModal(false);
+              setSelectedEntryToEdit(null);
+              // Refresh billing entries
+              if (activeTab === 'entries') {
+                fetchBillingEntries();
+              }
+            }}
+            onCancel={() => {
+              setShowCreateModal(false);
+              setSelectedEntryToEdit(null);
+            }}
+          />
+        </Modal>
       )}
     </div>
   );

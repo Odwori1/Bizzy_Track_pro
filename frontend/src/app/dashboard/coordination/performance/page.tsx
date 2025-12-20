@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { PerformanceMetrics } from '@/components/department/PerformanceMetrics';
 import { useDepartment } from '@/hooks/useDepartment';
+import { useCurrency } from '@/lib/currency'; // ADDED IMPORT
 
 export default function PerformancePage() {
   const [dateRange, setDateRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
@@ -14,6 +15,7 @@ export default function PerformancePage() {
   const [error, setError] = useState<string | null>(null);
 
   const { performanceMetrics, fetchPerformanceMetrics } = useDepartment();
+  const { format } = useCurrency(); // ADDED HOOK
 
   // Load performance data
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function PerformancePage() {
             Track and analyze department efficiency, revenue, and completion rates
           </p>
         </div>
-        
+
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
             <label className="text-sm text-gray-600">Time Period:</label>
@@ -98,7 +100,7 @@ export default function PerformancePage() {
               <option value="year">Last Year</option>
             </select>
           </div>
-          
+
           <Link href="/dashboard/coordination/performance/analytics">
             <Button variant="outline">
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -148,14 +150,14 @@ export default function PerformancePage() {
               </div>
             </div>
           </Card>
-          
+
           <Card>
             <div className="p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs text-gray-500 uppercase tracking-wider">Total Revenue</div>
                   <div className="text-2xl font-bold text-gray-900 mt-1">
-                    ${summary.totalRevenue.toLocaleString()}
+                    {format(summary.totalRevenue)} {/* FIXED: Using format() instead of hardcoded $ */}
                   </div>
                 </div>
                 <div className="p-3 bg-green-50 rounded-lg">
@@ -169,14 +171,14 @@ export default function PerformancePage() {
               </div>
             </div>
           </Card>
-          
+
           <Card>
             <div className="p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs text-gray-500 uppercase tracking-wider">Total Profit</div>
                   <div className="text-2xl font-bold text-gray-900 mt-1">
-                    ${summary.totalProfit.toLocaleString()}
+                    {format(summary.totalProfit)} {/* FIXED: Using format() instead of hardcoded $ */}
                   </div>
                 </div>
                 <div className="p-3 bg-purple-50 rounded-lg">
@@ -190,7 +192,7 @@ export default function PerformancePage() {
               </div>
             </div>
           </Card>
-          
+
           <Card>
             <div className="p-6">
               <div className="flex items-center justify-between">
@@ -233,7 +235,7 @@ export default function PerformancePage() {
                 </Button>
               </Link>
             </div>
-            
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-4 bg-gray-50 rounded-lg">
                 <div className="text-xs text-gray-500 uppercase tracking-wider">Efficiency</div>
@@ -241,26 +243,26 @@ export default function PerformancePage() {
                   {selectedDepartment.efficiency?.toFixed(1) || '0'}%
                 </div>
               </div>
-              
+
               <div className="p-4 bg-gray-50 rounded-lg">
                 <div className="text-xs text-gray-500 uppercase tracking-wider">Assignments</div>
                 <div className="text-xl font-bold text-gray-900 mt-1">
                   {selectedDepartment.completed_assignments || 0}/{selectedDepartment.total_assignments || 0}
                 </div>
               </div>
-              
+
               <div className="p-4 bg-gray-50 rounded-lg">
                 <div className="text-xs text-gray-500 uppercase tracking-wider">Revenue</div>
                 <div className="text-xl font-bold text-gray-900 mt-1">
-                  ${selectedDepartment.total_revenue?.toLocaleString() || '0'}
+                  {format(selectedDepartment.total_revenue || 0)} {/* FIXED: Using format() instead of hardcoded $ */}
                 </div>
               </div>
-              
+
               <div className="p-4 bg-gray-50 rounded-lg">
                 <div className="text-xs text-gray-500 uppercase tracking-wider">Avg Time</div>
                 <div className="text-xl font-bold text-gray-900 mt-1">
-                  {selectedDepartment.avg_completion_hours 
-                    ? selectedDepartment.avg_completion_hours < 24 
+                  {selectedDepartment.avg_completion_hours
+                    ? selectedDepartment.avg_completion_hours < 24
                       ? `${selectedDepartment.avg_completion_hours.toFixed(1)}h`
                       : `${(selectedDepartment.avg_completion_hours / 24).toFixed(1)}d`
                     : 'N/A'}
@@ -310,7 +312,7 @@ export default function PerformancePage() {
         <Card>
           <div className="p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Performance Insights</h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Top Performers */}
               <div>
@@ -333,7 +335,7 @@ export default function PerformancePage() {
                           </div>
                         </div>
                         <div className="text-sm font-medium text-green-600">
-                          ${dept.profit?.toLocaleString() || '0'}
+                          {format(dept.profit || 0)} {/* FIXED: Using format() instead of hardcoded $ */}
                         </div>
                       </div>
                     ))}
@@ -368,7 +370,7 @@ export default function PerformancePage() {
                         </Button>
                       </div>
                     ))}
-                  
+
                   {performanceMetrics.filter(dept => dept.efficiency && dept.efficiency < 70).length === 0 && (
                     <div className="text-center py-4 text-gray-500">
                       All departments are performing well!

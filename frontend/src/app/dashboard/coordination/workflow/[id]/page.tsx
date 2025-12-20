@@ -9,14 +9,14 @@ import { WorkflowTimeline } from '@/components/department/WorkflowTimeline';
 import { useDepartment } from '@/hooks/useDepartment';
 import { JobDepartmentAssignment, DepartmentWorkflowHandoff } from '@/types/department';
 import { formatDisplayDate } from '@/lib/date-format';
-import { 
-  AlertCircle, 
-  CheckCircle, 
-  Clock, 
-  Play, 
-  Pause, 
-  CheckSquare, 
-  Edit, 
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Play,
+  Pause,
+  CheckSquare,
+  Edit,
   History,
   Building,
   FileText
@@ -46,14 +46,19 @@ export default function WorkflowDetailsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [assignment, setAssignment] = useState<JobDepartmentAssignment | null>(null);
   const [handoffs, setHandoffs] = useState<DepartmentWorkflowHandoff[]>([]);
-  
+
   // Local time tracking state
   const [localTimeEntries, setLocalTimeEntries] = useState<LocalTimeEntry[]>([]);
   const [localActiveTimeEntry, setLocalActiveTimeEntry] = useState<LocalTimeEntry | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { fetchJobAssignmentById, fetchHandoffsByJob } = useDepartment();
+  // FIXED: Added updateJobAssignment to the hook call
+  const { 
+    fetchJobAssignmentById, 
+    fetchHandoffsByJob,
+    updateJobAssignment 
+  } = useDepartment();
 
   // Load assignment data
   useEffect(() => {
@@ -104,11 +109,21 @@ export default function WorkflowDetailsPage() {
       setAssignment(assignmentData);
 
       if (assignmentData.job_id) {
-        const handoffData = await fetchHandoffsByJob(assignmentData.job_id);
-        setHandoffs(handoffData);
+        try {
+          const handoffData = await fetchHandoffsByJob(assignmentData.job_id);
+          // FIXED: Ensure handoffData is always an array
+          setHandoffs(Array.isArray(handoffData) ? handoffData : []);
+        } catch (handoffError: any) {
+          console.warn('Failed to load handoffs:', handoffError);
+          setHandoffs([]); // Set empty array on error
+        }
+      } else {
+        setHandoffs([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load workflow details');
+      // FIXED: Set handoffs to empty array on error
+      setHandoffs([]);
     } finally {
       setLoading(false);
     }
@@ -147,23 +162,28 @@ export default function WorkflowDetailsPage() {
     }
   };
 
-  // Status update functions
+  // FIXED: Status update functions with proper backend integration
   const handleStartWork = async () => {
     if (!assignment) return;
-    
+
     setSubmitting(true);
     setError(null);
-    
+
     try {
-      // Update status to in_progress
-      // Note: This API might not exist yet, so we'll update locally
-      setAssignment(prev => prev ? { ...prev, status: 'in_progress' } : null);
-      
+      // FIXED: Call backend API to update status
+      await updateJobAssignment(assignmentId, {
+        status: 'in_progress',
+        actual_start: new Date().toISOString()
+      });
+
+      // Reload assignment data to get fresh state from backend
+      await loadAssignmentData();
+
       setSuccess('Work started successfully');
-      
+
       // Start time tracking automatically
       startTimeTracking('Started work');
-      
+
     } catch (err: any) {
       console.error('Failed to start work:', err);
       setError(err.message || 'Failed to start work');
@@ -175,21 +195,36 @@ export default function WorkflowDetailsPage() {
   const handleUpdateStatus = async (status: string, notes: string) => {
     setSubmitting(true);
     setError(null);
-    
+
     try {
-      // Update status locally since API might not exist
-      setAssignment(prev => prev ? { ...prev, status: status as any } : null);
+      // FIXED: Call backend API to update status
+      const updateData: any = { status };
       
+      // If completing, set actual end date
+      if (status === 'completed') {
+        updateData.actual_end = new Date().toISOString();
+      }
+      
+      // If putting on hold, add notes
+      if (status === 'on_hold' && notes) {
+        updateData.notes = (assignment?.notes || '') + `\n[On Hold: ${notes}]`;
+      }
+      
+      await updateJobAssignment(assignmentId, updateData);
+
+      // Reload data
+      await loadAssignmentData();
+
       setSuccess(`Status updated to ${status} successfully`);
       setShowStatusModal(false);
       setNewStatus('');
       setStatusNotes('');
-      
+
       // If completing, stop any active time tracking
       if (status === 'completed' && localActiveTimeEntry) {
         stopTimeTracking('Completed assignment');
       }
-      
+
     } catch (err: any) {
       console.error('Failed to update status:', err);
       setError(err.message || 'Failed to update status');
@@ -198,7 +233,7 @@ export default function WorkflowDetailsPage() {
     }
   };
 
-  // Time tracking functions
+  // Time tracking functions (unchanged)
   const startTimeTracking = (notes: string = '') => {
     const newEntry: LocalTimeEntry = {
       id: `local_${Date.now()}`,
@@ -211,7 +246,7 @@ export default function WorkflowDetailsPage() {
       notes: notes || 'Started time tracking',
       created_at: new Date().toISOString()
     };
-    
+
     setLocalActiveTimeEntry(newEntry);
     saveLocalTimeData(localTimeEntries, newEntry);
     setSuccess('Time tracking started');
@@ -219,24 +254,24 @@ export default function WorkflowDetailsPage() {
 
   const stopTimeTracking = (notes: string = '') => {
     if (!localActiveTimeEntry) return;
-    
+
     const now = new Date();
     const startTime = new Date(localActiveTimeEntry.start_time);
     const durationMinutes = Math.floor((now.getTime() - startTime.getTime()) / (1000 * 60));
-    
+
     const completedEntry: LocalTimeEntry = {
       ...localActiveTimeEntry,
       end_time: now.toISOString(),
       duration_minutes: durationMinutes,
       notes: localActiveTimeEntry.notes + (notes ? ` - ${notes}` : ' - Stopped')
     };
-    
+
     // Add to entries and clear active
     const updatedEntries = [...localTimeEntries, completedEntry];
     setLocalTimeEntries(updatedEntries);
     setLocalActiveTimeEntry(null);
     saveLocalTimeData(updatedEntries, null);
-    
+
     setSuccess('Time tracking stopped');
     setElapsedTime(0);
   };
@@ -245,7 +280,7 @@ export default function WorkflowDetailsPage() {
     try {
       const [hours, minutes] = duration.split(':').map(Number);
       const durationMinutes = hours * 60 + minutes;
-      
+
       const manualEntry: LocalTimeEntry = {
         id: `manual_${Date.now()}`,
         assignment_id: assignmentId,
@@ -257,11 +292,11 @@ export default function WorkflowDetailsPage() {
         notes: notes || 'Manual time entry',
         created_at: new Date().toISOString()
       };
-      
+
       const updatedEntries = [...localTimeEntries, manualEntry];
       setLocalTimeEntries(updatedEntries);
       saveLocalTimeData(updatedEntries, localActiveTimeEntry);
-      
+
       setSuccess('Time logged successfully');
       setShowTimeModal(false);
       setTimeDuration('');
@@ -277,7 +312,7 @@ export default function WorkflowDetailsPage() {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    
+
     if (hours > 0) {
       return `${hours}h ${minutes}m ${secs}s`;
     } else if (minutes > 0) {
@@ -292,7 +327,7 @@ export default function WorkflowDetailsPage() {
     const totalMinutes = localTimeEntries.reduce((total, entry) => {
       return total + (entry.duration_minutes || 0);
     }, 0);
-    
+
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return { hours, minutes, totalMinutes };
@@ -300,7 +335,7 @@ export default function WorkflowDetailsPage() {
 
   // Get all time entries sorted by date
   const getAllTimeEntries = () => {
-    return [...localTimeEntries].sort((a, b) => 
+    return [...localTimeEntries].sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   };
@@ -356,7 +391,7 @@ export default function WorkflowDetailsPage() {
   // Format date and time for display
   const formatDateTimeDisplay = (dateString: string | null): string => {
     if (!dateString) return 'Not set';
-    
+
     try {
       // Use the centralized utility
       return formatDisplayDate(dateString);
@@ -368,6 +403,12 @@ export default function WorkflowDetailsPage() {
 
   // Handle handoff creation
   const handleCreateHandoff = () => {
+    // FIXED: Check if assignment is in progress
+    if (assignment?.status !== 'in_progress') {
+      setError('Cannot create handoff: Assignment must be in progress');
+      return;
+    }
+    
     router.push(`/dashboard/coordination/workflow/${assignmentId}/handoff`);
   };
 
@@ -432,7 +473,7 @@ export default function WorkflowDetailsPage() {
           </div>
         </div>
       )}
-      
+
       {success && (
         <div className="bg-green-50 border border-green-200 rounded-md p-4">
           <div className="flex items-center gap-2">
@@ -699,8 +740,8 @@ export default function WorkflowDetailsPage() {
                             </div>
                             <div className="text-right">
                               <p className="font-bold text-sm">
-                                {entry.duration_minutes ? 
-                                  `${Math.floor(entry.duration_minutes / 60)}h ${entry.duration_minutes % 60}m` : 
+                                {entry.duration_minutes ?
+                                  `${Math.floor(entry.duration_minutes / 60)}h ${entry.duration_minutes % 60}m` :
                                   'Ongoing'
                                 }
                               </p>
@@ -725,7 +766,7 @@ export default function WorkflowDetailsPage() {
             </div>
           </Card>
 
-          {/* Workflow Timeline */}
+          {/* FIXED: Workflow Timeline with comprehensive safety checks */}
           <Card>
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
@@ -734,14 +775,28 @@ export default function WorkflowDetailsPage() {
                   Workflow Timeline
                 </h3>
                 <div className="text-sm text-gray-600">
-                  {handoffs.length} handoff{handoffs.length !== 1 ? 's' : ''}
+                  {Array.isArray(handoffs) ? handoffs.length : 0} handoff{Array.isArray(handoffs) && handoffs.length !== 1 ? 's' : ''}
                 </div>
               </div>
 
-              <WorkflowTimeline
-                handoffs={handoffs}
-                currentAssignmentId={assignmentId}
-              />
+              {/* FIXED: Comprehensive safety check before rendering WorkflowTimeline */}
+              {Array.isArray(handoffs) && handoffs.length > 0 ? (
+                <WorkflowTimeline
+                  handoffs={handoffs}
+                  currentAssignmentId={assignmentId}
+                />
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Workflow History</h3>
+                  <p className="text-gray-600 max-w-md mx-auto">
+                    No department handoffs have been created for this job yet.
+                    Handoffs will appear here once departments start coordinating.
+                  </p>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -788,7 +843,7 @@ export default function WorkflowDetailsPage() {
                     <Clock size={16} className="mr-2" />
                     Log Manual Time
                   </Button>
-                  
+
                   {currentActiveEntry ? (
                     <Button
                       variant="outline"
@@ -887,7 +942,7 @@ export default function WorkflowDetailsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Status</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -906,7 +961,7 @@ export default function WorkflowDetailsPage() {
                   ))}
                 </select>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Notes (Optional)
@@ -920,7 +975,7 @@ export default function WorkflowDetailsPage() {
                 />
               </div>
             </div>
-            
+
             <div className="flex justify-end space-x-3 mt-6">
               <Button
                 variant="outline"
@@ -949,7 +1004,7 @@ export default function WorkflowDetailsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Log Manual Time</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -964,7 +1019,7 @@ export default function WorkflowDetailsPage() {
                 />
                 <p className="text-xs text-gray-500 mt-1">Enter time as hours:minutes</p>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Notes (Optional)
@@ -978,7 +1033,7 @@ export default function WorkflowDetailsPage() {
                 />
               </div>
             </div>
-            
+
             <div className="flex justify-end space-x-3 mt-6">
               <Button
                 variant="outline"

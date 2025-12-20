@@ -58,12 +58,18 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
   },
 
   fetchInvoice: async (id: string) => {
+    // ADDED: Validation for invalid invoice IDs
+    if (!id || id === 'undefined') {
+      throw new Error('Invalid invoice ID');
+    }
+    
     set({ loading: true, error: null });
     try {
       const invoice = await apiClient.get<Invoice>(`/invoices/${id}`);
       set({ currentInvoice: invoice, loading: false });
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      const errorMessage = error.message || 'Failed to fetch invoice';
+      set({ error: errorMessage, loading: false });
       throw error;
     }
   },
@@ -84,6 +90,11 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
   },
 
   updateInvoiceStatus: async (id: string, data: UpdateInvoiceStatusData) => {
+    // ADDED: Validation for invalid invoice IDs
+    if (!id || id === 'undefined') {
+      throw new Error('Invalid invoice ID');
+    }
+    
     set({ loading: true, error: null });
     try {
       const result = await apiClient.patch<Invoice>(`/invoices/${id}/status`, data);
@@ -101,6 +112,11 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
   },
 
   recordPayment: async (id: string, data: RecordPaymentData) => {
+    // ADDED: Validation for invalid invoice IDs
+    if (!id || id === 'undefined') {
+      throw new Error('Invalid invoice ID');
+    }
+    
     set({ loading: true, error: null });
     try {
       // FIXED: Changed from PATCH to POST and using correct field name 'amount'
@@ -119,6 +135,11 @@ export const useInvoiceStore = create<InvoiceState>((set, get) => ({
   },
 
   deleteInvoice: async (id: string) => {
+    // ADDED: Validation for invalid invoice IDs
+    if (!id || id === 'undefined') {
+      throw new Error('Invalid invoice ID');
+    }
+    
     set({ loading: true, error: null });
     try {
       await apiClient.delete(`/invoices/${id}`);
