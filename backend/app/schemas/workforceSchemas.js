@@ -126,6 +126,8 @@ export const createTimesheetEntrySchema = Joi.object({
   regular_hours: Joi.number().precision(2).min(0).max(168).optional().default(0),
   overtime_hours: Joi.number().precision(2).min(0).max(168).optional().default(0),
   break_hours: Joi.number().precision(2).min(0).max(24).optional().default(0),
+  regular_rate: Joi.number().precision(2).min(0).required(),
+  overtime_rate: Joi.number().precision(2).min(0).required(),
   notes: Joi.string().optional().allow('')
 });
 
@@ -153,10 +155,18 @@ export const staffQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).optional().default(20)
 });
 
-// FIXED: Shift query schema with corrected date format
+// FIXED: Shift query schema - Use string pattern matching for query parameters
 export const shiftQuerySchema = Joi.object({
-  start_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
-  end_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+  start_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required()
+    .messages({
+      'string.pattern.base': '"start_date" must be in YYYY-MM-DD format',
+      'any.required': '"start_date" is required'
+    }),
+  end_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required()
+    .messages({
+      'string.pattern.base': '"end_date" must be in YYYY-MM-DD format',
+      'any.required': '"end_date" is required'
+    }),
   department_id: idSchema.optional(),
   staff_profile_id: idSchema.optional(),
   shift_status: Joi.string().valid('scheduled', 'in_progress', 'completed', 'cancelled').optional()
@@ -166,4 +176,31 @@ export const timesheetQuerySchema = Joi.object({
   period_id: idSchema.optional(),
   staff_profile_id: idSchema.optional(),
   status: Joi.string().valid('draft', 'submitted', 'approved', 'processed').optional()
+});
+
+// FIXED: Performance Metric Schema - match actual table columns
+export const createPerformanceMetricSchema = Joi.object({
+  staff_profile_id: idSchema.required(),
+  metric_date: Joi.date().required(),
+  jobs_completed: Joi.number().integer().min(0).required(),
+  jobs_assigned: Joi.number().integer().min(0).required(),
+  total_hours_worked: Joi.number().precision(2).min(0).max(24).required(),
+  overtime_hours: Joi.number().precision(2).min(0).max(12).required(),
+  customer_rating_avg: Joi.number().precision(2).min(0).max(5).optional().allow(null),
+  efficiency_score: Joi.number().precision(2).min(0).max(100).optional().allow(null),
+  revenue_generated: Joi.number().precision(2).min(0).required()
+});
+
+// FIXED: Performance Query Schema
+export const performanceQuerySchema = Joi.object({
+  staff_profile_id: idSchema.optional(),
+  start_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  end_date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+// Availability Query Schema
+export const availabilityQuerySchema = Joi.object({
+  staff_profile_id: idSchema.optional(),
+  day_of_week: Joi.number().integer().min(0).max(6).optional(),
+  is_available: Joi.boolean().optional()
 });

@@ -105,43 +105,6 @@ const navigationSections = [
     ],
   },
   {
-    id: 'workforce',
-    title: 'Workforce Management',
-    color: 'indigo',
-    items: [
-      {
-        name: 'Workforce Dashboard',
-        href: '/dashboard/management/workforce',
-        icon: '👥',
-        permission: 'staff:read', // Use existing staff permission for now
-      },
-      {
-        name: 'Staff Profiles',
-        href: '/dashboard/management/workforce/staff/profiles',
-        icon: '📋',
-        permission: 'staff:read',
-      },
-      {
-        name: 'Shift Management',
-        href: '/dashboard/management/workforce/shifts',
-        icon: '📅',
-        permission: 'staff:read',
-      },
-      {
-        name: 'Timesheets',
-        href: '/dashboard/management/workforce/timesheets',
-        icon: '⏰',
-        permission: 'staff:read',
-      },
-      {
-        name: 'Performance',
-        href: '/dashboard/management/workforce/performance',
-        icon: '📈',
-        permission: 'staff:read',
-      },
-    ],
-  },
-  {
     id: 'coordination',
     title: 'Department Coordination',
     color: 'cyan',
@@ -491,7 +454,7 @@ const FilteredSection = ({ section }: { section: any }) => {
       setHasVisibleItems(true);
       return;
     }
-
+    
     // For non-owners, apply permission checks
     const hasItems = section.items.some((item: any) => {
       if (!item.permission) return true;
@@ -516,7 +479,6 @@ const FilteredSection = ({ section }: { section: any }) => {
            section.id === 'pos' ? '🛒' :
            section.id === 'products' ? '📦' :
            section.id === 'staff' ? '👥' :
-           section.id === 'workforce' ? '👨‍💼' :
            section.id === 'coordination' ? '🔄' :
            section.id === 'analytics' ? '📈' :
            section.id === 'operations' ? '⚙️' :

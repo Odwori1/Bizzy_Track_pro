@@ -1,12 +1,12 @@
 export const validateRequest = (schema, source = 'body') => {
   return (req, res, next) => {
-    // Choose the source to validate
+    // Choose the source to validate - FIXED VERSION
     const dataToValidate = source === 'query' ? req.query : req.body;
     
     const { error, value } = schema.validate(dataToValidate, {
       abortEarly: false,
       stripUnknown: true,
-      convert: true
+      convert: true  // Allow type conversion
     });
 
     if (error) {

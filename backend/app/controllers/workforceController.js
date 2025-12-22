@@ -194,12 +194,13 @@ export const workforceController = {
         shift_status
       } = req.query;
 
-      if (!start_date || !end_date) {
-        return res.status(400).json({
-          success: false,
-          message: 'start_date and end_date are required'
-        });
-      }
+      // REMOVED: Manual validation - let Joi schema handle it
+      // if (!start_date || !end_date) {
+      //   return res.status(400).json({
+      //     success: false,
+      //     message: 'start_date and end_date are required'
+      //   });
+      // }
 
       const filters = {
         start_date,
@@ -221,6 +222,174 @@ export const workforceController = {
 
     } catch (error) {
       log.error('Shifts fetch controller error', error);
+      next(error);
+    }
+  },
+
+  async getTimesheets(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const { start_date, end_date, staff_profile_id } = req.query;
+
+      const timesheets = await WorkforceService.getTimesheets(businessId, {
+        start_date,
+        end_date,
+        staff_profile_id
+      });
+
+      res.json({
+        success: true,
+        data: timesheets,
+        count: timesheets.length,
+        message: 'Timesheets retrieved successfully'
+      });
+    } catch (error) {
+      log.error('Timesheets fetch controller error', error);
+      next(error);
+    }
+  },
+
+  async createTimesheet(req, res, next) {
+    try {
+      const timesheetData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      const timesheet = await WorkforceService.createTimesheet(businessId, timesheetData, userId);
+
+      res.status(201).json({
+        success: true,
+        data: timesheet,
+        message: 'Timesheet created successfully'
+      });
+    } catch (error) {
+      log.error('Timesheet creation controller error', error);
+      next(error);
+    }
+  },
+
+  async updateTimesheet(req, res, next) {
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
+      const businessId = req.user.businessId;
+
+      const timesheet = await WorkforceService.updateTimesheet(businessId, id, updateData);
+
+      res.json({
+        success: true,
+        data: timesheet,
+        message: 'Timesheet updated successfully'
+      });
+    } catch (error) {
+      log.error('Timesheet update controller error', error);
+      next(error);
+    }
+  },
+
+  // Availability methods
+  async getAvailability(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const { staff_profile_id } = req.query;
+
+      const availability = await WorkforceService.getAvailability(businessId, {
+        staff_profile_id
+      });
+
+      res.json({
+        success: true,
+        data: availability,
+        count: availability.length,
+        message: 'Availability retrieved successfully'
+      });
+    } catch (error) {
+      log.error('Availability fetch controller error', error);
+      next(error);
+    }
+  },
+
+  async createAvailability(req, res, next) {
+    try {
+      const availabilityData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      const availability = await WorkforceService.createAvailability(businessId, availabilityData, userId);
+
+      res.status(201).json({
+        success: true,
+        data: availability,
+        message: 'Availability created successfully'
+      });
+    } catch (error) {
+      log.error('Availability creation controller error', error);
+      next(error);
+    }
+  },
+
+  // Performance methods - UPDATED
+  async getPerformance(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const { staff_profile_id, start_date, end_date } = req.query;
+
+      const filters = {};
+      if (staff_profile_id) filters.staff_profile_id = staff_profile_id;
+      if (start_date) filters.start_date = start_date;
+      if (end_date) filters.end_date = end_date;
+
+      const performance = await WorkforceService.getPerformance(businessId, filters);
+
+      res.json({
+        success: true,
+        data: performance,
+        count: performance.length,
+        message: 'Performance metrics retrieved successfully'
+      });
+    } catch (error) {
+      log.error('Performance fetch controller error', error);
+      next(error);
+    }
+  },
+
+  async createPerformance(req, res, next) {
+    try {
+      const performanceData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      // Add created_by to the performance data
+      performanceData.created_by = userId;
+
+      const performance = await WorkforceService.createPerformance(businessId, performanceData, userId);
+
+      res.status(201).json({
+        success: true,
+        data: performance,
+        message: 'Performance metric created successfully'
+      });
+    } catch (error) {
+      log.error('Performance creation controller error', error);
+      next(error);
+    }
+  },
+
+  // Payroll methods
+  async getPayrollExports(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      const payrollExports = await WorkforceService.getPayrollExports(businessId);
+
+      res.json({
+        success: true,
+        data: payrollExports,
+        count: payrollExports.length,
+        message: 'Payroll exports retrieved successfully'
+      });
+    } catch (error) {
+      log.error('Payroll exports fetch controller error', error);
       next(error);
     }
   }

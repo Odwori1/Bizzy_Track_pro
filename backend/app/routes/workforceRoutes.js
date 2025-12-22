@@ -7,7 +7,12 @@ import {
   createShiftRosterSchema,
   createClockEventSchema,
   staffQuerySchema,
-  shiftQuerySchema
+  shiftQuerySchema,
+  timesheetQuerySchema,
+  createStaffAvailabilitySchema,
+  createPerformanceMetricSchema,
+  availabilityQuerySchema,
+  performanceQuerySchema
 } from '../schemas/workforceSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -73,9 +78,66 @@ router.get(
 // Clock Event Routes
 router.post(
   '/clock-events',
-  requirePermission('attendance:clock_in'), // Can use either clock_in or clock_out permission
+  requirePermission('attendance:clock_in'),
   validateRequest(createClockEventSchema),
   workforceController.processClockEvent
+);
+
+// Timesheet Routes
+router.get(
+  '/timesheets',
+  requirePermission('timesheets:read'),
+  validateRequest(timesheetQuerySchema, 'query'),
+  workforceController.getTimesheets
+);
+
+router.post(
+  '/timesheets',
+  requirePermission('timesheets:create'),
+  workforceController.createTimesheet
+);
+
+router.put(
+  '/timesheets/:id',
+  requirePermission('timesheets:update'),
+  workforceController.updateTimesheet
+);
+
+// Staff Availability Routes
+router.get(
+  '/availability',
+  requirePermission('availability:read'),
+  validateRequest(availabilityQuerySchema, 'query'),
+  workforceController.getAvailability
+);
+
+router.post(
+  '/availability',
+  requirePermission('availability:create'),
+  validateRequest(createStaffAvailabilitySchema),
+  workforceController.createAvailability
+);
+
+// Performance Metrics Routes
+router.get(
+  '/performance',
+  requirePermission('performance:read'),
+  validateRequest(performanceQuerySchema, 'query'),
+  workforceController.getPerformance
+);
+
+router.post(
+  '/performance',
+  requirePermission('performance:create'),
+  validateRequest(createPerformanceMetricSchema),
+  workforceController.createPerformance
+);
+
+// Payroll Routes
+router.get(
+  '/payroll-exports',
+  requirePermission('payroll:read'),
+  workforceController.getPayrollExports
 );
 
 export default router;

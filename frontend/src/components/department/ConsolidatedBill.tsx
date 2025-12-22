@@ -83,11 +83,26 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
     department_total: bill?.department_total || 0,
     profit: bill?.profit || 0,
     total_cost: bill?.total_cost || 0,
+    
+    // CRITICAL: Get the actual invoice ID
+    invoice_id: bill?.invoice?.id || bill?.id || '',
+    
+    // Also get from consolidated response if available
+    consolidated_invoice_id: bill?.invoice_id || bill?.invoice?.id || '',
   };
 
+  // Determine which ID to use for viewing
+  const getViewableInvoiceId = () => {
+    // Try in order: invoice_id, consolidated_invoice_id, id
+    return safeBill.invoice_id || safeBill.consolidated_invoice_id || safeBill.id;
+  };
+
+  const viewableInvoiceId = getViewableInvoiceId();
+  console.log('Viewable Invoice ID:', viewableInvoiceId, 'from bill:', bill);
+
   // Calculate department total from breakdown if not provided
-  const calculatedDepartmentTotal = safeBill.department_total > 0 
-    ? safeBill.department_total 
+  const calculatedDepartmentTotal = safeBill.department_total > 0
+    ? safeBill.department_total
     : safeBill.department_breakdown.reduce((sum, dept) => sum + (dept.amount || 0), 0);
 
   // Calculate percentages for breakdown
@@ -106,47 +121,47 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
   // Calculate price discrepancy
   const hasServicePrice = safeBill.service_price > 0;
   const hasDepartmentCosts = calculatedDepartmentTotal > 0;
-  const priceDifference = hasServicePrice && hasDepartmentCosts 
-    ? safeBill.service_price - calculatedDepartmentTotal 
+  const priceDifference = hasServicePrice && hasDepartmentCosts
+    ? safeBill.service_price - calculatedDepartmentTotal
     : 0;
-  const profitMargin = hasServicePrice && safeBill.service_price > 0 
-    ? (priceDifference / safeBill.service_price) * 100 
+  const profitMargin = hasServicePrice && safeBill.service_price > 0
+    ? (priceDifference / safeBill.service_price) * 100
     : 0;
 
   // Determine billing scenario for clear messaging
   const getBillingMessage = () => {
-    if (!hasServicePrice && !hasDepartmentCosts) return { 
-      title: 'No Pricing Data', 
+    if (!hasServicePrice && !hasDepartmentCosts) return {
+      title: 'No Pricing Data',
       color: 'gray',
       message: 'Service price and department costs not available'
     };
-    
-    if (!hasServicePrice && hasDepartmentCosts) return { 
-      title: 'Department Costs Only', 
+
+    if (!hasServicePrice && hasDepartmentCosts) return {
+      title: 'Department Costs Only',
       color: 'yellow',
       message: 'Only department costs available. Service price needed for complete billing.'
     };
-    
-    if (hasServicePrice && !hasDepartmentCosts) return { 
-      title: 'Service Price Only', 
+
+    if (hasServicePrice && !hasDepartmentCosts) return {
+      title: 'Service Price Only',
       color: 'blue',
       message: 'Service price set. No department costs recorded.'
     };
-    
-    if (Math.abs(priceDifference) < 0.01) return { 
-      title: 'Break Even', 
+
+    if (Math.abs(priceDifference) < 0.01) return {
+      title: 'Break Even',
       color: 'yellow',
       message: 'Service price equals department costs'
     };
-    
-    if (priceDifference > 0) return { 
-      title: 'Profitable', 
+
+    if (priceDifference > 0) return {
+      title: 'Profitable',
       color: 'green',
       message: `Profit: ${format(priceDifference)} (${profitMargin.toFixed(1)}% margin)`
     };
-    
-    return { 
-      title: 'Loss', 
+
+    return {
+      title: 'Loss',
       color: 'red',
       message: `Loss: ${format(Math.abs(priceDifference))}`
     };
@@ -188,7 +203,7 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
       {/* Billing Analysis - CRITICAL SECTION */}
       <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
         <h4 className="font-medium text-gray-900 mb-3">Billing Analysis</h4>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           {/* Customer Invoice */}
           <div className="bg-white p-4 rounded border">
@@ -252,7 +267,7 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
       {hasDepartmentCosts && (
         <div className="mb-6">
           <h4 className="text-md font-semibold text-gray-900 mb-4">Department Cost Details (Internal)</h4>
-          
+
           <div className="space-y-3">
             {breakdown.map((dept, index) => (
               <div key={`${dept.department_id}-${dept.id || index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded">
@@ -277,7 +292,7 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
                 </div>
               </div>
             ))}
-            
+
             {/* Total Department Costs */}
             <div className="pt-4 border-t">
               <div className="flex justify-between items-center">
@@ -356,10 +371,11 @@ export const ConsolidatedBillComponent: React.FC<ConsolidatedBillProps> = ({
             </Button>
           )}
 
-          {onViewInvoice && (
+          {onViewInvoice && viewableInvoiceId && viewableInvoiceId.trim() !== '' && (
             <Button
               variant="primary"
-              onClick={() => onViewInvoice(safeBill.id)}
+              onClick={() => onViewInvoice(viewableInvoiceId)}
+              disabled={!viewableInvoiceId || viewableInvoiceId.trim() === ''}
             >
               View Invoice
             </Button>

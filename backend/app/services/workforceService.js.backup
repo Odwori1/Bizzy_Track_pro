@@ -597,11 +597,11 @@ export class WorkforceService {
 
     try {
       let query = `
-        SELECT
-          te.*,
-          sp.user_id,
-          sp.employee_id,
-          u.full_name,
+        SELECT 
+          te.*, 
+          sp.user_id, 
+          sp.employee_id, 
+          u.full_name, 
           u.email,
           tp.period_name,
           tp.start_date as period_start_date,
@@ -645,7 +645,7 @@ export class WorkforceService {
   }
 
   /**
-   * Create timesheet - FIXED VERSION (matches actual table structure)
+   * Create timesheet
    */
   static async createTimesheet(businessId, timesheetData, userId) {
     const client = await getClient();
@@ -673,48 +673,33 @@ export class WorkforceService {
         throw new Error('Staff profile not found or does not belong to this business');
       }
 
-      // Calculate totals
-      const regular_hours = timesheetData.regular_hours || 0;
-      const overtime_hours = timesheetData.overtime_hours || 0;
-      const break_hours = timesheetData.break_hours || 0;
-      const regular_rate = timesheetData.regular_rate || 0;
-      const overtime_rate = timesheetData.overtime_rate || 0;
-      
-      const total_regular_pay = regular_hours * regular_rate;
-      const total_overtime_pay = overtime_hours * overtime_rate;
-      const total_pay = total_regular_pay + total_overtime_pay;
-
       const result = await client.query(
         `INSERT INTO timesheet_entries (
-          business_id,
+          business_id, 
           timesheet_period_id,
-          staff_profile_id,
-          regular_hours,
+          staff_profile_id, 
+          regular_hours, 
           overtime_hours,
           break_hours,
           regular_rate,
           overtime_rate,
-          total_regular_pay,
-          total_overtime_pay,
-          total_pay,
-          status,
-          notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          status, 
+          notes, 
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *`,
         [
           businessId,
           timesheetData.timesheet_period_id,
           timesheetData.staff_profile_id,
-          regular_hours,
-          overtime_hours,
-          break_hours,
-          regular_rate,
-          overtime_rate,
-          total_regular_pay,
-          total_overtime_pay,
-          total_pay,
+          timesheetData.regular_hours || 0,
+          timesheetData.overtime_hours || 0,
+          timesheetData.break_hours || 0,
+          timesheetData.regular_rate || 0,
+          timesheetData.overtime_rate || 0,
           timesheetData.status || 'draft',
-          timesheetData.notes || ''
+          timesheetData.notes || '',
+          userId
         ]
       );
 
@@ -816,7 +801,7 @@ export class WorkforceService {
 
     try {
       let query = `
-        SELECT
+        SELECT 
           sa.*,
           sp.employee_id,
           sp.job_title,
@@ -826,7 +811,7 @@ export class WorkforceService {
         JOIN users u ON sp.user_id = u.id
         WHERE sa.business_id = $1
       `;
-
+      
       const params = [businessId];
       let paramCount = 2;
 
@@ -858,7 +843,7 @@ export class WorkforceService {
   }
 
   /**
-   * Create staff availability - FIXED VERSION (no created_by column)
+   * Create staff availability
    */
   static async createAvailability(businessId, availabilityData, userId) {
     const client = await getClient();
@@ -897,8 +882,9 @@ export class WorkforceService {
           preferred_shift_type,
           max_hours_per_day,
           effective_from,
-          effective_until
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          effective_until,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *`,
         [
           businessId,
@@ -910,7 +896,8 @@ export class WorkforceService {
           availabilityData.preferred_shift_type || null,
           availabilityData.max_hours_per_day || 8,
           availabilityData.effective_from || new Date(),
-          availabilityData.effective_until || null
+          availabilityData.effective_until || null,
+          userId
         ]
       );
 
@@ -938,63 +925,62 @@ export class WorkforceService {
   }
 
   /**
-   * Get performance metrics - FIXED VERSION
+   * Get performance metrics
    */
   static async getPerformance(businessId, filters = {}) {
     const client = await getClient();
 
     try {
       let query = `
-        SELECT
-          spm.*,
+        SELECT 
+          pm.*,
           sp.employee_id,
           sp.job_title,
           u.full_name
-        FROM staff_performance_metrics spm
-        JOIN staff_profiles sp ON spm.staff_profile_id = sp.id
+        FROM staff_performance_metrics pm
+        JOIN staff_profiles sp ON pm.staff_profile_id = sp.id
         JOIN users u ON sp.user_id = u.id
-        WHERE spm.business_id = $1
+        WHERE pm.business_id = $1
       `;
-
+      
       const params = [businessId];
       let paramCount = 2;
 
       if (filters.staff_profile_id) {
-        query += ` AND spm.staff_profile_id = $${paramCount}`;
+        query += ` AND pm.staff_profile_id = $${paramCount}`;
         params.push(filters.staff_profile_id);
         paramCount++;
       }
 
+      if (filters.metric_type) {
+        query += ` AND pm.metric_type = $${paramCount}`;
+        params.push(filters.metric_type);
+        paramCount++;
+      }
+
       if (filters.start_date) {
-        query += ` AND spm.metric_date >= $${paramCount}`;
+        query += ` AND pm.period_date >= $${paramCount}`;
         params.push(filters.start_date);
         paramCount++;
       }
 
       if (filters.end_date) {
-        query += ` AND spm.metric_date <= $${paramCount}`;
+        query += ` AND pm.period_date <= $${paramCount}`;
         params.push(filters.end_date);
         paramCount++;
       }
 
-      query += ' ORDER BY spm.metric_date DESC';
+      query += ' ORDER BY pm.period_date DESC, pm.metric_type';
 
       const result = await client.query(query, params);
       return result.rows;
-    } catch (error) {
-      log.error('❌ Performance query failed:', {
-        error: error.message,
-        businessId,
-        filters
-      });
-      throw error;
     } finally {
       client.release();
     }
   }
 
   /**
-   * Create performance metric - FIXED VERSION
+   * Create performance metric
    */
   static async createPerformance(businessId, performanceData, userId) {
     const client = await getClient();
@@ -1012,42 +998,27 @@ export class WorkforceService {
         throw new Error('Staff profile not found or does not belong to this business');
       }
 
-      // Check for existing metric for same date and staff
-      const existingCheck = await client.query(
-        'SELECT id FROM staff_performance_metrics WHERE business_id = $1 AND staff_profile_id = $2 AND metric_date = $3',
-        [businessId, performanceData.staff_profile_id, performanceData.metric_date]
-      );
-
-      if (existingCheck.rows.length > 0) {
-        throw new Error('Performance metric already exists for this staff member on this date');
-      }
-
       const result = await client.query(
         `INSERT INTO staff_performance_metrics (
           business_id,
           staff_profile_id,
-          metric_date,
-          jobs_completed,
-          jobs_assigned,
-          total_hours_worked,
-          overtime_hours,
-          customer_rating_avg,
-          efficiency_score,
-          revenue_generated,
-          created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          metric_type,
+          value,
+          period,
+          period_date,
+          notes,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *`,
         [
           businessId,
           performanceData.staff_profile_id,
-          performanceData.metric_date,
-          performanceData.jobs_completed || 0,
-          performanceData.jobs_assigned || 0,
-          performanceData.total_hours_worked || 0,
-          performanceData.overtime_hours || 0,
-          performanceData.customer_rating_avg || null,
-          performanceData.efficiency_score || null,
-          performanceData.revenue_generated || 0
+          performanceData.metric_type,
+          performanceData.value,
+          performanceData.period,
+          performanceData.period_date,
+          performanceData.notes || '',
+          userId
         ]
       );
 
@@ -1059,8 +1030,8 @@ export class WorkforceService {
         resourceId: result.rows[0].id,
         newValues: {
           staff_profile_id: performanceData.staff_profile_id,
-          metric_date: performanceData.metric_date,
-          jobs_completed: performanceData.jobs_completed
+          metric_type: performanceData.metric_type,
+          value: performanceData.value
         }
       });
 
@@ -1075,31 +1046,31 @@ export class WorkforceService {
   }
 
   /**
-   * Get payroll exports - FIXED VERSION
+   * Get payroll exports
    */
   static async getPayrollExports(businessId) {
     const client = await getClient();
 
     try {
+      // Try to query the table, but handle the case if it doesn't exist
       const query = `
-        SELECT
-          pec.*,
+        SELECT 
+          pe.*,
           u.full_name as created_by_name
-        FROM payroll_export_configs pec
-        LEFT JOIN users u ON pec.created_by = u.id
-        WHERE pec.business_id = $1
-        ORDER BY pec.created_at DESC
+        FROM payroll_exports pe
+        LEFT JOIN users u ON pe.created_by = u.id
+        WHERE pe.business_id = $1
+        ORDER BY pe.created_at DESC
       `;
-
+      
       const result = await client.query(query, [businessId]);
       return result.rows;
     } catch (error) {
-      // Log the error but return empty array
-      log.warn('Payroll exports query failed, returning empty array', {
-        error: error.message,
-        businessId
-      });
-      return [];
+      if (error.message.includes('relation "payroll_exports" does not exist')) {
+        log.warn('Payroll exports table does not exist yet, returning empty array');
+        return [];
+      }
+      throw error;
     } finally {
       client.release();
     }

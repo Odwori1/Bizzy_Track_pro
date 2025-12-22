@@ -18,11 +18,11 @@ export default function BillingPage() {
   const [servicePrices, setServicePrices] = useState<Record<string, number>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedEntryToEdit, setSelectedEntryToEdit] = useState<DepartmentBillingEntry | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const {
     consolidatedBills,
     billingEntries,
-    loading,
     error,
     fetchConsolidatedBilling,
     fetchBillingEntries,
@@ -114,6 +114,20 @@ export default function BillingPage() {
     return safeBills.find(bill => bill.job_id === jobId);
   };
 
+  // Handle view invoice - Updated function with validation
+  const handleViewInvoice = (invoiceId: string) => {
+    if (!invoiceId || invoiceId === 'undefined' || invoiceId === 'null') {
+      console.error('Invalid invoice ID:', invoiceId);
+      alert('Invalid invoice ID');
+      return;
+    }
+    
+    console.log('Opening invoice:', invoiceId);
+    
+    // Open in same tab to maintain authentication
+    window.location.href = `/dashboard/management/invoices/${invoiceId}`;
+  };
+
   // Handle bill generation with improved error handling
   const handleGenerateBill = async () => {
     if (!selectedJobId) {
@@ -137,21 +151,14 @@ export default function BillingPage() {
       );
 
       if (userChoice) {
-        // User wants to view existing bill
-        if (existingBill.invoice_id) {
-          handleViewInvoice(existingBill.invoice_id);
-        } else if (existingBill.id) {
-          handleViewInvoice(existingBill.id);
-        } else {
-          alert('Cannot find invoice ID for this bill');
-        }
+        handleViewInvoice(existingBill.invoice?.id || existingBill.id);
         return;
       }
     }
 
     try {
       console.log('Attempting to generate bill for job:', selectedJobId);
-      await generateConsolidatedBill(selectedJobId);
+      const result = await generateConsolidatedBill(selectedJobId);
 
       // Refresh the consolidated bills list
       await fetchConsolidatedBilling();
@@ -159,27 +166,103 @@ export default function BillingPage() {
       // Switch to consolidated view
       setActiveTab('consolidated');
 
-      // Show success message
-      alert('Consolidated bill generated successfully!');
+      // Show success with option to view
+      const viewInvoice = confirm(
+        'Bill generated successfully! Would you like to view the invoice now?'
+      );
+      
+      if (viewInvoice && result.invoice?.id) {
+        handleViewInvoice(result.invoice.id);
+      }
+      
     } catch (error: any) {
       console.error('Failed to generate bill:', error);
 
-      // Extract error message
-      let errorMessage = error.message || 'Failed to generate bill';
-
-      // Check for specific backend error messages
-      if (errorMessage.includes('invoice already exists') ||
-          errorMessage.includes('An invoice already exists')) {
-
+      // Handle duplicate invoice case
+      if (error.code === 'INVOICE_EXISTS' || error.status === 409) {
+        const existingInvoiceId = error.existingInvoiceId || error.data?.existingInvoiceId;
         const jobNumber = uniqueJobs.find(j => j.id === selectedJobId)?.number || 'Unknown';
-        errorMessage = `An invoice already exists for Job ${jobNumber}. Please use the existing invoice.`;
+        
+        if (existingInvoiceId) {
+          const userChoice = confirm(
+            `An invoice already exists for Job ${jobNumber}.\n\n` +
+            `Invoice: ${error.existingInvoiceNumber || existingInvoiceId}\n\n` +
+            `Would you like to view the existing invoice?\n\n` +
+            `Click OK to view, Cancel to stay on this page.`
+          );
+          
+          if (userChoice) {
+            handleViewInvoice(existingInvoiceId);
+            return;
+          }
+        } else {
+          setGenerationError(`An invoice already exists for Job ${jobNumber}. Please use the existing invoice.`);
+        }
+      } else {
+        // Other errors
+        setGenerationError(error.message || 'Failed to generate bill');
+        alert(`Error: ${error.message || 'Failed to generate bill'}`);
       }
+    }
+  };
 
-      // Set error state for display
-      setGenerationError(errorMessage);
-
-      // Also show alert for immediate feedback
-      alert(`Error: ${errorMessage}`);
+  // Generate bill for specific job
+  const handleGenerateBillForJob = async (jobId: string) => {
+    try {
+      setLoading(true);
+      setGenerationError(null);
+      
+      console.log('Generating bill for job:', jobId);
+      const result = await generateConsolidatedBill(jobId);
+      
+      // Refresh data
+      await fetchBillingEntries();
+      await fetchConsolidatedBilling();
+      
+      alert('Bill generated successfully!');
+      
+      // If we have invoice ID from result, offer to view it
+      if (result.invoice?.id) {
+        const viewInvoice = confirm(
+          'Bill generated successfully! Would you like to view the invoice now?'
+        );
+        if (viewInvoice) {
+          handleViewInvoice(result.invoice.id);
+        }
+      }
+      
+    } catch (error: any) {
+      console.error('Failed to generate bill:', error);
+      
+      // Handle duplicate invoice case
+      if (error.code === 'INVOICE_EXISTS' || error.status === 409) {
+        const existingInvoiceId = error.existingInvoiceId || error.data?.existingInvoiceId;
+        
+        if (existingInvoiceId) {
+          const userChoice = confirm(
+            `An invoice already exists for this job.\n\n` +
+            `Invoice: ${error.existingInvoiceNumber || existingInvoiceId}\n\n` +
+            `Would you like to view the existing invoice?\n\n` +
+            `Click OK to view, Cancel to stay on this page.`
+          );
+          
+          if (userChoice) {
+            handleViewInvoice(existingInvoiceId);
+            return;
+          }
+        } else {
+          alert(`An invoice already exists for this job. Please check the invoices list.`);
+        }
+      } else {
+        // Show other errors
+        alert(`Error: ${error.message || 'Failed to generate bill'}`);
+      }
+      
+      // Set error for display
+      setGenerationError(error.message || 'Failed to generate bill');
+      
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -187,35 +270,6 @@ export default function BillingPage() {
   const handleExportBill = (billId: string) => {
     console.log('Exporting bill:', billId);
     alert('Export feature will be implemented');
-  };
-
-  // Handle view invoice - Updated function with validation
-  const handleViewInvoice = (invoiceId: string) => {
-    if (!invoiceId || invoiceId === 'undefined' || invoiceId === 'null') {
-      console.error('Invalid invoice ID:', invoiceId);
-      alert('Invalid invoice ID');
-      return;
-    }
-    
-    console.log('Opening invoice:', invoiceId);
-    // Open in new tab
-    window.open(`/dashboard/management/invoices/${invoiceId}`, '_blank');
-  };
-
-  // Generate bill for specific job
-  const handleGenerateBillForJob = async (jobId: string) => {
-    try {
-      setSelectedJobId(jobId);
-      await generateConsolidatedBill(jobId);
-      
-      // Refresh data
-      await fetchBillingEntries();
-      await fetchConsolidatedBilling();
-      
-      alert('Bill generated successfully!');
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
-    }
   };
 
   // Get unique jobs from consolidated bills
@@ -612,7 +666,7 @@ export default function BillingPage() {
                               onClick={() => handleGenerateBillForJob(entry.job_id)}
                               disabled={loading}
                             >
-                              Generate Bill
+                              {loading ? 'Generating...' : 'Generate Bill'}
                             </Button>
                           )}
                         </td>

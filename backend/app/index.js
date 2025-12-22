@@ -58,7 +58,7 @@ import staffRoutes from './routes/staffRoutes.js';
 import permissionRoutes from './routes/permissionRoutes.js';
 
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
-import workforceRoutes from './routes/workforceRoutes.js';
+import workforceRoutes from './routes/workforceRoutes.js';  // KEEP ONLY THIS ONE
 import jobRoutingRoutes from './routes/jobRoutingRoutes.js';
 import fieldOperationsRoutes from './routes/fieldOperationsRoutes.js';
 import slaMonitoringRoutes from './routes/slaMonitoringRoutes.js';
@@ -227,7 +227,7 @@ app.use('/api/department-workflow', departmentWorkflowRoutes);
 app.use('/api/permissions', permissionRoutes);
 
 app.use('/api/job-assignments', jobAssignmentRoutes);
-app.use('/api/workforce', workforceRoutes);
+// REMOVED duplicate: app.use('/api', workforceRoutes);  // DELETE THIS LINE
 app.use('/api/job-routing', jobRoutingRoutes);
 app.use('/api/field-operations', fieldOperationsRoutes);
 app.use('/api/sla-monitoring', slaMonitoringRoutes);
@@ -257,6 +257,9 @@ app.use('/api/security', apiSecurityRoutes);
 app.use('/api', branchRoutes);
 app.use('/api', securityAuditRoutes);
 
+// WORKFORCE ROUTES - Register at /api/workforce prefix
+app.use('/api/workforce', workforceRoutes);
+
 // REMOVED: app.use(releaseRLSContext); - Services handle their own connection cleanup
 
 // 404 handler
@@ -284,7 +287,7 @@ app.use('*', (req, res) => {
       'DELETE /api/customers/:id',
       // Add with the other endpoints
       'GET /api/service-categories',
-      'POST /api/service-categories', 
+      'POST /api/service-categories',
       'GET /api/service-categories/:id',
       'PUT /api/service-categories/:id',
       'DELETE /api/service-categories/:id',
@@ -294,7 +297,7 @@ app.use('*', (req, res) => {
       'GET /api/customer-communications/customer/:customerId',
       'GET /api/customer-communications/:id',
       'PUT /api/customer-communications/:id',
-      'DELETE /api/customer-communications/:id',	    
+      'DELETE /api/customer-communications/:id',
       'GET /api/dashboard/overview',
       'GET /api/dashboard/financial-summary',
       'GET /api/dashboard/activity-timeline',
@@ -313,7 +316,7 @@ app.use('*', (req, res) => {
       'POST /api/api-keys',
       'GET /api/api-keys',
       'POST /api/api-keys/:apiKeyId/rotate',
-      'DELETE /api/api-keys/:apiKeyId',
+      'DELETE /api/api-key/:apiKeyId',
       'GET /api/api-keys/:apiKeyId/usage',
       'POST /api/webhooks/endpoints',
       'GET /api/webhooks/endpoints',
@@ -325,7 +328,14 @@ app.use('*', (req, res) => {
       'POST /api/integrations/:integrationId/test',
       'GET /api/integrations/:integrationId/activity-logs',
       'GET /api/security/overview',
-      'GET /api/security/analytics/usage'
+      'GET /api/security/analytics/usage',
+      // WORKFORCE ENDPOINTS
+      'GET /api/workforce/shifts',
+      'GET /api/workforce/timesheets',
+      'GET /api/workforce/performance',
+      'GET /api/workforce/availability',
+      'GET /api/workforce/payroll',
+      'GET /api/staff'  // Already working
     ]
   });
 });
