@@ -190,3 +190,54 @@ export const formatDateForChart = (dateData: any): string => {
 
 // Alternative name for backward compatibility
 export const formatDateShort = formatDateForChart;
+
+/**
+ * Format time only (hours and minutes)
+ */
+export function formatTime(dateInput: string | BackendDate | Date | null | undefined): string {
+  if (!dateInput) return 'N/A';
+
+  try {
+    let date: Date;
+
+    if (typeof dateInput === 'string') {
+      date = new Date(dateInput);
+    } else if (typeof dateInput === 'object' && dateInput !== null) {
+      if ('utc' in dateInput) {
+        date = new Date(dateInput.utc);
+      } else if (dateInput instanceof Date) {
+        date = dateInput;
+      } else {
+        return 'Invalid time';
+      }
+    } else {
+      return 'Invalid time';
+    }
+
+    if (isNaN(date.getTime())) {
+      return 'Invalid time';
+    }
+
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch (error) {
+    console.error('Time formatting error:', error);
+    return 'Invalid time';
+  }
+}
+
+/**
+ * Format date and time together
+ */
+export function formatDateTime(dateInput: string | BackendDate | Date | null | undefined): string {
+  const dateStr = formatDisplayDate(dateInput);
+  const timeStr = formatTime(dateInput);
+  
+  if (dateStr === 'N/A' || timeStr === 'N/A') return 'N/A';
+  if (dateStr.includes('Invalid') || timeStr.includes('Invalid')) return 'Invalid date/time';
+  
+  return `${dateStr} at ${timeStr}`;
+}

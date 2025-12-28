@@ -59,6 +59,9 @@ import permissionRoutes from './routes/permissionRoutes.js';
 
 import jobAssignmentRoutes from './routes/jobAssignmentRoutes.js';
 import workforceRoutes from './routes/workforceRoutes.js';  // KEEP ONLY THIS ONE
+// unified workforce, staff, department
+import unifiedEmployeeRoutes from './routes/unifiedEmployeeRoutes.js';
+
 import jobRoutingRoutes from './routes/jobRoutingRoutes.js';
 import fieldOperationsRoutes from './routes/fieldOperationsRoutes.js';
 import slaMonitoringRoutes from './routes/slaMonitoringRoutes.js';
@@ -223,6 +226,8 @@ app.use('/api/department-billing', departmentBillingRoutes);
 app.use('/api/department-performance', departmentPerformanceRoutes);
 app.use('/api/department-workflow', departmentWorkflowRoutes);
 //staff routes
+//unfied employee routes
+app.use('/api/employees', unifiedEmployeeRoutes);
 //permission routes
 app.use('/api/permissions', permissionRoutes);
 

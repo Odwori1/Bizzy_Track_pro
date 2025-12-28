@@ -362,6 +362,54 @@ export class WorkforceService {
   }
 
   /**
+   * Get all shift templates
+   */
+  static async getShiftTemplates(businessId) {
+    const client = await getClient();
+
+    try {
+      const query = `
+        SELECT 
+          id,
+          business_id,
+          name,
+          description,
+          start_time as default_start_time,
+          end_time as default_end_time,
+          break_minutes,
+          department_id,
+          required_staff_count,
+          required_skills,
+          is_premium_shift,
+          premium_rate_multiplier,
+          is_active,
+          created_at,
+          updated_at
+        FROM shift_templates 
+        WHERE business_id = $1 
+        ORDER BY name
+      `;
+
+      const result = await client.query(query, [businessId]);
+      
+      log.info('✅ Shift templates query successful', {
+        rowCount: result.rows.length,
+        businessId
+      });
+
+      return result.rows;
+    } catch (error) {
+      log.error('❌ Shift templates query failed:', {
+        error: error.message,
+        businessId
+      });
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create shift roster assignment
    */
   static async createShiftRoster(businessId, rosterData, userId) {
@@ -679,7 +727,7 @@ export class WorkforceService {
       const break_hours = timesheetData.break_hours || 0;
       const regular_rate = timesheetData.regular_rate || 0;
       const overtime_rate = timesheetData.overtime_rate || 0;
-      
+
       const total_regular_pay = regular_hours * regular_rate;
       const total_overtime_pay = overtime_hours * overtime_rate;
       const total_pay = total_regular_pay + total_overtime_pay;

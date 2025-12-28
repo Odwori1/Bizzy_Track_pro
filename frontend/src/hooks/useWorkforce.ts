@@ -1,11 +1,11 @@
 import { useState, useCallback } from 'react';
-import { 
-  StaffProfile, 
-  StaffProfileFormData, 
+import {
+  StaffProfile,
+  StaffProfileFormData,
   StaffProfileUpdateData,
   StaffProfileFilters,
-  Shift, 
-  ShiftFormData, 
+  Shift,
+  ShiftFormData,
   ShiftUpdateData,
   ShiftFilters,
   ShiftTemplate,
@@ -272,6 +272,37 @@ export const useWorkforce = () => {
     }
   }, []);
 
+  // ==================== TIME CLOCK BREAK MANAGEMENT ====================
+  const startBreak = useCallback(async (staffProfileId: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const clockEvent = await workforceApi.startBreak(staffProfileId);
+      return clockEvent;
+    } catch (err: any) {
+      setError(err.message || 'Failed to start break');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const endBreak = useCallback(async (staffProfileId: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const clockEvent = await workforceApi.endBreak(staffProfileId);
+      return clockEvent;
+    } catch (err: any) {
+      setError(err.message || 'Failed to end break');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // ==================== PERFORMANCE ====================
   const fetchPerformanceMetrics = useCallback(async (filters?: any): Promise<PerformanceMetric[]> => {
     setLoading(true);
@@ -368,41 +399,43 @@ export const useWorkforce = () => {
   return {
     loading,
     error,
-    
+
     // Staff Profiles
     fetchStaffProfiles,
     createStaffProfile,
     updateStaffProfile,
     deleteStaffProfile,
-    
+
     // Shifts
     fetchShifts,
     createShift,
     updateShift,
     deleteShift,
-    
+
     // Shift Templates
     fetchShiftTemplates,
     createShiftTemplate,
-    
+
     // Timesheets
     fetchTimesheets,
     createTimesheet,
     updateTimesheet,
-    
+
     // Time Clock
     fetchClockEvents,
     clockIn,
     clockOut,
-    
+    startBreak,
+    endBreak,
+
     // Performance
     fetchPerformanceMetrics,
     createPerformanceMetric,
-    
+
     // Availability
     fetchAvailability,
     createAvailability,
-    
+
     // Payroll
     fetchPayrollExports,
     createPayrollExport,

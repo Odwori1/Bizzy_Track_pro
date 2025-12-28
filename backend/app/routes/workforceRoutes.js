@@ -60,6 +60,13 @@ router.post(
   workforceController.createShiftTemplate
 );
 
+// ADDED: GET route for shift templates
+router.get(
+  '/shift-templates',
+  requirePermission('shifts:read'),
+  workforceController.getShiftTemplates
+);
+
 // Shift Roster Routes
 router.post(
   '/shift-rosters',
@@ -75,7 +82,13 @@ router.get(
   workforceController.getShifts
 );
 
-// Clock Event Routes
+// Clock Event Routes - FIXED: Added GET route
+router.get(
+  '/clock-events',
+  requirePermission('attendance:clock_in'),
+  workforceController.getClockEvents
+);
+
 router.post(
   '/clock-events',
   requirePermission('attendance:clock_in'),

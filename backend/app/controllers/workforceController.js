@@ -1,3 +1,4 @@
+import { getClient } from "../utils/database.js";
 import { WorkforceService } from '../services/workforceService.js';
 import { log } from '../utils/logger.js';
 
@@ -129,6 +130,27 @@ export const workforceController = {
     }
   },
 
+  async getShiftTemplates(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      log.info('Getting shift templates', { businessId });
+
+      const shiftTemplates = await WorkforceService.getShiftTemplates(businessId);
+
+      res.json({
+        success: true,
+        data: shiftTemplates,
+        count: shiftTemplates.length,
+        message: 'Shift templates fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Shift templates fetch controller error', error);
+      next(error);
+    }
+  },
+
   async createShiftRoster(req, res, next) {
     try {
       const rosterData = req.body;
@@ -152,6 +174,51 @@ export const workforceController = {
 
     } catch (error) {
       log.error('Shift roster creation controller error', error);
+      next(error);
+    }
+  },
+
+  // FIXED: Added getClockEvents method
+  async getClockEvents(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const { staff_profile_id, limit = 10 } = req.query;
+
+      const client = await getClient();
+      
+      let query = `
+        SELECT 
+          ce.*,
+          sp.employee_id,
+          u.full_name as user_full_name
+        FROM clock_events ce
+        JOIN staff_profiles sp ON ce.staff_profile_id = sp.id
+        JOIN users u ON sp.user_id = u.id
+        WHERE ce.business_id = $1
+      `;
+      
+      const params = [businessId];
+      
+      if (staff_profile_id) {
+        query += ' AND ce.staff_profile_id = $2';
+        params.push(staff_profile_id);
+      }
+      
+      query += ' ORDER BY ce.event_time DESC LIMIT $' + (params.length + 1);
+      params.push(parseInt(limit));
+
+      const result = await client.query(query, params);
+      client.release();
+
+      res.json({
+        success: true,
+        data: result.rows,
+        count: result.rows.length,
+        message: 'Clock events fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Clock events fetch controller error', error);
       next(error);
     }
   },
@@ -193,14 +260,6 @@ export const workforceController = {
         staff_profile_id,
         shift_status
       } = req.query;
-
-      // REMOVED: Manual validation - let Joi schema handle it
-      // if (!start_date || !end_date) {
-      //   return res.status(400).json({
-      //     success: false,
-      //     message: 'start_date and end_date are required'
-      //   });
-      // }
 
       const filters = {
         start_date,
