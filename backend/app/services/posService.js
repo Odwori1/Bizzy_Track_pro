@@ -228,7 +228,7 @@ export class POSService {
   }
 
   /**
-   * Get all POS transactions with accounting info
+   * Get all POS transactions with accounting info - FIXED VERSION
    */
   static async getTransactions(businessId, filters = {}) {
     const client = await getClient();
@@ -241,14 +241,14 @@ export class POSService {
           c.phone as customer_phone,
           u.full_name as created_by_name,
           COUNT(pti.id) as item_count,
-          -- Accounting info (FIXED: added ::text cast)
+          -- Accounting info: journal_entries.reference_id is VARCHAR, so cast UUID to text
           (SELECT COUNT(*) FROM journal_entries je
            WHERE je.reference_type = 'pos_transaction'
            AND je.reference_id = pt.id::text) as accounting_entries_count,
-          -- COGS info (FIXED: added ::text cast)
+          -- COGS info: inventory_transactions.reference_id is UUID, so NO cast needed
           (SELECT COALESCE(SUM(it.total_cost), 0) FROM inventory_transactions it
            WHERE it.reference_type = 'pos_transaction'
-           AND it.reference_id = pt.id::text) as total_cogs
+           AND it.reference_id = pt.id) as total_cogs
         FROM pos_transactions pt
         LEFT JOIN customers c ON pt.customer_id = c.id
         LEFT JOIN users u ON pt.created_by = u.id
@@ -313,7 +313,11 @@ export class POSService {
         params.push(offset);
       }
 
-      log.info('🗄️ Database Query - getTransactions:', { query: queryStr, params });
+      log.info('🗄️ Database Query - getTransactions (FIXED):', { 
+        query: queryStr, 
+        params,
+        fixes: 'Corrected UUID/TEXT casting for journal_entries vs inventory_transactions' 
+      });
 
       const result = await client.query(queryStr, params);
 
@@ -328,9 +332,11 @@ export class POSService {
         };
       });
 
-      log.info('✅ POS transactions query successful', {
+      log.info('✅ POS transactions query successful (FIXED)', {
         rowCount: transactionsWithProfit.length,
-        businessId
+        businessId,
+        accountingEntriesFound: transactionsWithProfit[0]?.accounting_entries_count || 0,
+        totalCogsCalculated: transactionsWithProfit.reduce((sum, t) => sum + (parseFloat(t.total_cogs) || 0), 0)
       });
 
       return transactionsWithProfit;
@@ -338,7 +344,8 @@ export class POSService {
       log.error('❌ POS transactions query failed:', {
         error: error.message,
         businessId,
-        filters
+        filters,
+        note: 'Check UUID/TEXT casting in subqueries'
       });
       throw error;
     } finally {
@@ -347,7 +354,7 @@ export class POSService {
   }
 
   /**
-   * Get POS transaction by ID with complete accounting info
+   * Get POS transaction by ID with complete accounting info - FIXED VERSION
    */
   static async getTransactionById(businessId, transactionId) {
     const client = await getClient();
@@ -403,7 +410,7 @@ export class POSService {
       const itemsResult = await client.query(itemsQuery, [businessId, transactionId]);
       transaction.items = itemsResult.rows;
 
-      // Get journal entries for this transaction (FIXED: added ::text cast)
+      // Get journal entries for this transaction - FIXED: pt.id needs ::text cast for VARCHAR reference_id
       const journalEntriesQuery = `
         SELECT
           je.*,
@@ -423,7 +430,7 @@ export class POSService {
         LEFT JOIN chart_of_accounts ca ON jel.account_id = ca.id
         WHERE je.business_id = $1
           AND je.reference_type = 'pos_transaction'
-          AND je.reference_id = $2::text
+          AND je.reference_id = $2::text  -- FIXED: transactionId parameter needs ::text cast
         GROUP BY je.id
         ORDER BY je.created_at
       `;
@@ -431,24 +438,24 @@ export class POSService {
       const journalEntriesResult = await client.query(journalEntriesQuery, [businessId, transactionId]);
       transaction.journal_entries = journalEntriesResult.rows;
 
-      // Get inventory transactions (FIXED: added ::text cast)
+      // Get inventory transactions - FIXED: NO ::text cast needed for UUID reference_id
       const inventoryTransactionsQuery = `
         SELECT it.*, ii.name as item_name, ii.sku
         FROM inventory_transactions it
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
         WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
-          AND it.reference_id = $2::text
+          AND it.reference_id = $2  -- FIXED: NO ::text cast - reference_id is UUID
         ORDER BY it.created_at
       `;
 
       const inventoryTransactionsResult = await client.query(
         inventoryTransactionsQuery,
-        [businessId, transactionId]
+        [businessId, transactionId]  // transactionId is UUID, matches reference_id UUID type
       );
       transaction.inventory_transactions = inventoryTransactionsResult.rows;
 
-      // Calculate accounting summary (will be fixed in transactionAccountingService.js)
+      // Calculate accounting summary
       try {
         transaction.accounting_summary = await TransactionAccountingService.getTransactionAccountingSummary(
           businessId,
@@ -462,12 +469,13 @@ export class POSService {
         };
       }
 
-      log.info('✅ POS transaction query successful', {
+      log.info('✅ POS transaction query successful (FIXED)', {
         transactionId,
         businessId,
         itemCount: transaction.items.length,
         journalEntryCount: transaction.journal_entries.length,
-        inventoryTransactionCount: transaction.inventory_transactions.length
+        inventoryTransactionCount: transaction.inventory_transactions.length,
+        castingFix: 'Applied correct UUID/TEXT casts per schema'
       });
 
       return transaction;
@@ -475,7 +483,8 @@ export class POSService {
       log.error('❌ POS transaction query failed:', {
         error: error.message,
         businessId,
-        transactionId
+        transactionId,
+        note: 'Check journal_entries vs inventory_transactions reference_id types'
       });
       throw error;
     } finally {
@@ -522,7 +531,7 @@ export class POSService {
             new_status: newStatus,
             trigger: 'trigger_auto_pos_accounting'
           });
-          
+
         } catch (accountingError) {
           log.error('Failed to process reversal:', accountingError);
           // Continue with voiding even if accounting notification fails
@@ -590,7 +599,7 @@ export class POSService {
   }
 
   /**
-   * Delete POS transaction (only if no accounting entries)
+   * Delete POS transaction (only if no accounting entries) - FIXED VERSION
    */
   static async deleteTransaction(businessId, transactionId, userId) {
     const client = await getClient();
@@ -610,11 +619,11 @@ export class POSService {
 
       const transaction = currentTransaction.rows[0];
 
-      // Check if transaction has accounting entries (FIXED: added ::text cast)
+      // Check if transaction has accounting entries - FIXED: journal_entries.reference_id is VARCHAR
       const accountingCheck = await client.query(
         `SELECT COUNT(*) as count FROM journal_entries
          WHERE reference_type = 'pos_transaction' AND reference_id = $1::text`,
-        [transactionId]
+        [transactionId]  // Needs ::text cast for VARCHAR comparison
       );
 
       if (parseInt(accountingCheck.rows[0].count) > 0) {
@@ -627,10 +636,10 @@ export class POSService {
         [businessId, transactionId]
       );
 
-      // Delete any inventory transactions (FIXED: added ::text cast)
+      // Delete any inventory transactions - FIXED: NO ::text cast needed
       await client.query(
-        `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2::text AND reference_type = 'pos_transaction'`,
-        [businessId, transactionId]
+        `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2 AND reference_type = 'pos_transaction'`,
+        [businessId, transactionId]  // NO ::text cast - reference_id is UUID
       );
 
       // Delete the transaction
@@ -654,10 +663,11 @@ export class POSService {
 
       await client.query('COMMIT');
 
-      log.info('✅ POS transaction deleted successfully', {
+      log.info('✅ POS transaction deleted successfully (FIXED)', {
         transactionId,
         businessId,
-        userId
+        userId,
+        castingFix: 'Applied correct UUID/TEXT casts for journal_entries check'
       });
 
       return { success: true, message: 'Transaction deleted successfully' };
@@ -666,7 +676,8 @@ export class POSService {
       log.error('❌ POS transaction deletion failed:', {
         error: error.message,
         businessId,
-        transactionId
+        transactionId,
+        note: 'Check journal_entries reference_id VARCHAR vs UUID casting'
       });
       throw error;
     } finally {
@@ -675,7 +686,7 @@ export class POSService {
   }
 
   /**
-   * Get POS sales analytics with COGS and gross profit
+   * Get POS sales analytics with COGS and gross profit - FIXED VERSION
    */
   static async getSalesAnalytics(businessId, startDate = null, endDate = null) {
     const client = await getClient();
@@ -684,11 +695,12 @@ export class POSService {
       const queryStr = `
         SELECT
           sa.*,
-          -- Add COGS and gross profit
+          -- Add COGS and gross profit - FIXED: inventory_transactions.reference_id is UUID
           (SELECT COALESCE(SUM(it.total_cost), 0)
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.transaction_type = 'sale'
+             AND it.reference_type = 'pos_transaction'
              AND ($2::timestamp IS NULL OR it.created_at >= $2)
              AND ($3::timestamp IS NULL OR it.created_at <= $3)) as total_cogs,
           sa.total_sales -
@@ -696,6 +708,7 @@ export class POSService {
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.transaction_type = 'sale'
+             AND it.reference_type = 'pos_transaction'
              AND ($2::timestamp IS NULL OR it.created_at >= $2)
              AND ($3::timestamp IS NULL OR it.created_at <= $3)) as gross_profit
         FROM get_sales_analytics($1, $2, $3) sa
@@ -703,7 +716,11 @@ export class POSService {
 
       const params = [businessId, startDate, endDate];
 
-      log.info('🗄️ Database Query - getSalesAnalytics:', { query: queryStr, params });
+      log.info('🗄️ Database Query - getSalesAnalytics (FIXED):', { 
+        query: queryStr, 
+        params,
+        fixes: 'Added reference_type filter for inventory_transactions' 
+      });
 
       const result = await client.query(queryStr, params);
       const analytics = result.rows[0] || {};
@@ -717,7 +734,7 @@ export class POSService {
         analytics.cogs_percentage = 0;
       }
 
-      log.info('✅ POS sales analytics query successful', {
+      log.info('✅ POS sales analytics query successful (FIXED)', {
         businessId,
         total_sales: analytics.total_sales,
         total_cogs: analytics.total_cogs,
@@ -738,7 +755,7 @@ export class POSService {
   }
 
   /**
-   * Get today's sales summary with accounting metrics
+   * Get today's sales summary with accounting metrics - FIXED VERSION
    */
   static async getTodaySales(businessId) {
     const client = await getClient();
@@ -750,7 +767,7 @@ export class POSService {
           COALESCE(SUM(pt.final_amount), 0) as total_sales,
           COALESCE(AVG(pt.final_amount), 0) as average_transaction,
           COUNT(DISTINCT pt.customer_id) as customer_count,
-          -- COGS for today
+          -- COGS for today - FIXED: inventory_transactions.reference_id is UUID
           COALESCE(SUM(it.total_cost), 0) as total_cogs,
           COALESCE(SUM(pt.final_amount), 0) - COALESCE(SUM(it.total_cost), 0) as gross_profit,
           -- Payment methods
@@ -758,7 +775,7 @@ export class POSService {
           COUNT(*) FILTER (WHERE pt.payment_method = 'card') as card_count,
           COUNT(*) FILTER (WHERE pt.payment_method = 'mobile_money') as mobile_money_count
         FROM pos_transactions pt
-        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id
+        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id  -- FIXED: NO ::text cast
           AND it.reference_type = 'pos_transaction'
           AND it.transaction_type = 'sale'
         WHERE pt.business_id = $1
@@ -766,7 +783,11 @@ export class POSService {
           AND DATE(pt.transaction_date) = CURRENT_DATE
       `;
 
-      log.info('🗄️ Database Query - getTodaySales:', { query: queryStr, params: [businessId] });
+      log.info('🗄️ Database Query - getTodaySales (FIXED):', { 
+        query: queryStr, 
+        params: [businessId],
+        fixes: 'Removed ::text cast from inventory_transactions JOIN' 
+      });
 
       const result = await client.query(queryStr, [businessId]);
       const todaySales = result.rows[0] || {};
@@ -780,11 +801,12 @@ export class POSService {
         todaySales.cogs_percentage = 0;
       }
 
-      log.info('✅ Today sales query successful', {
+      log.info('✅ Today sales query successful (FIXED)', {
         businessId,
         total_sales: todaySales.total_sales,
         total_cogs: todaySales.total_cogs,
-        gross_profit: todaySales.gross_profit
+        gross_profit: todaySales.gross_profit,
+        castingFix: 'Correct UUID comparison for inventory_transactions'
       });
 
       return todaySales;

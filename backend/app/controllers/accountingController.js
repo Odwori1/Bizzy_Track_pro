@@ -8,8 +8,153 @@ import { log } from '../utils/logger.js';
 /**
  * ACCOUNTING CONTROLLER
  * UPDATED TO WORK WITH ACCOUNTING VALIDATION MIDDLEWARE
+ * ADDED: POS transaction processing endpoints
  */
 export class AccountingController {
+  /**
+   * Process accounting for a POS transaction
+   */
+  static async processPosAccounting(req, res) {
+    try {
+      const { transactionId } = req.body;
+      const userId = req.user.userId || req.user.id;
+      const businessId = req.user.businessId || req.user.business_id;
+      
+      if (!transactionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Transaction ID is required'
+        });
+      }
+      
+      log.info('Processing POS transaction accounting', {
+        transactionId,
+        userId,
+        businessId
+      });
+      
+      const result = await AccountingService.processPosAccounting(transactionId, userId);
+      
+      // Log audit trail
+      if (result.success) {
+        await auditLogger.logAction({
+          businessId,
+          userId,
+          action: 'accounting.pos_transaction.processed',
+          resourceType: 'pos_transaction',
+          resourceId: transactionId,
+          newValues: {
+            journal_entry_id: result.journalEntryId,
+            lines_created: result.linesCreated
+          }
+        });
+      }
+      
+      return res.json({
+        success: result.success,
+        message: result.message,
+        data: {
+          journalEntryId: result.journalEntryId,
+          linesCreated: result.linesCreated
+        }
+      });
+      
+    } catch (error) {
+      log.error('POS accounting controller error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error processing accounting',
+        details: error.message
+      });
+    }
+  }
+  
+  /**
+   * Repair missing accounting entries
+   */
+  static async repairMissingAccounting(req, res) {
+    try {
+      // Check permissions - only owner/admin can repair
+      if (!['owner', 'admin'].includes(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Permission denied. Only owners and admins can repair accounting.'
+        });
+      }
+      
+      const { limit = 100 } = req.body;
+      const userId = req.user.userId || req.user.id;
+      const businessId = req.user.businessId || req.user.business_id;
+      
+      log.info('Repairing missing accounting entries', {
+        userId,
+        businessId,
+        limit
+      });
+      
+      const result = await AccountingService.repairMissingAccounting(userId, limit);
+      
+      // Log audit trail
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'accounting.repair_processed',
+        resourceType: 'system',
+        resourceId: null,
+        newValues: {
+          transactions_processed: result.transactions.length,
+          limit
+        }
+      });
+      
+      return res.json({
+        success: result.success,
+        message: result.message,
+        data: {
+          transactions: result.transactions
+        }
+      });
+      
+    } catch (error) {
+      log.error('Repair accounting controller error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error repairing accounting',
+        details: error.message
+      });
+    }
+  }
+  
+  /**
+   * Get accounting processing statistics
+   */
+  static async getAccountingStats(req, res) {
+    try {
+      const businessId = req.user.businessId || req.user.business_id;
+      
+      log.info('Getting accounting statistics', { businessId });
+      
+      const result = await AccountingService.getAccountingStats(businessId);
+      
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+      
+      return res.json({
+        success: true,
+        data: result.stats
+      });
+      
+    } catch (error) {
+      log.error('Accounting stats controller error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error getting accounting stats',
+        details: error.message
+      });
+    }
+  }
+
   /**
    * Get all journal entries with filters
    */
@@ -501,7 +646,8 @@ export class AccountingController {
           timestamp: new Date().toISOString(),
           status: 'Accounting controller is operational',
           schema: 'Uses line_type matching actual database',
-          validation: 'Using accounting-specific validation middleware'
+          validation: 'Using accounting-specific validation middleware',
+          features: 'Added POS transaction accounting processing'
         },
         message: 'Accounting system is working correctly'
       });

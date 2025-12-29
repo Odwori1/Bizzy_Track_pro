@@ -2,6 +2,7 @@
 import express from 'express';
 import { AccountingController } from '../controllers/accountingController.js';
 import { validateRequest } from '../middleware/validation.js';
+import { AccountingService } from '../services/accountingService.js';
 import { validateAccountingRequest } from '../middleware/accountingValidation.js';
 import { AccountingSchemas } from '../schemas/accountingSchemas.js';
 
@@ -103,7 +104,7 @@ router.get('/health', AccountingController.testController);
 
 /**
  * @route   GET /api/accounting/transaction/:transaction_id
- * @desc    Get accounting details for a transaction (NEW ENDPOINT)
+ * @desc    Get accounting details for a transaction
  * @access  Private
  */
 router.get('/transaction/:transaction_id', (req, res) => {
@@ -123,5 +124,109 @@ router.get(
   '/profit-loss',
   AccountingController.getProfitLoss
 );
+
+/**
+ * @route   POST /api/accounting/process-pos
+ * @desc    Process accounting for POS transaction
+ * @access  Private
+ */
+router.post('/process-pos', async (req, res) => {
+  try {
+    const { transactionId } = req.body;
+    const userId = req.user.userId || req.user.id;
+    const businessId = req.user.businessId || req.user.business_id;
+    
+    if (!transactionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction ID is required'
+      });
+    }
+    
+    const result = await AccountingService.processPosAccounting(transactionId, userId);
+    
+    res.json({
+      success: result.success,
+      message: result.message,
+      data: {
+        journalEntryId: result.journalEntryId,
+        linesCreated: result.linesCreated
+      }
+    });
+    
+  } catch (error) {
+    console.error('POS accounting API error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error processing accounting'
+    });
+  }
+});
+
+/**
+ * @route   POST /api/accounting/repair
+ * @desc    Repair missing accounting entries
+ * @access  Private (Admin/Owner only)
+ */
+router.post('/repair', async (req, res) => {
+  try {
+    // Check permissions - only owner/admin can repair
+    if (!['owner', 'admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Permission denied'
+      });
+    }
+    
+    const { limit = 100 } = req.body;
+    const userId = req.user.userId || req.user.id;
+    
+    const result = await AccountingService.repairMissingAccounting(userId, limit);
+    
+    res.json({
+      success: result.success,
+      message: result.message,
+      data: {
+        transactions: result.transactions
+      }
+    });
+    
+  } catch (error) {
+    console.error('Repair API error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error repairing accounting'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/accounting/stats
+ * @desc    Get accounting processing statistics
+ * @access  Private
+ */
+router.get('/stats', async (req, res) => {
+  try {
+    const businessId = req.user.businessId || req.user.business_id;
+    
+    const result = await AccountingService.getAccountingStats(businessId);
+    
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+    
+    res.json({
+      success: true,
+      data: result.stats
+    });
+    
+  } catch (error) {
+    console.error('Stats API error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting accounting stats'
+    });
+  }
+});
 
 export default router;

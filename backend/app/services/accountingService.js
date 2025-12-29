@@ -6,6 +6,7 @@ import { log } from '../utils/logger.js';
 /**
  * GAAP-COMPLIANT ACCOUNTING SERVICE
  * FIXED: Schema mismatch - removed created_by from journal_entry_lines
+ * UPDATED: Added POS transaction accounting processing
  */
 export class AccountingService {
   /**
@@ -26,6 +27,102 @@ export class AccountingService {
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
+  }
+
+  /**
+   * Process accounting for a POS transaction
+   * @param {string} transactionId - POS transaction ID
+   * @param {string} userId - User ID who initiated
+   * @returns {Promise<Object>} Processing result
+   */
+  static async processPosAccounting(transactionId, userId) {
+    const client = await getClient();
+    
+    try {
+      const result = await client.query(`
+        SELECT * FROM process_pos_accounting_safe($1, $2)
+      `, [transactionId, userId]);
+      
+      return {
+        success: result.rows[0].success,
+        message: result.rows[0].message,
+        journalEntryId: result.rows[0].journal_entry_id,
+        linesCreated: result.rows[0].lines_created
+      };
+      
+    } catch (error) {
+      log.error('Accounting processing error:', error);
+      return {
+        success: false,
+        message: `Accounting processing failed: ${error.message}`,
+        journalEntryId: null,
+        linesCreated: 0
+      };
+    } finally {
+      client.release();
+    }
+  }
+  
+  /**
+   * Repair missing accounting entries
+   * @param {string} userId - User ID
+   * @param {number} limit - Max transactions to process
+   * @returns {Promise<Array>} Repair results
+   */
+  static async repairMissingAccounting(userId, limit = 100) {
+    const client = await getClient();
+    
+    try {
+      const result = await client.query(`
+        SELECT * FROM repair_missing_pos_accounting($1, $2)
+      `, [userId, limit]);
+      
+      return {
+        success: true,
+        message: `Processed ${result.rows.length} transactions`,
+        transactions: result.rows
+      };
+      
+    } catch (error) {
+      log.error('Repair processing error:', error);
+      return {
+        success: false,
+        message: `Repair failed: ${error.message}`,
+        transactions: []
+      };
+    } finally {
+      client.release();
+    }
+  }
+  
+  /**
+   * Get accounting processing statistics
+   * @param {string} businessId - Business ID
+   * @returns {Promise<Object>} Statistics
+   */
+  static async getAccountingStats(businessId) {
+    const client = await getClient();
+    
+    try {
+      const result = await client.query(`
+        SELECT * FROM get_accounting_processing_stats($1)
+      `, [businessId]);
+      
+      return {
+        success: true,
+        stats: result.rows[0]
+      };
+      
+    } catch (error) {
+      log.error('Stats retrieval error:', error);
+      return {
+        success: false,
+        message: `Failed to get stats: ${error.message}`,
+        stats: null
+      };
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -496,10 +593,10 @@ export class AccountingService {
       const totalRevenue = revenueResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
       const totalCOGS = cogsResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
       const totalOperatingExpenses = operatingExpensesResult.rows.reduce((sum, row) => sum + parseFloat(row.amount), 0);
-      
+
       const grossProfit = totalRevenue - totalCOGS;
       const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) : 0;
-      
+
       const netProfit = grossProfit - totalOperatingExpenses;
       const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) : 0;
 
