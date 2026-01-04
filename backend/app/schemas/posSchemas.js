@@ -9,7 +9,7 @@ export const createPOSTransactionSchema = Joi.object({
   final_amount: Joi.number().precision(2).min(0).required(),
   payment_method: Joi.string().valid('cash', 'card', 'mobile_money', 'credit', 'multiple').required(),
   payment_status: Joi.string().valid('pending', 'completed', 'failed', 'refunded').default('completed'),
-  status: Joi.string().valid('active', 'void', 'refunded').default('completed'),
+  status: Joi.string().valid('pending', 'completed', 'cancelled', 'refunded').default('completed'),
   notes: Joi.string().max(1000).optional().allow(''),
   items: Joi.array().items(
     Joi.object({
@@ -30,7 +30,7 @@ export const createPOSTransactionSchema = Joi.object({
 export const updatePOSTransactionSchema = Joi.object({
   customer_id: Joi.string().uuid().optional().allow(null),
   payment_status: Joi.string().valid('pending', 'completed', 'failed', 'refunded').optional(),
-  status: Joi.string().valid('active', 'void', 'refunded').optional(),
+  status: Joi.string().valid('pending', 'completed', 'cancelled', 'refunded').optional(),
   notes: Joi.string().max(1000).optional().allow('')
 });
 
@@ -38,7 +38,7 @@ export const posQuerySchema = Joi.object({
   customer_id: Joi.string().uuid().optional(),
   payment_method: Joi.string().valid('cash', 'card', 'mobile_money', 'credit', 'multiple').optional(),
   payment_status: Joi.string().valid('pending', 'completed', 'failed', 'refunded').optional(),
-  status: Joi.string().valid('active', 'void', 'refunded').optional(),
+  status: Joi.string().valid('pending', 'completed', 'cancelled', 'refunded').optional(),
   start_date: Joi.date().optional(),
   end_date: Joi.date().optional(),
   page: Joi.number().integer().min(1).default(1),

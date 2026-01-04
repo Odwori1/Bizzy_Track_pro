@@ -3,6 +3,7 @@ import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
 import { TransactionAccountingService } from './transactionAccountingService.js';
 import { InventorySyncService } from './inventorySyncService.js';
+import { AccountingService } from './accountingService.js';
 
 export class POSService {
   /**
@@ -76,14 +77,15 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 2: CREATE POS TRANSACTION
+      // STEP 2: CREATE POS TRANSACTION (WITH accounting_processed = FALSE)
       // ========================================================================
       const transactionResult = await client.query(
         `INSERT INTO pos_transactions (
           business_id, transaction_number, customer_id, transaction_date,
           total_amount, tax_amount, discount_amount, final_amount,
-          payment_method, payment_status, status, notes, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          payment_method, payment_status, status, notes, created_by,
+          accounting_processed, accounting_error
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING *`,
         [
           businessId,
@@ -98,7 +100,9 @@ export class POSService {
           transactionData.payment_status || 'completed',
           transactionData.status || 'completed',
           transactionData.notes || '',
-          userId
+          userId,
+          false,  // accounting_processed = false initially
+          null    // accounting_error = null initially
         ]
       );
 
@@ -133,34 +137,7 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 4: DATABASE TRIGGER HANDLES ACCOUNTING - NO JAVASCRIPT CALLS
-      // ========================================================================
-      log.info('Accounting will be created by database trigger', {
-        transaction_id: transaction.id,
-        trigger: 'trigger_auto_pos_accounting',
-        status: transaction.status // Must be 'completed' for trigger
-      });
-
-      // Optional: Verify trigger fired
-      setTimeout(async () => {
-        try {
-          const checkResult = await client.query(
-            'SELECT COUNT(*) as entry_count FROM journal_entries WHERE reference_id = $1::text',
-            [transaction.id]
-          );
-          if (parseInt(checkResult.rows[0].entry_count) > 0) {
-            log.info('✅ Database trigger created accounting entries', {
-              transaction_id: transaction.id,
-              entry_count: checkResult.rows[0].entry_count
-            });
-          }
-        } catch (checkError) {
-          log.warn('Could not verify accounting creation:', checkError.message);
-        }
-      }, 1000); // Check after 1 second
-
-      // ========================================================================
-      // STEP 5: HANDLE EQUIPMENT HIRE IF PRESENT
+      // STEP 4: HANDLE EQUIPMENT HIRE IF PRESENT
       // ========================================================================
       const equipmentItems = processedItems.filter(item => item.item_type === 'equipment_hire');
       if (equipmentItems.length > 0) {
@@ -174,7 +151,7 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 6: AUDIT LOG
+      // STEP 5: AUDIT LOG FOR TRANSACTION CREATION
       // ========================================================================
       await auditLogger.logAction({
         businessId,
@@ -188,39 +165,157 @@ export class POSService {
           payment_method: transaction.payment_method,
           item_count: processedItems.length,
           inventory_items_count: processedItems.filter(item => item.inventory_item_id).length,
-          accounting_method: 'database_trigger',
-          equipment_items_count: equipmentItems.length
+          equipment_items_count: equipmentItems.length,
+          accounting_processed: false // Initial state
         }
       });
 
+      // ========================================================================
+      // STEP 6: COMMIT THE TRANSACTION BEFORE ACCOUNTING
+      // ========================================================================
       await client.query('COMMIT');
 
+      log.info('✅ POS transaction committed, starting accounting process', {
+        transactionId: transaction.id,
+        businessId
+      });
+
       // ========================================================================
-      // STEP 7: RETURN RESPONSE
+      // STEP 7: PROCESS ACCOUNTING (WITH SEPARATE CONNECTION - NOW SAFE)
+      // ========================================================================
+      let accountingResult;
+      try {
+        accountingResult = await AccountingService.processPosAccounting(
+          transaction.id,
+          userId
+        );
+
+        if (accountingResult?.success === true) {
+          log.info('✅ Accounting created successfully', {
+            transactionId: transaction.id,
+            linesCreated: accountingResult.linesCreated
+          });
+          
+          // ========================================================================
+          // CRITICAL FIX: UPDATE accounting_processed FLAG
+          // ========================================================================
+          const updateClient = await getClient();
+          try {
+            await updateClient.query(
+              `UPDATE pos_transactions 
+               SET accounting_processed = true, 
+                   accounting_error = NULL,
+                   updated_at = NOW()
+               WHERE id = $1 AND business_id = $2`,
+              [transaction.id, businessId]
+            );
+            
+            log.info('✅ Updated accounting_processed flag to true', {
+              transactionId: transaction.id
+            });
+          } finally {
+            updateClient.release();
+          }
+        } else {
+          log.warn('⚠️ Accounting not created', {
+            transactionId: transaction.id,
+            reason: accountingResult?.message || 'Unknown reason'
+          });
+          
+          // Update with error if accounting failed
+          const updateClient = await getClient();
+          try {
+            await updateClient.query(
+              `UPDATE pos_transactions 
+               SET accounting_error = $1,
+                   updated_at = NOW()
+               WHERE id = $2 AND business_id = $3`,
+              [accountingResult?.message || 'Accounting processing failed', 
+               transaction.id, businessId]
+            );
+            
+            log.warn('⚠️ Updated accounting_error with failure message', {
+              transactionId: transaction.id,
+              error: accountingResult?.message
+            });
+          } finally {
+            updateClient.release();
+          }
+        }
+      } catch (accountingError) {
+        log.error('❌ Accounting processing error:', {
+          transactionId: transaction.id,
+          error: accountingError.message
+        });
+        
+        // Update with error even if the service call itself failed
+        const updateClient = await getClient();
+        try {
+          await updateClient.query(
+            `UPDATE pos_transactions 
+             SET accounting_error = $1,
+                 updated_at = NOW()
+             WHERE id = $2 AND business_id = $3`,
+            [`Accounting service error: ${accountingError.message}`, 
+             transaction.id, businessId]
+          );
+        } finally {
+          updateClient.release();
+        }
+        
+        // Don't fail the transaction if accounting fails
+        accountingResult = {
+          success: false,
+          message: `Accounting processing error: ${accountingError.message}`,
+          linesCreated: 0
+        };
+      }
+
+      // ========================================================================
+      // STEP 8: RETURN RESPONSE WITH UPDATED FIELDS
       // ========================================================================
       const response = {
         ...transaction,
         items: processedItems,
         accounting_info: {
-          method: 'database_trigger',
-          trigger: 'trigger_auto_pos_accounting',
-          status: 'pending_creation',
-          note: 'Accounting entries being created by database trigger',
+          method: 'manual_service',
+          status: accountingResult?.success === true ? 'created' : 'failed',
+          entries_created: accountingResult?.linesCreated || 0,
+          note: accountingResult?.success === true
+            ? 'Accounting entries created successfully'
+            : accountingResult?.message || 'Accounting creation failed',
           verify_with: `SELECT * FROM journal_entries WHERE reference_id = '${transaction.id}'::text`
         }
       };
 
-      log.info('✅ POS transaction created successfully', {
+      // Fetch the latest transaction state with accounting flags
+      const finalClient = await getClient();
+      try {
+        const finalState = await finalClient.query(
+          'SELECT accounting_processed, accounting_error FROM pos_transactions WHERE id = $1',
+          [transaction.id]
+        );
+        if (finalState.rows.length > 0) {
+          response.accounting_processed = finalState.rows[0].accounting_processed;
+          response.accounting_error = finalState.rows[0].accounting_error;
+        }
+      } finally {
+        finalClient.release();
+      }
+
+      log.info('✅ POS transaction completed successfully', {
         transactionId: transaction.id,
         businessId,
-        accounting_method: 'database_trigger'
+        accounting_processed: response.accounting_processed,
+        accounting_success: accountingResult?.success === true,
+        lines_created: accountingResult?.linesCreated || 0
       });
 
       return response;
 
     } catch (error) {
       await client.query('ROLLBACK');
-      log.error('POS transaction creation failed:', error);
+      log.error('❌ POS transaction creation failed:', error);
       throw error;
     } finally {
       client.release();
@@ -234,8 +329,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      let queryStr = `
-        SELECT
+      let queryStr =
+        `SELECT
           pt.*,
           CONCAT(c.first_name, ' ', c.last_name) as customer_name,
           c.phone as customer_phone,
@@ -253,8 +348,7 @@ export class POSService {
         LEFT JOIN customers c ON pt.customer_id = c.id
         LEFT JOIN users u ON pt.created_by = u.id
         LEFT JOIN pos_transaction_items pti ON pt.id = pti.pos_transaction_id
-        WHERE pt.business_id = $1
-      `;
+        WHERE pt.business_id = $1`;
       const params = [businessId];
       let paramCount = 1;
 
@@ -313,10 +407,10 @@ export class POSService {
         params.push(offset);
       }
 
-      log.info('🗄️ Database Query - getTransactions (FIXED):', { 
-        query: queryStr, 
+      log.info('🗄️ Database Query - getTransactions (FIXED):', {
+        query: queryStr,
         params,
-        fixes: 'Corrected UUID/TEXT casting for journal_entries vs inventory_transactions' 
+        fixes: 'Corrected UUID/TEXT casting for journal_entries vs inventory_transactions'
       });
 
       const result = await client.query(queryStr, params);
@@ -360,8 +454,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      const transactionQuery = `
-        SELECT
+      const transactionQuery =
+        `SELECT
           pt.*,
           CONCAT(c.first_name, ' ', c.last_name) as customer_name,
           c.phone as customer_phone,
@@ -370,8 +464,7 @@ export class POSService {
         FROM pos_transactions pt
         LEFT JOIN customers c ON pt.customer_id = c.id
         LEFT JOIN users u ON pt.created_by = u.id
-        WHERE pt.business_id = $1 AND pt.id = $2
-      `;
+        WHERE pt.business_id = $1 AND pt.id = $2`;
 
       const transactionResult = await client.query(transactionQuery, [businessId, transactionId]);
 
@@ -382,8 +475,8 @@ export class POSService {
       const transaction = transactionResult.rows[0];
 
       // Get transaction items
-      const itemsQuery = `
-        SELECT
+      const itemsQuery =
+        `SELECT
           pti.*,
           COALESCE(p.name, ii.name, s.name, fa.asset_name, pti.item_name) as item_display_name,
           fa.asset_name as equipment_name,
@@ -404,15 +497,14 @@ export class POSService {
         LEFT JOIN fixed_assets fa ON ea.asset_id = fa.id
         LEFT JOIN equipment_hire_bookings ebb ON pti.booking_id = ebb.id
         WHERE pti.business_id = $1 AND pti.pos_transaction_id = $2
-        ORDER BY pti.created_at
-      `;
+        ORDER BY pti.created_at`;
 
       const itemsResult = await client.query(itemsQuery, [businessId, transactionId]);
       transaction.items = itemsResult.rows;
 
       // Get journal entries for this transaction - FIXED: pt.id needs ::text cast for VARCHAR reference_id
-      const journalEntriesQuery = `
-        SELECT
+      const journalEntriesQuery =
+        `SELECT
           je.*,
           json_agg(json_build_object(
             'id', jel.id,
@@ -432,22 +524,20 @@ export class POSService {
           AND je.reference_type = 'pos_transaction'
           AND je.reference_id = $2::text  -- FIXED: transactionId parameter needs ::text cast
         GROUP BY je.id
-        ORDER BY je.created_at
-      `;
+        ORDER BY je.created_at`;
 
       const journalEntriesResult = await client.query(journalEntriesQuery, [businessId, transactionId]);
       transaction.journal_entries = journalEntriesResult.rows;
 
       // Get inventory transactions - FIXED: NO ::text cast needed for UUID reference_id
-      const inventoryTransactionsQuery = `
-        SELECT it.*, ii.name as item_name, ii.sku
+      const inventoryTransactionsQuery =
+        `SELECT it.*, ii.name as item_name, ii.sku
         FROM inventory_transactions it
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
         WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
           AND it.reference_id = $2  -- FIXED: NO ::text cast - reference_id is UUID
-        ORDER BY it.created_at
-      `;
+        ORDER BY it.created_at`;
 
       const inventoryTransactionsResult = await client.query(
         inventoryTransactionsQuery,
@@ -564,12 +654,11 @@ export class POSService {
       paramCount++;
       updateValues.push(businessId);
 
-      const updateQuery = `
-        UPDATE pos_transactions
+      const updateQuery =
+        `UPDATE pos_transactions
         SET ${updateFields.join(', ')}
         WHERE id = $${paramCount - 1} AND business_id = $${paramCount}
-        RETURNING *
-      `;
+        RETURNING *`;
 
       log.info('🗄️ Database Query - updateTransaction:', { query: updateQuery, params: updateValues });
 
@@ -692,8 +781,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      const queryStr = `
-        SELECT
+      const queryStr =
+        `SELECT
           sa.*,
           -- Add COGS and gross profit - FIXED: inventory_transactions.reference_id is UUID
           (SELECT COALESCE(SUM(it.total_cost), 0)
@@ -711,15 +800,14 @@ export class POSService {
              AND it.reference_type = 'pos_transaction'
              AND ($2::timestamp IS NULL OR it.created_at >= $2)
              AND ($3::timestamp IS NULL OR it.created_at <= $3)) as gross_profit
-        FROM get_sales_analytics($1, $2, $3) sa
-      `;
+        FROM get_sales_analytics($1, $2, $3) sa`;
 
       const params = [businessId, startDate, endDate];
 
-      log.info('🗄️ Database Query - getSalesAnalytics (FIXED):', { 
-        query: queryStr, 
+      log.info('🗄️ Database Query - getSalesAnalytics (FIXED):', {
+        query: queryStr,
         params,
-        fixes: 'Added reference_type filter for inventory_transactions' 
+        fixes: 'Added reference_type filter for inventory_transactions'
       });
 
       const result = await client.query(queryStr, params);
@@ -761,8 +849,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      const queryStr = `
-        SELECT
+      const queryStr =
+        `SELECT
           COUNT(*) as transaction_count,
           COALESCE(SUM(pt.final_amount), 0) as total_sales,
           COALESCE(AVG(pt.final_amount), 0) as average_transaction,
@@ -780,13 +868,12 @@ export class POSService {
           AND it.transaction_type = 'sale'
         WHERE pt.business_id = $1
           AND pt.status = 'completed'
-          AND DATE(pt.transaction_date) = CURRENT_DATE
-      `;
+          AND DATE(pt.transaction_date) = CURRENT_DATE`;
 
-      log.info('🗄️ Database Query - getTodaySales (FIXED):', { 
-        query: queryStr, 
+      log.info('🗄️ Database Query - getTodaySales (FIXED):', {
+        query: queryStr,
         params: [businessId],
-        fixes: 'Removed ::text cast from inventory_transactions JOIN' 
+        fixes: 'Removed ::text cast from inventory_transactions JOIN'
       });
 
       const result = await client.query(queryStr, [businessId]);
@@ -828,8 +915,8 @@ export class POSService {
     const client = await getClient();
 
     try {
-      let queryStr = `
-        SELECT
+      let queryStr =
+        `SELECT
           p.*,
           ic.name as category_name,
           CASE
@@ -854,8 +941,7 @@ export class POSService {
         LEFT JOIN inventory_categories ic ON p.category_id = ic.id
         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
         WHERE p.business_id = $1
-          AND p.is_active = true
-      `;
+          AND p.is_active = true`;
 
       const params = [businessId];
       let paramCount = 1;

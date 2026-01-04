@@ -37,21 +37,38 @@ export class AccountingService {
    */
   static async processPosAccounting(transactionId, userId) {
     const client = await getClient();
-    
+
     try {
-      const result = await client.query(`
-        SELECT * FROM process_pos_accounting_safe($1, $2)
-      `, [transactionId, userId]);
-      
+      const result = await client.query(
+        `SELECT * FROM process_pos_accounting_safe($1, $2)`, 
+        [transactionId, userId]
+      );
+
+      if (!result.rows[0]?.success) {
+        log.warn('⚠️ POS accounting not created', {
+          transactionId,
+          userId,
+          reason: result.rows[0]?.message || 'Unknown database reason',
+          success_flag: result.rows[0]?.success,
+          timestamp: new Date().toISOString()
+        });
+      }
+
       return {
-        success: result.rows[0].success,
-        message: result.rows[0].message,
-        journalEntryId: result.rows[0].journal_entry_id,
-        linesCreated: result.rows[0].lines_created
+        success: result.rows[0]?.success === true,
+        message: result.rows[0]?.message || 'Accounting processing completed',
+        journalEntryId: result.rows[0]?.journal_entry_id || null,
+        linesCreated: result.rows[0]?.lines_created || 0
       };
-      
+
     } catch (error) {
-      log.error('Accounting processing error:', error);
+      log.error('❌ Accounting processing error:', {
+        transactionId,
+        userId,
+        error: error.message,
+        stack: error.stack
+      });
+      
       return {
         success: false,
         message: `Accounting processing failed: ${error.message}`,
@@ -62,7 +79,7 @@ export class AccountingService {
       client.release();
     }
   }
-  
+
   /**
    * Repair missing accounting entries
    * @param {string} userId - User ID
@@ -71,18 +88,19 @@ export class AccountingService {
    */
   static async repairMissingAccounting(userId, limit = 100) {
     const client = await getClient();
-    
+
     try {
-      const result = await client.query(`
-        SELECT * FROM repair_missing_pos_accounting($1, $2)
-      `, [userId, limit]);
-      
+      const result = await client.query(
+        `SELECT * FROM repair_missing_pos_accounting($1, $2)`,
+        [userId, limit]
+      );
+
       return {
         success: true,
         message: `Processed ${result.rows.length} transactions`,
         transactions: result.rows
       };
-      
+
     } catch (error) {
       log.error('Repair processing error:', error);
       return {
@@ -94,7 +112,7 @@ export class AccountingService {
       client.release();
     }
   }
-  
+
   /**
    * Get accounting processing statistics
    * @param {string} businessId - Business ID
@@ -102,17 +120,18 @@ export class AccountingService {
    */
   static async getAccountingStats(businessId) {
     const client = await getClient();
-    
+
     try {
-      const result = await client.query(`
-        SELECT * FROM get_accounting_processing_stats($1)
-      `, [businessId]);
-      
+      const result = await client.query(
+        `SELECT * FROM get_accounting_processing_stats($1)`,
+        [businessId]
+      );
+
       return {
         success: true,
         stats: result.rows[0]
       };
-      
+
     } catch (error) {
       log.error('Stats retrieval error:', error);
       return {
@@ -392,12 +411,11 @@ export class AccountingService {
 
     try {
       // Build query for journal entries
-      let query = `
-        SELECT je.*, u.full_name as created_by_name
+      let query = 
+        `SELECT je.*, u.full_name as created_by_name
         FROM journal_entries je
         LEFT JOIN users u ON je.created_by = u.id
-        WHERE je.business_id = $1
-      `;
+        WHERE je.business_id = $1`;
 
       const params = [businessId];
       let paramCount = 1;
@@ -512,8 +530,8 @@ export class AccountingService {
 
     try {
       // Calculate revenue (account codes 4000-4999, credit entries)
-      const revenueQuery = `
-        SELECT
+      const revenueQuery = 
+        `SELECT
           ca.account_code,
           ca.account_name,
           SUM(jel.amount) as amount
@@ -527,12 +545,11 @@ export class AccountingService {
           AND je.status = 'posted'
           AND je.voided_at IS NULL
         GROUP BY ca.account_code, ca.account_name
-        ORDER BY ca.account_code
-      `;
+        ORDER BY ca.account_code`;
 
       // Calculate COGS (account code 5100 ONLY, debit entries)
-      const cogsQuery = `
-        SELECT
+      const cogsQuery = 
+        `SELECT
           ca.account_code,
           ca.account_name,
           SUM(jel.amount) as amount
@@ -546,12 +563,11 @@ export class AccountingService {
           AND je.status = 'posted'
           AND je.voided_at IS NULL
         GROUP BY ca.account_code, ca.account_name
-        ORDER BY ca.account_code
-      `;
+        ORDER BY ca.account_code`;
 
       // Calculate Operating Expenses (account codes 5200-5999, debit entries)
-      const operatingExpensesQuery = `
-        SELECT
+      const operatingExpensesQuery = 
+        `SELECT
           ca.account_code,
           ca.account_name,
           SUM(jel.amount) as amount
@@ -566,12 +582,11 @@ export class AccountingService {
           AND je.status = 'posted'
           AND je.voided_at IS NULL
         GROUP BY ca.account_code, ca.account_name
-        ORDER BY ca.account_code
-      `;
+        ORDER BY ca.account_code`;
 
       // Get counts for metadata
-      const countsQuery = `
-        SELECT
+      const countsQuery = 
+        `SELECT
           COUNT(DISTINCT je.id) as journal_entry_count,
           COUNT(DISTINCT pt.id) as transaction_count
         FROM journal_entries je
@@ -580,8 +595,7 @@ export class AccountingService {
         WHERE je.business_id = $1
           AND je.journal_date BETWEEN $2::date AND $3::date
           AND je.status = 'posted'
-          AND je.voided_at IS NULL
-      `;
+          AND je.voided_at IS NULL`;
 
       const [revenueResult, cogsResult, operatingExpensesResult, countsResult] = await Promise.all([
         client.query(revenueQuery, [businessId, startDate, endDate]),
@@ -671,14 +685,14 @@ export class AccountingService {
     if (purchaseData.payment_method === 'cash') {
       journalEntryData.lines.push({
         account_code: '1110',
-        description: `Cash payment for inventory purchase`,
+        description: 'Cash payment for inventory purchase',
         amount: purchaseData.total_amount,
         line_type: 'credit'
       });
     } else {
       journalEntryData.lines.push({
         account_code: '2100',
-        description: `Payable for inventory purchase`,
+        description: 'Payable for inventory purchase',
         amount: purchaseData.total_amount,
         line_type: 'credit'
       });

@@ -188,7 +188,21 @@ export const businessService = {
         }
       }
 
-      // 4. Generate JWT token with timezone info
+      // 4. CREATE ACCOUNTING FOUNDATION - CRITICAL FIX HERE
+      log.info('Creating accounting foundation', { businessId: business.id });
+      
+      // IMPORTANT: Call functions in correct order with proper user ID
+      
+      // 4a. Ensure chart of accounts exist
+      await client.query(`SELECT ensure_business_has_complete_accounts($1)`, [business.id]);
+      
+      // 4b. Create wallets with the ACTUAL user ID (not a placeholder)
+      // The function now handles NULL user_id gracefully
+      await client.query(`SELECT ensure_business_has_default_wallets($1, $2)`, [business.id, user.id]);
+      
+      log.info('Accounting foundation created', { businessId: business.id });
+
+      // 5. Generate JWT token with timezone info
       const token = generateToken({
         userId: user.id,
         businessId: business.id,
@@ -202,8 +216,7 @@ export const businessService = {
       log.info('Business registration completed successfully', {
         businessId: business.id,
         timezone: business.timezone,
-        currency: business.currency,
-        rolesCreated: defaultRoles.length
+        currency: business.currency
       });
 
       return {
