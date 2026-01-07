@@ -2,7 +2,7 @@ import { ExpenseService } from '../services/expenseService.js';
 import { log } from '../utils/logger.js';
 
 export const expenseController = {
-  // NEW: Get Expense by ID
+  // Get Expense by ID
   async getExpenseById(req, res, next) {
     try {
       const { id } = req.params;
@@ -24,7 +24,7 @@ export const expenseController = {
     }
   },
 
-  // NEW: Update Expense
+  // Update Expense
   async updateExpense(req, res, next) {
     try {
       const { id } = req.params;
@@ -48,7 +48,7 @@ export const expenseController = {
     }
   },
 
-  // NEW: Delete Expense
+  // Delete Expense
   async deleteExpense(req, res, next) {
     try {
       const { id } = req.params;
@@ -70,7 +70,7 @@ export const expenseController = {
     }
   },
 
-  // NEW: Update Expense Category
+  // Update Expense Category
   async updateCategory(req, res, next) {
     try {
       const { id } = req.params;
@@ -94,7 +94,7 @@ export const expenseController = {
     }
   },
 
-  // NEW: Delete Expense Category
+  // Delete Expense Category
   async deleteCategory(req, res, next) {
     try {
       const { id } = req.params;
@@ -116,6 +116,7 @@ export const expenseController = {
     }
   },
 
+  // Create Expense Category
   async createCategory(req, res, next) {
     try {
       const categoryData = req.body;
@@ -138,6 +139,7 @@ export const expenseController = {
     }
   },
 
+  // Create Expense
   async createExpense(req, res, next) {
     try {
       const expenseData = req.body;
@@ -160,6 +162,7 @@ export const expenseController = {
     }
   },
 
+  // Approve Expense - FIXED VERSION
   async approveExpense(req, res, next) {
     try {
       const { id } = req.params;
@@ -167,9 +170,19 @@ export const expenseController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Approving expense', { businessId, userId, expenseId: id, status: approvalData.status });
+      log.info('Approving expense', {
+        businessId,
+        userId,
+        expenseId: id,
+        status: approvalData.status
+      });
 
-      const updatedExpense = await ExpenseService.approveExpense(businessId, id, approvalData, userId);
+      const updatedExpense = await ExpenseService.approveExpense(
+        businessId,
+        id,
+        approvalData,
+        userId
+      );
 
       res.json({
         success: true,
@@ -183,6 +196,7 @@ export const expenseController = {
     }
   },
 
+  // Get Categories
   async getCategories(req, res, next) {
     try {
       const businessId = req.user.businessId;
@@ -206,10 +220,20 @@ export const expenseController = {
     }
   },
 
+  // Get Expenses
   async getExpenses(req, res, next) {
     try {
       const businessId = req.user.businessId;
-      const { category_id, status, wallet_id, start_date, end_date, page, limit } = req.query;
+      const {
+        category_id,
+        status,
+        wallet_id,
+        start_date,
+        end_date,
+        page,
+        limit,
+        search
+      } = req.query;
 
       const filters = {};
       if (category_id) filters.category_id = category_id;
@@ -219,6 +243,7 @@ export const expenseController = {
       if (end_date) filters.end_date = end_date;
       if (page) filters.page = parseInt(page);
       if (limit) filters.limit = parseInt(limit);
+      if (search) filters.search = search;
 
       const expenses = await ExpenseService.getExpenses(businessId, filters);
 
@@ -235,6 +260,7 @@ export const expenseController = {
     }
   },
 
+  // Get Statistics
   async getStatistics(req, res, next) {
     try {
       const businessId = req.user.businessId;
@@ -250,6 +276,35 @@ export const expenseController = {
 
     } catch (error) {
       log.error('Expense statistics fetch controller error', error);
+      next(error);
+    }
+  },
+
+  // Pay Expense - Complete payment processing
+  async payExpense(req, res, next) {
+    try {
+      const { id } = req.params;
+      const paymentData = req.body;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Paying expense', {
+        businessId,
+        userId,
+        expenseId: id,
+        paymentMethod: paymentData.payment_method
+      });
+
+      const paidExpense = await ExpenseService.payExpense(businessId, id, paymentData, userId);
+
+      res.json({
+        success: true,
+        message: 'Expense paid successfully',
+        data: paidExpense
+      });
+
+    } catch (error) {
+      log.error('Expense payment controller error', error);
       next(error);
     }
   }

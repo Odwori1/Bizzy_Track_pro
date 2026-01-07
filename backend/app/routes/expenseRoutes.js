@@ -6,7 +6,8 @@ import {
   createExpenseSchema,
   updateExpenseSchema,
   approveExpenseSchema,
-  expenseQuerySchema
+  expenseQuerySchema,
+  payExpenseSchema  // ADD THIS LINE
 } from '../schemas/expenseSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
@@ -98,6 +99,14 @@ router.delete(
   '/:id',
   requirePermission('expense:delete'),
   expenseController.deleteExpense
+);
+
+// 🆕 Expense Payment (from Phase 2 blueprint)
+router.post(
+  '/:id/pay',
+  requirePermission('expense:approve'),
+  validateRequest(payExpenseSchema),  // CHANGED: Use the Joi schema
+  expenseController.payExpense
 );
 
 export default router;

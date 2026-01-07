@@ -46,3 +46,22 @@ export const expenseQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(20)
 });
+
+// Expense Payment Schema
+export const payExpenseSchema = Joi.object({
+  payment_method: Joi.string()
+    .valid('cash', 'mobile_money', 'bank_transfer', 'card')
+    .required()
+    .messages({
+      'any.required': 'Payment method is required',
+      'string.empty': 'Payment method cannot be empty',
+      'any.only': 'Payment method must be one of: cash, mobile_money, bank_transfer, card'
+    }),
+  reference_number: Joi.string()
+    .max(100)
+    .optional()
+    .allow('')
+    .messages({
+      'string.max': 'Reference number cannot exceed 100 characters'
+    })
+});

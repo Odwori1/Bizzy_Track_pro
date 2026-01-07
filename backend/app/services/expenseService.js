@@ -4,6 +4,26 @@ import { log } from '../utils/logger.js';
 
 export class ExpenseService {
   /**
+   * 🆕 Generate expense number
+   */
+  static async generateExpenseNumber(businessId) {
+    const client = await getClient();
+    try {
+      const result = await client.query(
+        `SELECT generate_expense_number($1) as expense_number`,
+        [businessId]
+      );
+      return result.rows[0].expense_number;
+    } catch (error) {
+      // Fallback if function doesn't exist
+      const timestamp = Date.now();
+      return `EXP-${timestamp}`;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get expense by ID
    */
   static async getExpenseById(businessId, expenseId) {
@@ -94,8 +114,10 @@ export class ExpenseService {
            expense_date = COALESCE($5, expense_date),
            receipt_url = COALESCE($6, receipt_url),
            status = COALESCE($7, status),
+           vendor_name = COALESCE($8, vendor_name),
+           payment_method = COALESCE($9, payment_method),
            updated_at = NOW()
-         WHERE id = $8 AND business_id = $9
+         WHERE id = $10 AND business_id = $11
          RETURNING *`,
         [
           expenseData.category_id,
@@ -105,6 +127,8 @@ export class ExpenseService {
           expenseData.expense_date,
           expenseData.receipt_url,
           expenseData.status,
+          expenseData.vendor_name,
+          expenseData.payment_method,
           expenseId,
           businessId
         ]
@@ -189,15 +213,16 @@ export class ExpenseService {
       await client.query('BEGIN');
 
       const result = await client.query(
-        `INSERT INTO expense_categories (business_id, name, description, color, is_active)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO expense_categories (business_id, name, description, color, is_active, account_code)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
         [
           businessId,
           categoryData.name,
           categoryData.description || '',
           categoryData.color || '#3B82F6',
-          categoryData.is_active !== undefined ? categoryData.is_active : true
+          categoryData.is_active !== undefined ? categoryData.is_active : true,
+          categoryData.account_code || null
         ]
       );
 
@@ -248,14 +273,16 @@ export class ExpenseService {
            description = COALESCE($2, description),
            color = COALESCE($3, color),
            is_active = COALESCE($4, is_active),
+           account_code = COALESCE($5, account_code),
            updated_at = NOW()
-         WHERE id = $5 AND business_id = $6
+         WHERE id = $6 AND business_id = $7
          RETURNING *`,
         [
           categoryData.name,
           categoryData.description,
           categoryData.color,
           categoryData.is_active,
+          categoryData.account_code,
           categoryId,
           businessId
         ]
@@ -389,7 +416,7 @@ export class ExpenseService {
   }
 
   /**
-   * Create expense record WITH ACCOUNTING INTEGRATION
+   * 🆕 Create expense with proper accounting integration
    */
   static async createExpense(businessId, expenseData, userId) {
     const client = await getClient();
@@ -399,7 +426,7 @@ export class ExpenseService {
 
       // Verify category belongs to business
       const categoryCheck = await client.query(
-        'SELECT id FROM expense_categories WHERE id = $1 AND business_id = $2',
+        'SELECT id, account_code FROM expense_categories WHERE id = $1 AND business_id = $2',
         [expenseData.category_id, businessId]
       );
 
@@ -407,24 +434,20 @@ export class ExpenseService {
         throw new Error('Expense category not found or access denied');
       }
 
-      // If wallet is provided, verify it belongs to business
-      if (expenseData.wallet_id) {
-        const walletCheck = await client.query(
-          'SELECT id FROM money_wallets WHERE id = $1 AND business_id = $2',
-          [expenseData.wallet_id, businessId]
-        );
+      // Generate expense number
+      const expenseNumber = await this.generateExpenseNumber(businessId);
 
-        if (walletCheck.rows.length === 0) {
-          throw new Error('Wallet not found or access denied');
-        }
-      }
+      // Calculate total amount
+      const taxAmount = expenseData.tax_amount || 0;
+      const totalAmount = expenseData.amount + taxAmount;
 
       // Create expense record
       const result = await client.query(
         `INSERT INTO expenses (
           business_id, category_id, wallet_id, amount, description,
-          expense_date, receipt_url, status, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          expense_date, receipt_url, status, created_by, 
+          vendor_name, payment_method, total_amount, tax_amount, expense_number
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING *`,
         [
           businessId,
@@ -432,55 +455,43 @@ export class ExpenseService {
           expenseData.wallet_id || null,
           expenseData.amount,
           expenseData.description,
-          expenseData.expense_date,
+          expenseData.expense_date || new Date().toISOString().split('T')[0],
           expenseData.receipt_url || '',
           expenseData.status || 'pending',
-          userId
+          userId,
+          expenseData.vendor_name || '',
+          expenseData.payment_method || null,
+          totalAmount,
+          taxAmount,
+          expenseNumber
         ]
       );
 
       const expense = result.rows[0];
 
-      // 🆕 ACCOUNTING INTEGRATION: Create journal entry if expense is paid
-      if (expenseData.status === 'paid' || expenseData.status === 'approved') {
+      // 🆕 Create accounting entries if expense is paid
+      if (expenseData.status === 'paid') {
         try {
-          const { AccountingService } = await import('./accountingService.js');
+          const journalEntryId = await client.query(
+            `SELECT create_accounting_for_expense($1, $2) as journal_entry_id`,
+            [expense.id, userId]
+          );
           
-          // Map expense category to account code
-          const accountCode = await this.mapExpenseCategoryToAccount(expenseData.category_id, businessId);
+          if (journalEntryId.rows[0].journal_entry_id) {
+            await client.query(
+              'UPDATE expenses SET journal_entry_id = $1 WHERE id = $2',
+              [journalEntryId.rows[0].journal_entry_id, expense.id]
+            );
+            expense.journal_entry_id = journalEntryId.rows[0].journal_entry_id;
+          }
           
-          const journalEntryData = {
-            business_id: businessId,
-            description: `Expense: ${expenseData.description}`,
-            journal_date: expenseData.expense_date || new Date(),
-            reference_type: 'expense',
-            reference_id: expense.id,
-            lines: [
-              {
-                account_code: accountCode, // Expense account
-                description: `Expense: ${expenseData.description}`,
-                amount: expenseData.amount,
-                line_type: 'debit'
-              },
-              {
-                account_code: expenseData.wallet_id ? '1110' : '2100', // Cash or Accounts Payable
-                description: `Payment for expense: ${expenseData.description}`,
-                amount: expenseData.amount,
-                line_type: 'credit'
-              }
-            ]
-          };
-
-          await AccountingService.createJournalEntry(journalEntryData, userId);
-          log.info('Accounting journal entry created for expense', {
+          log.info('Accounting created for paid expense', {
             expenseId: expense.id,
-            amount: expenseData.amount,
-            accountCode: accountCode
+            journalEntryId: expense.journal_entry_id
           });
         } catch (accountingError) {
+          log.error('Failed to create accounting for expense:', accountingError);
           // Don't fail expense creation if accounting fails
-          log.error('Failed to create accounting entry for expense:', accountingError);
-          // Expense is still created, accounting error is logged
         }
       }
 
@@ -519,11 +530,15 @@ export class ExpenseService {
           e.*,
           ec.name as category_name,
           mw.name as wallet_name,
-          u_app.full_name as approved_by_name
+          u_app.full_name as approved_by_name,
+          u_created.full_name as created_by_name,
+          u_paid.full_name as paid_by_name
         FROM expenses e
         LEFT JOIN expense_categories ec ON e.category_id = ec.id
         LEFT JOIN money_wallets mw ON e.wallet_id = mw.id
         LEFT JOIN users u_app ON e.approved_by = u_app.id
+        LEFT JOIN users u_created ON e.created_by = u_created.id
+        LEFT JOIN users u_paid ON e.paid_by = u_paid.id
         WHERE e.business_id = $1
       `;
       const params = [businessId];
@@ -557,6 +572,12 @@ export class ExpenseService {
         paramCount++;
         queryStr += ` AND e.expense_date <= $${paramCount}`;
         params.push(filters.end_date);
+      }
+
+      if (filters.search) {
+        paramCount++;
+        queryStr += ` AND (e.description ILIKE $${paramCount} OR e.vendor_name ILIKE $${paramCount} OR e.expense_number ILIKE $${paramCount})`;
+        params.push(`%${filters.search}%`);
       }
 
       queryStr += ' ORDER BY e.created_at DESC';
@@ -595,7 +616,7 @@ export class ExpenseService {
   }
 
   /**
-   * Approve or reject expense WITH ACCOUNTING INTEGRATION
+   * 🆕 Approve expense with accounting
    */
   static async approveExpense(businessId, expenseId, approvalData, userId) {
     const client = await getClient();
@@ -605,7 +626,7 @@ export class ExpenseService {
 
       // Get current expense
       const expenseResult = await client.query(
-        'SELECT * FROM expenses WHERE id = $1 AND business_id = $2',
+        'SELECT * FROM expenses WHERE id = $1 AND business_id = $2 FOR UPDATE',
         [expenseId, businessId]
       );
 
@@ -631,69 +652,30 @@ export class ExpenseService {
 
       const updatedExpense = updateResult.rows[0];
 
-      // If approved and has wallet, create wallet transaction
-      if (approvalData.status === 'approved' && currentExpense.wallet_id) {
-        const { WalletService } = await import('./walletService.js');
-
-        await WalletService.recordTransaction(
-          businessId,
-          {
-            wallet_id: currentExpense.wallet_id,
-            transaction_type: 'expense',
-            amount: currentExpense.amount,
-            description: `Expense: ${currentExpense.description}`,
-            reference_type: 'expense',
-            reference_id: expenseId
-          },
-          userId
-        );
-      }
-
-      // 🆕 ACCOUNTING INTEGRATION: Create journal entry when expense is approved/paid
-      if (approvalData.status === 'approved' || approvalData.status === 'paid') {
+      // 🆕 Create accounting for approved expenses
+      if (approvalData.status === 'approved') {
         try {
-          const { AccountingService } = await import('./accountingService.js');
-          
-          // Only create accounting entry if not already created (when expense was created as paid)
-          const existingJournalCheck = await client.query(
-            `SELECT COUNT(*) as count FROM journal_entries 
-             WHERE business_id = $1 AND reference_type = 'expense' AND reference_id = $2`,
-            [businessId, expenseId]
+          const journalEntryId = await client.query(
+            `SELECT create_accounting_for_expense($1, $2) as journal_entry_id`,
+            [expenseId, userId]
           );
-
-          if (parseInt(existingJournalCheck.rows[0].count) === 0) {
-            const accountCode = await this.mapExpenseCategoryToAccount(currentExpense.category_id, businessId);
+          
+          if (journalEntryId.rows[0].journal_entry_id) {
+            // Update expense with journal entry ID
+            await client.query(
+              `UPDATE expenses SET journal_entry_id = $1 WHERE id = $2`,
+              [journalEntryId.rows[0].journal_entry_id, expenseId]
+            );
             
-            const journalEntryData = {
-              business_id: businessId,
-              description: `Expense Approval: ${currentExpense.description}`,
-              journal_date: new Date(),
-              reference_type: 'expense',
-              reference_id: expenseId,
-              lines: [
-                {
-                  account_code: accountCode,
-                  description: `Expense: ${currentExpense.description}`,
-                  amount: currentExpense.amount,
-                  line_type: 'debit'
-                },
-                {
-                  account_code: currentExpense.wallet_id ? '1110' : '2100',
-                  description: `Payment for expense: ${currentExpense.description}`,
-                  amount: currentExpense.amount,
-                  line_type: 'credit'
-                }
-              ]
-            };
-
-            await AccountingService.createJournalEntry(journalEntryData, userId);
-            log.info('Accounting journal entry created for approved expense', {
+            updatedExpense.journal_entry_id = journalEntryId.rows[0].journal_entry_id;
+            log.info('Accounting created for approved expense', {
               expenseId: expenseId,
-              amount: currentExpense.amount
+              journalEntryId: journalEntryId.rows[0].journal_entry_id
             });
           }
         } catch (accountingError) {
-          log.error('Failed to create accounting entry for approved expense:', accountingError);
+          log.error('Failed to create accounting for approved expense:', accountingError);
+          // Continue even if accounting fails
         }
       }
 
@@ -721,6 +703,88 @@ export class ExpenseService {
   }
 
   /**
+   * 🆕 Pay an expense (new endpoint from blueprint)
+   */
+  static async payExpense(businessId, expenseId, paymentData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Get current expense
+      const expenseResult = await client.query(
+        `SELECT * FROM expenses WHERE id = $1 AND business_id = $2 FOR UPDATE`,
+        [expenseId, businessId]
+      );
+
+      if (expenseResult.rows.length === 0) {
+        throw new Error('Expense not found or access denied');
+      }
+
+      const currentExpense = expenseResult.rows[0];
+
+      // Validate expense can be paid
+      if (currentExpense.status === 'paid') {
+        throw new Error('Expense is already paid');
+      }
+
+      if (currentExpense.status !== 'approved') {
+        throw new Error('Only approved expenses can be paid');
+      }
+
+      // Process payment
+      const journalEntryId = await client.query(
+        `SELECT process_expense_payment($1, $2, $3) as journal_entry_id`,
+        [expenseId, paymentData.payment_method, userId]
+      );
+
+      // Update expense
+      const updateResult = await client.query(
+        `UPDATE expenses 
+         SET status = 'paid', 
+             payment_method = $1,
+             paid_by = $2,
+             paid_at = NOW(),
+             journal_entry_id = COALESCE($3, journal_entry_id),
+             updated_at = NOW()
+         WHERE id = $4 AND business_id = $5
+         RETURNING *`,
+        [
+          paymentData.payment_method,
+          userId,
+          journalEntryId.rows[0].journal_entry_id,
+          expenseId,
+          businessId
+        ]
+      );
+
+      const updatedExpense = updateResult.rows[0];
+
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'expense.paid',
+        resourceType: 'expense',
+        resourceId: expenseId,
+        newValues: {
+          status: 'paid',
+          payment_method: paymentData.payment_method,
+          paid_by: userId,
+          paid_at: new Date().toISOString()
+        }
+      });
+
+      await client.query('COMMIT');
+      return updatedExpense;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get expense statistics
    */
   static async getExpenseStatistics(businessId, startDate = null, endDate = null) {
@@ -734,12 +798,13 @@ export class ExpenseService {
           COUNT(*) FILTER (WHERE status = 'approved') as approved_expenses,
           COUNT(*) FILTER (WHERE status = 'rejected') as rejected_expenses,
           COUNT(*) FILTER (WHERE status = 'paid') as paid_expenses,
-          SUM(amount) as total_amount,
-          SUM(amount) FILTER (WHERE status = 'approved') as approved_amount,
-          SUM(amount) FILTER (WHERE status = 'pending') as pending_amount,
+          SUM(total_amount) as total_amount,
+          SUM(total_amount) FILTER (WHERE status = 'approved') as approved_amount,
+          SUM(total_amount) FILTER (WHERE status = 'pending') as pending_amount,
+          SUM(total_amount) FILTER (WHERE status = 'paid') as paid_amount,
           ec.name as category_name,
           COUNT(*) as category_count,
-          SUM(e.amount) as category_amount
+          SUM(e.total_amount) as category_amount
         FROM expenses e
         LEFT JOIN expense_categories ec ON e.category_id = ec.id
         WHERE e.business_id = $1
@@ -770,8 +835,9 @@ export class ExpenseService {
       const totalsQuery = `
         SELECT
           COUNT(*) as total_count,
-          SUM(amount) as total_amount,
-          AVG(amount) as average_amount
+          SUM(total_amount) as total_amount,
+          AVG(total_amount) as average_amount,
+          SUM(tax_amount) as total_tax
         FROM expenses
         WHERE business_id = $1
         ${startDate ? ' AND expense_date >= $2' : ''}
@@ -811,31 +877,22 @@ export class ExpenseService {
    */
   static async mapExpenseCategoryToAccount(categoryId, businessId) {
     const client = await getClient();
-    
+
     try {
-      // Try to get custom mapping from expense_categories table
       const result = await client.query(
-        `SELECT name, COALESCE(account_code, 
-          CASE 
-            WHEN name ILIKE '%rent%' THEN '5200'
-            WHEN name ILIKE '%salary%' OR name ILIKE '%wage%' THEN '5500'
-            WHEN name ILIKE '%utility%' THEN '5400'
-            WHEN name ILIKE '%advertis%' OR name ILIKE '%market%' THEN '5500'
-            ELSE '5300'  -- Default to Office Expenses
-          END) as account_code
-         FROM expense_categories 
+        `SELECT account_code FROM expense_categories 
          WHERE id = $1 AND business_id = $2`,
         [categoryId, businessId]
       );
 
-      if (result.rows.length > 0) {
+      if (result.rows.length > 0 && result.rows[0].account_code) {
         return result.rows[0].account_code;
       }
 
-      return '5300'; // Default Office Expenses
+      return '5700'; // Default Other Expenses
     } catch (error) {
       log.warn('Error mapping expense category to account code:', error);
-      return '5300'; // Default fallback
+      return '5700'; // Default fallback
     } finally {
       client.release();
     }
