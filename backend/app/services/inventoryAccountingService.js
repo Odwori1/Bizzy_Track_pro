@@ -70,7 +70,14 @@ export class InventoryAccountingService {
 
       const inventoryTransaction = transactionResult.rows[0];
 
-      // 4. Update inventory item stock
+      // 4. Sync to products if linked (DO THIS FIRST to avoid deadlock)
+      await this.syncInventoryToProduct(
+        purchaseData.inventory_item_id, 
+        userId, 
+        purchaseData.quantity  // Pass the quantity change
+      );
+
+      // 5. Update inventory item stock (trigger will fire but product already updated)
       await client.query(
         `UPDATE inventory_items
          SET current_stock = current_stock + $1,
@@ -78,9 +85,6 @@ export class InventoryAccountingService {
          WHERE id = $2`,
         [purchaseData.quantity, purchaseData.inventory_item_id]
       );
-
-      // 5. Sync to products if linked
-      await this.syncInventoryToProduct(purchaseData.inventory_item_id, userId);
 
       // 6. Audit log
       await auditLogger.logAction({
@@ -179,6 +183,13 @@ export class InventoryAccountingService {
               `POS Sale: ${item.quantity} units of ${inventoryItem.name}`,
               userId
             ]
+          );
+
+          // Sync product stock with negative quantity change
+          await this.syncInventoryToProduct(
+            item.inventory_item_id,
+            userId,
+            -item.quantity  // Negative quantity for sale
           );
 
           // Update inventory stock
@@ -296,7 +307,7 @@ export class InventoryAccountingService {
   /**
    * Sync inventory item to product
    */
-  static async syncInventoryToProduct(inventoryItemId, userId) {
+  static async syncInventoryToProduct(inventoryItemId, userId, quantityChange = 0) {
     const client = await getClient();
 
     try {
@@ -313,6 +324,16 @@ export class InventoryAccountingService {
       }
 
       const inventoryItem = inventoryResult.rows[0];
+
+      // Calculate the NEW stock value
+      let newStock = parseFloat(inventoryItem.current_stock);
+      if (quantityChange !== 0) {
+        newStock = newStock + quantityChange;
+        // Ensure stock doesn't go negative
+        if (newStock < 0) {
+          newStock = 0;
+        }
+      }
 
       // Check if product already exists for this inventory item
       const productResult = await client.query(
@@ -346,7 +367,7 @@ export class InventoryAccountingService {
             inventoryItem.sku,
             inventoryItem.cost_price,
             inventoryItem.selling_price,
-            inventoryItem.current_stock,
+            newStock,  // Use calculated newStock
             inventoryItem.min_stock_level,
             inventoryItem.max_stock_level,
             inventoryItem.unit_of_measure,
@@ -376,7 +397,7 @@ export class InventoryAccountingService {
             inventoryItem.category_id,
             inventoryItem.cost_price,
             inventoryItem.selling_price,
-            inventoryItem.current_stock,
+            newStock,  // Use calculated newStock
             inventoryItem.min_stock_level,
             inventoryItem.max_stock_level,
             inventoryItem.unit_of_measure,
@@ -407,7 +428,10 @@ export class InventoryAccountingService {
           inventory_item_id: inventoryItemId,
           product_id: product.id,
           name: product.name,
-          sku: product.sku
+          sku: product.sku,
+          stock_before: inventoryItem.current_stock,
+          stock_after: newStock,
+          quantity_change: quantityChange
         }
       });
 
@@ -416,6 +440,9 @@ export class InventoryAccountingService {
       return {
         product: product,
         inventory_item: inventoryItem,
+        stock_before: parseFloat(inventoryItem.current_stock),
+        stock_after: newStock,
+        quantity_change: quantityChange,
         action: productResult.rows.length > 0 ? 'updated' : 'created'
       };
 
@@ -443,7 +470,7 @@ export class InventoryAccountingService {
         case 'fifo':
           // FIXED: Use created_at instead of transaction_date
           valuationQuery = `
-            SELECT 
+            SELECT
               it.business_id,
               it.inventory_item_id,
               ii.name as item_name,

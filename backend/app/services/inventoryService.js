@@ -33,11 +33,11 @@ export class InventoryService {
 
       // Get FIFO valuation
       const valuationResult = await client.query(
-        `SELECT 
+        `SELECT
            SUM(current_value) as fifo_value,
            SUM(current_quantity) as total_quantity,
            COUNT(*) as valued_items
-         FROM inventory_valuation_fifo 
+         FROM inventory_valuation_fifo
          WHERE business_id = $1`,
         [businessId]
       );
@@ -70,7 +70,7 @@ export class InventoryService {
 
       // Get accounting summary
       const accountingSummaryResult = await client.query(
-        `SELECT 
+        `SELECT
            COUNT(*) as total_transactions,
            SUM(CASE WHEN transaction_type = 'purchase' THEN total_cost ELSE 0 END) as total_purchases,
            SUM(CASE WHEN transaction_type = 'sale' THEN total_cost ELSE 0 END) as total_cogs,
@@ -418,13 +418,13 @@ export class InventoryService {
       }
 
       const item = result.rows[0];
-      
+
       // Get recent transactions
       const transactionsResult = await client.query(
-        `SELECT 
+        `SELECT
            it.*,
            je.description as journal_description,
-           CASE 
+           CASE
              WHEN it.reference_type = 'pos_transaction' THEN 'POS Sale'
              WHEN it.reference_type = 'purchase_order' THEN 'Purchase'
              ELSE it.reference_type
@@ -436,16 +436,16 @@ export class InventoryService {
          LIMIT 20`,
         [itemId, businessId]
       );
-      
+
       item.recent_transactions = transactionsResult.rows;
 
       // Get current valuation from FIFO view
       const valuationResult = await client.query(
-        `SELECT * FROM inventory_valuation_fifo 
+        `SELECT * FROM inventory_valuation_fifo
          WHERE inventory_item_id = $1 AND business_id = $2`,
         [itemId, businessId]
       );
-      
+
       if (valuationResult.rows.length > 0) {
         item.valuation = valuationResult.rows[0];
       }
@@ -536,11 +536,11 @@ export class InventoryService {
       // If stock changed significantly, create adjustment transaction
       const oldStock = parseFloat(itemCheck.rows[0].current_stock);
       const newStock = parseFloat(itemData.current_stock || oldStock);
-      
+
       if (Math.abs(newStock - oldStock) > 0.01 && itemData.current_stock !== undefined) {
         const adjustmentQuantity = newStock - oldStock;
         const adjustmentType = adjustmentQuantity > 0 ? 'adjustment' : 'write_off';
-        
+
         await client.query(
           `INSERT INTO inventory_transactions (
             business_id, inventory_item_id, transaction_type,
@@ -564,7 +564,7 @@ export class InventoryService {
         'SELECT id FROM products WHERE inventory_item_id = $1 AND business_id = $2',
         [itemId, businessId]
       );
-      
+
       if (productCheck.rows.length > 0) {
         try {
           await InventorySyncService.syncInventoryToProduct(itemId, userId);
@@ -780,6 +780,22 @@ export class InventoryService {
           throw new Error(`Purchase accounting failed: ${accountingError.message}`);
         }
       }
+      // ADD THIS NEW CODE FOR INTERNAL USE ACCOUNTING:
+      else if (movementData.movement_type === 'internal_use') {
+        try {
+          await this.recordInternalUseAccounting(
+            businessId,
+            movementData.inventory_item_id,
+            quantity,
+            unitCost,
+            movementData.notes || '',
+            userId
+          );
+        } catch (accountingError) {
+          log.error('Internal use accounting failed:', accountingError);
+          throw new Error(`Internal use accounting failed: ${accountingError.message}`);
+        }
+      }
 
       // Record inventory movement
       const movementResult = await client.query(
@@ -952,6 +968,216 @@ export class InventoryService {
     } catch (error) {
       log.error('Sync status error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Record internal use of inventory with accounting entries
+   */
+  static async recordInternalUseAccounting(businessId, inventoryItemId, quantity, unitCost, notes, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // 1. Get inventory item details
+      const itemResult = await client.query(
+        `SELECT ii.*, ic.name as category_name, ic.category_type
+         FROM inventory_items ii
+         LEFT JOIN inventory_categories ic ON ii.category_id = ic.id
+         WHERE ii.id = $1 AND ii.business_id = $2`,
+        [inventoryItemId, businessId]
+      );
+
+      if (itemResult.rows.length === 0) {
+        throw new Error('Inventory item not found or access denied');
+      }
+
+      const item = itemResult.rows[0];
+      const totalCost = quantity * unitCost;
+
+      // 2. Determine which expense account to use based on category
+      let expenseAccountCode;
+      switch (item.category_type) {
+        case 'internal_use':
+          expenseAccountCode = '5201'; // Office Supplies Expense (default for internal use)
+          break;
+        case 'sale':
+          // If something meant for sale is used internally, still expense it
+          expenseAccountCode = '5209'; // Miscellaneous Expense (or create new account)
+          break;
+        case 'both':
+          expenseAccountCode = '5201'; // Office Supplies Expense
+          break;
+        default:
+          expenseAccountCode = '5201'; // Default to Office Supplies
+      }
+
+      // 3. Get the specific expense account ID
+      const expenseAccountResult = await client.query(
+        `SELECT id FROM chart_of_accounts
+         WHERE business_id = $1 AND account_code = $2`,
+        [businessId, expenseAccountCode]
+      );
+
+      let expenseAccountId;
+      if (expenseAccountResult.rows.length === 0) {
+        // Fallback to any expense account
+        const fallbackResult = await client.query(
+          `SELECT id FROM chart_of_accounts
+           WHERE business_id = $1 AND account_type = 'expense'
+           LIMIT 1`,
+          [businessId]
+        );
+        
+        if (fallbackResult.rows.length === 0) {
+          throw new Error('No expense account found for internal use');
+        }
+        
+        expenseAccountId = fallbackResult.rows[0].id;
+      } else {
+        expenseAccountId = expenseAccountResult.rows[0].id;
+      }
+
+      // 4. Get inventory asset account (1300)
+      const inventoryAccountResult = await client.query(
+        `SELECT id FROM chart_of_accounts
+         WHERE business_id = $1 AND account_code = '1300'`,
+        [businessId]
+      );
+
+      if (inventoryAccountResult.rows.length === 0) {
+        throw new Error('Inventory asset account (1300) not found');
+      }
+
+      const inventoryAccountId = inventoryAccountResult.rows[0].id;
+
+      // 5. Create journal entry for internal use
+      const journalEntryResult = await client.query(
+        `INSERT INTO journal_entries (
+          business_id,
+          journal_date,
+          reference_number,
+          reference_type,
+          reference_id,
+          description,
+          total_amount,
+          created_by,
+          posted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *`,
+        [
+          businessId,
+          new Date(),
+          'INTUSE-' + Date.now(),
+          'inventory_internal_use',
+          inventoryItemId,
+          `Internal use: ${quantity} ${item.unit_of_measure} of ${item.name} - ${notes}`,
+          totalCost,
+          userId,
+          new Date()
+        ]
+      );
+
+      const journalEntry = journalEntryResult.rows[0];
+
+      // 6. Create journal entry lines
+      // Line 1: Debit Expense Account
+      await client.query(
+        `INSERT INTO journal_entry_lines (
+          business_id,
+          journal_entry_id,
+          account_id,
+          line_type,
+          amount,
+          description
+        ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          businessId,
+          journalEntry.id,
+          expenseAccountId,
+          'debit',
+          totalCost,
+          `Expense: ${item.name} used internally`
+        ]
+      );
+
+      // Line 2: Credit Inventory Asset Account
+      await client.query(
+        `INSERT INTO journal_entry_lines (
+          business_id,
+          journal_entry_id,
+          account_id,
+          line_type,
+          amount,
+          description
+        ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          businessId,
+          journalEntry.id,
+          inventoryAccountId,
+          'credit',
+          totalCost,
+          `Inventory reduction: ${item.name} used internally`
+        ]
+      );
+
+      // 7. Create inventory transaction record
+      const transactionResult = await client.query(
+        `INSERT INTO inventory_transactions (
+          business_id, inventory_item_id, transaction_type,
+          quantity, unit_cost, reference_type, reference_id,
+          journal_entry_id, notes, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING *`,
+        [
+          businessId,
+          inventoryItemId,
+          'write_off', // Using 'write_off' for internal use (or create new type)
+          -quantity,
+          unitCost,
+          'internal_use',
+          inventoryItemId,
+          journalEntry.id,
+          `Internal use: ${notes}`,
+          userId
+        ]
+      );
+
+      const inventoryTransaction = transactionResult.rows[0];
+
+      // 8. Audit log
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'inventory.internal_use.recorded',
+        resourceType: 'inventory_transaction',
+        resourceId: inventoryTransaction.id,
+        newValues: {
+          item_name: item.name,
+          quantity: quantity,
+          unit_cost: unitCost,
+          total_cost: totalCost,
+          expense_account_code: expenseAccountCode,
+          notes: notes
+        }
+      });
+
+      await client.query('COMMIT');
+
+      return {
+        inventory_transaction: inventoryTransaction,
+        journal_entry: journalEntry,
+        expense_account_code: expenseAccountCode,
+        total_cost: totalCost
+      };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      log.error('Internal use accounting error:', error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }

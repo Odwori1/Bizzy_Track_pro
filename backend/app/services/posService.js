@@ -4,6 +4,7 @@ import { log } from '../utils/logger.js';
 import { TransactionAccountingService } from './transactionAccountingService.js';
 import { InventorySyncService } from './inventorySyncService.js';
 import { AccountingService } from './accountingService.js';
+import { InventoryAccountingService } from './inventoryAccountingService.js';
 
 export class POSService {
   /**
@@ -43,6 +44,7 @@ export class POSService {
       for (const item of transactionData.items) {
         let inventoryItemId = item.inventory_item_id;
         let productId = item.product_id;
+        let itemCost = 0;
 
         // If product_id provided but no inventory_item_id, try to sync
         if (productId && !inventoryItemId && item.item_type === 'product') {
@@ -67,6 +69,51 @@ export class POSService {
             log.warn(`Failed to sync product ${productId} to inventory:`, syncError.message);
             // Continue without inventory tracking
           }
+        }
+        // ========================================================================
+        // NEW: Handle direct inventory items (item_type === 'inventory')
+        // ========================================================================
+        else if (item.item_type === 'inventory') {
+          if (!item.inventory_item_id) {
+            throw new Error(`Inventory item ID required for inventory type items: ${item.item_name}`);
+          }
+          
+          // Validate inventory item exists and has stock
+          const inventoryCheck = await client.query(
+            `SELECT name, cost_price, selling_price, current_stock, category_id
+             FROM inventory_items 
+             WHERE id = $1 AND business_id = $2 AND is_active = true`,
+            [item.inventory_item_id, businessId]
+          );
+          
+          if (inventoryCheck.rows.length === 0) {
+            throw new Error(`Inventory item not found or inactive: ${item.inventory_item_id}`);
+          }
+          
+          const inventoryItem = inventoryCheck.rows[0];
+          
+          // Check stock availability
+          if (inventoryItem.current_stock < item.quantity) {
+            throw new Error(
+              `Insufficient stock for ${inventoryItem.name}. ` +
+              `Required: ${item.quantity}, Available: ${inventoryItem.current_stock}`
+            );
+          }
+          
+          // Use inventory item's selling price if not specified
+          if (!item.unit_price || item.unit_price === 0) {
+            item.unit_price = inventoryItem.selling_price;
+          }
+          
+          itemCost = inventoryItem.cost_price * item.quantity;
+          
+          log.info('Direct inventory sale item processed', {
+            item_name: inventoryItem.name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            cost_price: inventoryItem.cost_price,
+            item_cost: itemCost
+          });
         }
 
         processedItems.push({
@@ -151,6 +198,34 @@ export class POSService {
       }
 
       // ========================================================================
+      // NEW: Process accounting for direct inventory sales
+      // ========================================================================
+      const inventorySaleItems = processedItems.filter(item => item.item_type === 'inventory');
+      if (inventorySaleItems.length > 0) {
+        try {
+          // Call inventory accounting service for direct inventory sales
+          await InventoryAccountingService.recordPosSaleWithCogs({
+            business_id: businessId,
+            pos_transaction_id: transaction.id,
+            items: inventorySaleItems.map(item => ({
+              inventory_item_id: item.inventory_item_id,
+              product_id: null,  // No product link for direct inventory sales
+              quantity: item.quantity,
+              unit_price: item.unit_price
+            }))
+          }, userId);
+          
+          log.info('Direct inventory sales accounting completed', {
+            transactionId: transaction.id,
+            itemCount: inventorySaleItems.length
+          });
+        } catch (cogsError) {
+          log.error('Failed to record COGS for direct inventory sales:', cogsError);
+          // Don't fail the transaction, but log the error
+        }
+      }
+
+      // ========================================================================
       // STEP 5: AUDIT LOG FOR TRANSACTION CREATION
       // ========================================================================
       await auditLogger.logAction({
@@ -165,6 +240,7 @@ export class POSService {
           payment_method: transaction.payment_method,
           item_count: processedItems.length,
           inventory_items_count: processedItems.filter(item => item.inventory_item_id).length,
+          direct_inventory_items: inventorySaleItems.length,
           equipment_items_count: equipmentItems.length,
           accounting_processed: false // Initial state
         }
@@ -195,21 +271,21 @@ export class POSService {
             transactionId: transaction.id,
             linesCreated: accountingResult.linesCreated
           });
-          
+
           // ========================================================================
           // CRITICAL FIX: UPDATE accounting_processed FLAG
           // ========================================================================
           const updateClient = await getClient();
           try {
             await updateClient.query(
-              `UPDATE pos_transactions 
-               SET accounting_processed = true, 
+              `UPDATE pos_transactions
+               SET accounting_processed = true,
                    accounting_error = NULL,
                    updated_at = NOW()
                WHERE id = $1 AND business_id = $2`,
               [transaction.id, businessId]
             );
-            
+
             log.info('✅ Updated accounting_processed flag to true', {
               transactionId: transaction.id
             });
@@ -221,19 +297,19 @@ export class POSService {
             transactionId: transaction.id,
             reason: accountingResult?.message || 'Unknown reason'
           });
-          
+
           // Update with error if accounting failed
           const updateClient = await getClient();
           try {
             await updateClient.query(
-              `UPDATE pos_transactions 
+              `UPDATE pos_transactions
                SET accounting_error = $1,
                    updated_at = NOW()
                WHERE id = $2 AND business_id = $3`,
-              [accountingResult?.message || 'Accounting processing failed', 
+              [accountingResult?.message || 'Accounting processing failed',
                transaction.id, businessId]
             );
-            
+
             log.warn('⚠️ Updated accounting_error with failure message', {
               transactionId: transaction.id,
               error: accountingResult?.message
@@ -247,22 +323,22 @@ export class POSService {
           transactionId: transaction.id,
           error: accountingError.message
         });
-        
+
         // Update with error even if the service call itself failed
         const updateClient = await getClient();
         try {
           await updateClient.query(
-            `UPDATE pos_transactions 
+            `UPDATE pos_transactions
              SET accounting_error = $1,
                  updated_at = NOW()
              WHERE id = $2 AND business_id = $3`,
-            [`Accounting service error: ${accountingError.message}`, 
+            [`Accounting service error: ${accountingError.message}`,
              transaction.id, businessId]
           );
         } finally {
           updateClient.release();
         }
-        
+
         // Don't fail the transaction if accounting fails
         accountingResult = {
           success: false,
@@ -522,7 +598,7 @@ export class POSService {
         LEFT JOIN chart_of_accounts ca ON jel.account_id = ca.id
         WHERE je.business_id = $1
           AND je.reference_type = 'pos_transaction'
-          AND je.reference_id = $2::text  -- FIXED: transactionId parameter needs ::text cast
+          AND je.reference_id = $2::text  // FIXED: transactionId parameter needs ::text cast
         GROUP BY je.id
         ORDER BY je.created_at`;
 
@@ -536,7 +612,7 @@ export class POSService {
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
         WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
-          AND it.reference_id = $2  -- FIXED: NO ::text cast - reference_id is UUID
+          AND it.reference_id = $2  // FIXED: NO ::text cast - reference_id is UUID
         ORDER BY it.created_at`;
 
       const inventoryTransactionsResult = await client.query(
@@ -863,7 +939,7 @@ export class POSService {
           COUNT(*) FILTER (WHERE pt.payment_method = 'card') as card_count,
           COUNT(*) FILTER (WHERE pt.payment_method = 'mobile_money') as mobile_money_count
         FROM pos_transactions pt
-        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id  -- FIXED: NO ::text cast
+        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id  // FIXED: NO ::text cast
           AND it.reference_type = 'pos_transaction'
           AND it.transaction_type = 'sale'
         WHERE pt.business_id = $1
