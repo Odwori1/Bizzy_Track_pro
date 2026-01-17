@@ -5,6 +5,7 @@ export const assetController = {
   async create(req, res, next) {
     try {
       const assetData = req.body;
+      console.log('CONTROLLER - RAW BODY:', JSON.stringify(req.body, null, 2));
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
@@ -283,8 +284,8 @@ export const assetController = {
       const { as_of_date } = req.body;
 
       const historicalDepreciation = await AssetService.calculateHistoricalDepreciation(
-        businessId, 
-        assetId, 
+        businessId,
+        assetId,
         as_of_date ? new Date(as_of_date) : new Date()
       );
 

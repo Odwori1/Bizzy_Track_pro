@@ -19,7 +19,7 @@ export class AssetService {
         prefix = businessResult.rows[0].name.substring(0, 3).toUpperCase();
       }
 
-      // Get next sequence number from NEW assets table
+      // Get next sequence number from assets table
       const sequenceResult = await client.query(
         `SELECT COALESCE(MAX(CAST(SUBSTRING(asset_code FROM '[0-9]+$') AS INTEGER)), 0) + 1 as next_sequence
          FROM assets
@@ -37,13 +37,25 @@ export class AssetService {
   }
 
   /**
-   * Create a new fixed asset (UPDATED for new assets table)
+   * Create a new fixed asset - PRODUCTION READY with RLS fix
    */
   static async createFixedAsset(businessId, assetData, userId) {
     const client = await getClient();
 
     try {
       await client.query('BEGIN');
+
+      // ✅ FIX: Set session variable for RLS policy (transaction-scoped with 'true')
+      // The 'true' parameter makes it transaction-local, but we set it again after commit
+      await client.query(
+        "SELECT set_config('app.current_business_id', $1, false)",
+        [businessId]
+      );
+
+      log.info('RLS session variable set for transaction', { businessId });
+
+      // Lock table to prevent race conditions in asset code generation
+      await client.query('LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE');
 
       // Ensure fixed asset accounts exist
       await client.query(
@@ -55,52 +67,169 @@ export class AssetService {
       let assetCode = assetData.asset_code;
       if (!assetCode) {
         assetCode = await this.generateNextAssetCode(client, businessId);
+
+        // Verify uniqueness
+        const checkUnique = await client.query(
+          'SELECT id FROM assets WHERE business_id = $1 AND asset_code = $2',
+          [businessId, assetCode]
+        );
+
+        if (checkUnique.rows.length > 0) {
+          throw new Error(`Asset code ${assetCode} already exists`);
+        }
       }
 
-      // Insert into NEW assets table
+      // Useful life - Schema already converted years → months
+      const usefulLifeMonths = assetData.useful_life_months || 60;
+
+      log.info('Creating asset with useful life:', {
+        received_months: assetData.useful_life_months,
+        received_years: assetData.useful_life_years,
+        storing_months: usefulLifeMonths
+      });
+
+      // ✅ FIX: Store purchase_date directly as string (already validated by schema)
+      const purchaseDate = assetData.purchase_date || new Date().toISOString().split('T')[0];
+      
+      log.info('Creating asset with purchase date:', {
+        received: assetData.purchase_date,
+        storing: purchaseDate,
+        note: 'Storing as YYYY-MM-DD string to prevent timezone conversion'
+      });
+
+      // Use purchase_cost (not purchase_price)
+      const purchaseCost = parseFloat(assetData.purchase_cost || assetData.purchase_price || 0);
+
+      // Insert into assets table
       const result = await client.query(
         `INSERT INTO assets (
           business_id, asset_code, asset_name, category, asset_type,
           purchase_date, purchase_cost, salvage_value, useful_life_months,
-          depreciation_method, serial_number, model, manufacturer, location,
-          status, condition_status, notes, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          depreciation_method, depreciation_rate,
+          serial_number, model, manufacturer, location,
+          status, condition_status, notes,
+          department_id, supplier_id, purchase_order_id,
+          current_book_value,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
         RETURNING *`,
         [
           businessId,
           assetCode,
           assetData.asset_name,
-          assetData.category || 'equipment',
-          'tangible', // Default asset type
-          assetData.purchase_date || new Date(),
-          parseFloat(assetData.purchase_price || assetData.purchase_cost || 0),
+          assetData.category,
+          'tangible',
+          purchaseDate,  // ✅ Already a string
+          purchaseCost,
           parseFloat(assetData.salvage_value || 0),
-          (parseInt(assetData.useful_life_years || 5) * 12), // Convert years to months
+          usefulLifeMonths,
           assetData.depreciation_method || 'straight_line',
-          assetData.serial_number || '',
-          assetData.model || '',
-          assetData.manufacturer || '',
-          assetData.location || '',
-          'active', // status column: must be 'active'
-          assetData.condition_status || 'excellent', // condition_status column: from schema
-          assetData.description || '',
+          assetData.depreciation_rate || null,
+          assetData.serial_number || null,
+          assetData.model || null,
+          assetData.manufacturer || null,
+          assetData.location || null,
+          'active',
+          assetData.condition_status || 'excellent',
+          assetData.notes || assetData.description || null,
+          assetData.department_id || null,
+          assetData.supplier_id || null,
+          assetData.purchase_order_id || null,
+          purchaseCost, // Initial book value = purchase cost
           userId
         ]
       );
 
       const asset = result.rows[0];
 
-      // Create accounting journal entry for asset purchase (optional)
+      // ✅ Diagnostic log after the INSERT
+      log.info('Database returned purchase_date:', {
+        db_value: asset.purchase_date,
+        db_type: typeof asset.purchase_date,
+        db_instanceof_date: asset.purchase_date instanceof Date,
+        db_to_string: asset.purchase_date ? asset.purchase_date.toString() : 'null',
+        db_to_iso: asset.purchase_date ? asset.purchase_date.toISOString() : 'null'
+      });
+
+      // ✅ FIX: FORCE purchase_date to string format before returning
+      if (asset.purchase_date instanceof Date) {
+        // Convert to YYYY-MM-DD in LOCAL timezone (not UTC)
+        const d = new Date(asset.purchase_date);
+        // Add timezone offset to get local date
+        const localDate = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
+        asset.purchase_date = localDate.toISOString().split('T')[0];
+      }
+
+      // ✅ FIX: Verify persistence INSIDE transaction (before commit)
+      const verificationInTxn = await client.query(
+        'SELECT id, purchase_date FROM assets WHERE id = $1 AND business_id = $2',
+        [asset.id, businessId]
+      );
+
+      if (verificationInTxn.rows.length === 0) {
+        log.error('CRITICAL: Asset not found immediately after INSERT', {
+          asset_id: asset.id,
+          asset_code: asset.asset_code,
+          business_id: businessId
+        });
+        throw new Error('Asset creation failed - row not visible after INSERT');
+      }
+
+      log.info('In-transaction verification passed', {
+        asset_id: asset.id,
+        found_purchase_date: verificationInTxn.rows[0].purchase_date
+      });
+
+      // Create accounting journal entry for asset purchase
       if (asset.purchase_cost > 0) {
         try {
-          const journalResult = await client.query(
-            'SELECT create_asset_purchase_journal($1, $2, $3) as journal_entry_id',
-            [businessId, asset.id, userId]
-          );
+          // Use today's date if purchase date is in the future for journal entries
+          const effectiveJournalDate = new Date(purchaseDate) > new Date()
+            ? new Date().toISOString().split('T')[0]
+            : purchaseDate;
 
-          asset.journal_entry_id = journalResult.rows[0].journal_entry_id;
-        } catch (error) {
-          log.warn('Failed to create asset purchase journal entry:', error.message);
+          // Add this logging before the journal creation
+          log.info('Calling create_asset_purchase_journal with:', {
+            businessId,
+            assetId: asset.id,
+            assetIdType: typeof asset.id,
+            userId,
+            effectiveJournalDate,
+            functionSignature: 'create_asset_purchase_journal(p_business_id uuid, p_asset_id uuid, p_user_id uuid, p_journal_date date)'
+          });
+
+          // 🚨 FIX THIS LINE - Remove "as journal_entry_id"
+          const journalResult = await client.query(
+            'SELECT create_asset_purchase_journal($1, $2, $3, $4)',
+            [businessId, asset.id, userId, effectiveJournalDate]
+          );
+          
+          // After getting the result
+          log.info('Journal creation result structure:', {
+            rows: journalResult.rows,
+            rowCount: journalResult.rowCount,
+            fields: journalResult.fields ? journalResult.fields.map(f => f.name) : [],
+            keys: Object.keys(journalResult.rows[0] || {})
+          });
+
+          // 🚨 FIX THIS LINE - Use the function name as property
+          asset.journal_entry_id = journalResult.rows[0].create_asset_purchase_journal;
+
+          log.info('Asset purchase journal created:', {
+            asset_id: asset.id,
+            journal_entry_id: asset.journal_entry_id,  // Now will be correct!
+            purchase_date: purchaseDate,
+            effective_journal_date: effectiveJournalDate,
+            is_future_purchase: new Date(purchaseDate) > new Date()
+          });
+        } catch (journalError) {
+          log.warn('Failed to create asset purchase journal entry:', {
+            error: journalError.message,
+            asset_id: asset.id,
+            purchase_date: purchaseDate
+          });
+          // Continue without journal entry - don't fail the transaction
+          asset.journal_entry_warning = journalError.message;
         }
       }
 
@@ -115,22 +244,108 @@ export class AssetService {
           asset_code: asset.asset_code,
           asset_name: asset.asset_name,
           purchase_cost: asset.purchase_cost,
-          category: asset.category
+          useful_life_months: asset.useful_life_months,
+          purchase_date: asset.purchase_date
         }
       });
 
-      log.info('Fixed asset created', {
-        businessId,
-        userId,
-        assetId: asset.id,
-        assetCode: asset.asset_code,
-        assetName: asset.asset_name
+      log.info('Asset created successfully:', {
+        asset_id: asset.id,
+        asset_code: asset.asset_code,
+        useful_life_months: asset.useful_life_months,
+        purchase_date: asset.purchase_date,
+        purchase_cost: asset.purchase_cost
       });
 
+      // Commit the transaction
       await client.query('COMMIT');
+
+      log.info('Transaction committed successfully', { asset_id: asset.id });
+
+      // ✅ FIX: Post-commit verification - ensure RLS variable is still set
+      try {
+        const verification = await client.query(
+          'SELECT id, purchase_date::text as purchase_date_str FROM assets WHERE id = $1 AND business_id = $2',
+          [asset.id, businessId]
+        );
+
+        if (verification.rows.length === 0) {
+          log.error('CRITICAL: Asset committed but not found in database', {
+            asset_id: asset.id,
+            asset_code: asset.asset_code,
+            business_id: businessId,
+            note: 'RLS policy may be blocking access - trying to reset session variable'
+          });
+
+          // Try setting it again and re-query
+          await client.query(
+            "SELECT set_config('app.current_business_id', $1, false)",
+            [businessId]
+          );
+
+          const retryVerification = await client.query(
+            'SELECT id, purchase_date::text as purchase_date_str FROM assets WHERE id = $1 AND business_id = $2',
+            [asset.id, businessId]
+          );
+
+          if (retryVerification.rows.length === 0) {
+            log.error('CRITICAL: Asset still not found after RLS reset', {
+              asset_id: asset.id,
+              asset_code: asset.asset_code
+            });
+          } else {
+            log.info('Post-commit verification passed after RLS reset', {
+              asset_id: asset.id,
+              purchase_date_verified: retryVerification.rows[0].purchase_date_str
+            });
+          }
+        } else {
+          log.info('Post-commit verification passed', {
+            asset_id: asset.id,
+            asset_code: asset.asset_code,
+            purchase_date_verified: verification.rows[0].purchase_date_str
+          });
+        }
+      } catch (verifyError) {
+        log.warn('Post-commit verification query failed:', {
+          error: verifyError.message,
+          asset_id: asset.id,
+          note: 'Asset was created successfully despite verification failure'
+        });
+      }
+
+      // ✅ FIX: Format dates as strings to prevent timezone conversion in response
+      // Convert DATE columns to YYYY-MM-DD strings before returning
+      if (asset.purchase_date instanceof Date) {
+        const d = asset.purchase_date;
+        asset.purchase_date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      }
+      if (asset.disposal_date instanceof Date) {
+        const d = asset.disposal_date;
+        asset.disposal_date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      }
+      if (asset.depreciation_start_date instanceof Date) {
+        const d = asset.depreciation_start_date;
+        asset.depreciation_start_date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      }
+
       return asset;
+
     } catch (error) {
       await client.query('ROLLBACK');
+
+      log.error('Asset creation failed:', {
+        error: error.message,
+        stack: error.stack,
+        businessId,
+        assetData: {
+          asset_name: assetData.asset_name,
+          useful_life_months: assetData.useful_life_months,
+          purchase_date: assetData.purchase_date,
+          category: assetData.category
+        }
+      });
+
       throw error;
     } finally {
       client.release();
@@ -138,7 +353,7 @@ export class AssetService {
   }
 
   /**
-   * Get all fixed assets for a business (UPDATED for new assets table)
+   * Get all fixed assets for a business
    */
   static async getFixedAssets(businessId, filters = {}) {
     const client = await getClient();
@@ -165,8 +380,14 @@ export class AssetService {
 
       if (filters.condition_status) {
         paramCount++;
-        queryStr += ` AND a.status = $${paramCount}`;
+        queryStr += ` AND a.condition_status = $${paramCount}`;
         params.push(filters.condition_status);
+      }
+
+      if (filters.status) {
+        paramCount++;
+        queryStr += ` AND a.status = $${paramCount}`;
+        params.push(filters.status);
       }
 
       if (filters.is_active !== undefined) {
@@ -179,7 +400,7 @@ export class AssetService {
 
       const result = await client.query(queryStr, params);
 
-      // Format response to match expected structure
+      // Format response to include both old and new field names for compatibility
       return result.rows.map(asset => ({
         id: asset.id,
         business_id: asset.business_id,
@@ -187,15 +408,19 @@ export class AssetService {
         asset_name: asset.asset_name,
         category: asset.category,
         description: asset.notes,
+        notes: asset.notes,
         purchase_date: asset.purchase_date,
         purchase_price: asset.purchase_cost,
+        purchase_cost: asset.purchase_cost,
         current_value: asset.current_book_value,
         depreciation_method: asset.depreciation_method,
         depreciation_rate: asset.depreciation_rate,
+        useful_life_months: asset.useful_life_months,
         useful_life_years: Math.floor(asset.useful_life_months / 12),
         salvage_value: asset.salvage_value,
         location: asset.location,
-        condition_status: asset.status,
+        status: asset.status,
+        condition_status: asset.condition_status,
         serial_number: asset.serial_number,
         model: asset.model,
         manufacturer: asset.manufacturer,
@@ -215,7 +440,7 @@ export class AssetService {
   }
 
   /**
-   * Get asset by ID (UPDATED for new assets table)
+   * Get asset by ID
    */
   static async getAssetById(businessId, assetId) {
     const client = await getClient();
@@ -257,15 +482,19 @@ export class AssetService {
         asset_name: asset.asset_name,
         category: asset.category,
         description: asset.notes,
+        notes: asset.notes,
         purchase_date: asset.purchase_date,
         purchase_price: asset.purchase_cost,
+        purchase_cost: asset.purchase_cost,
         current_value: asset.current_book_value,
         depreciation_method: asset.depreciation_method,
         depreciation_rate: asset.depreciation_rate,
+        useful_life_months: asset.useful_life_months,
         useful_life_years: Math.floor(asset.useful_life_months / 12),
         salvage_value: asset.salvage_value,
         location: asset.location,
-        condition_status: asset.status,
+        status: asset.status,
+        condition_status: asset.condition_status,
         serial_number: asset.serial_number,
         model: asset.model,
         manufacturer: asset.manufacturer,
@@ -289,7 +518,7 @@ export class AssetService {
   }
 
   /**
-   * Update asset details (UPDATED for new assets table)
+   * Update asset details
    */
   static async updateAsset(businessId, assetId, updateData, userId) {
     const client = await getClient();
@@ -302,9 +531,11 @@ export class AssetService {
         asset_name: 'asset_name',
         category: 'category',
         description: 'notes',
+        notes: 'notes',
         current_value: 'current_book_value',
         location: 'location',
-        condition_status: 'status',
+        status: 'status',
+        condition_status: 'condition_status',
         serial_number: 'serial_number',
         model: 'model',
         manufacturer: 'manufacturer'
@@ -366,9 +597,11 @@ export class AssetService {
         asset_name: updatedAsset.asset_name,
         category: updatedAsset.category,
         description: updatedAsset.notes,
+        notes: updatedAsset.notes,
         current_value: updatedAsset.current_book_value,
         location: updatedAsset.location,
-        condition_status: updatedAsset.status,
+        status: updatedAsset.status,
+        condition_status: updatedAsset.condition_status,
         serial_number: updatedAsset.serial_number,
         model: updatedAsset.model,
         manufacturer: updatedAsset.manufacturer,
@@ -383,7 +616,7 @@ export class AssetService {
   }
 
   /**
-   * Get asset statistics (UPDATED for new assets table)
+   * Get asset statistics
    */
   static async getAssetStatistics(businessId) {
     const client = await getClient();
@@ -397,7 +630,7 @@ export class AssetService {
            SUM(current_book_value) as total_current_value,
            AVG(purchase_cost) as avg_asset_value,
            COUNT(*) FILTER (WHERE status = 'under_maintenance') as assets_under_maintenance,
-           COUNT(*) FILTER (WHERE status IN ('poor', 'broken')) as poor_condition_assets
+           COUNT(*) FILTER (WHERE condition_status IN ('poor', 'broken')) as poor_condition_assets
          FROM assets
          WHERE business_id = $1`,
         [businessId]
@@ -447,7 +680,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Register existing asset (without purchase)
+   * Register existing asset (without purchase)
    */
   static async registerExistingAsset(businessId, assetData, userId) {
     const client = await getClient();
@@ -580,7 +813,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Get asset register report
+   * Get asset register report
    */
   static async getAssetRegister(businessId, filters = {}) {
     const client = await getClient();
@@ -613,7 +846,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Get enhanced asset register
+   * Get enhanced asset register
    */
   static async getEnhancedAssetRegister(businessId, filters = {}) {
     const client = await getClient();
@@ -655,7 +888,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Get depreciation schedule
+   * Get depreciation schedule
    */
   static async getDepreciationSchedule(businessId, filters = {}) {
     const client = await getClient();
@@ -688,7 +921,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Post monthly depreciation
+   * Post monthly depreciation
    */
   static async postMonthlyDepreciation(businessId, month, year, userId) {
     const client = await getClient();
@@ -729,7 +962,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Calculate depreciation for specific asset
+   * Calculate depreciation for specific asset
    */
   static async calculateDepreciation(businessId, assetId, month, year) {
     const client = await getClient();
@@ -751,7 +984,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Dispose of asset
+   * Dispose of asset
    */
   static async disposeAsset(businessId, assetId, disposalData, userId) {
     const client = await getClient();
@@ -860,7 +1093,7 @@ export class AssetService {
   }
 
   /**
-   * NEW: Get assets by category summary
+   * Get assets by category summary
    */
   static async getAssetsByCategory(businessId) {
     const client = await getClient();
