@@ -37,6 +37,16 @@ export const createFixedAssetSchema = Joi.object({
   purchase_price: Joi.number().precision(2).positive().optional(),
   purchase_cost: Joi.number().precision(2).positive().optional(),
 
+  // ✅ NEW: Acquisition method and related fields
+  acquisition_method: Joi.string()
+    .valid('purchase', 'existing', 'transfer', 'donation', 'construction', 'exchange')
+    .optional()
+    .default('purchase'),
+
+  initial_book_value: Joi.number().precision(2).min(0).optional().allow(null),
+
+  existing_accumulated_depreciation: Joi.number().precision(2).min(0).optional().default(0),
+
   // Supplier and invoice
   supplier: Joi.string().max(255).optional().allow('').allow(null),
   supplier_id: Joi.string().uuid().optional().allow(null),
@@ -100,7 +110,22 @@ export const createFixedAssetSchema = Joi.object({
     value.purchase_cost = value.purchase_price;
   }
 
-  // ✅ TRANSFORM 2: Convert useful_life_years → useful_life_months
+  // ✅ TRANSFORM 2: Handle existing assets
+  if (value.acquisition_method === 'existing') {
+    // For existing assets, initial_book_value is required
+    if (!value.initial_book_value) {
+      return helpers.error('object.missing', {
+        message: 'initial_book_value is required for existing assets'
+      });
+    }
+    
+    // Calculate purchase_cost if not provided
+    if (!value.purchase_cost && value.initial_book_value && value.existing_accumulated_depreciation) {
+      value.purchase_cost = value.initial_book_value + value.existing_accumulated_depreciation;
+    }
+  }
+
+  // ✅ TRANSFORM 3: Convert useful_life_years → useful_life_months
   if (value.useful_life_years && !value.useful_life_months) {
     value.useful_life_months = Math.round(value.useful_life_years * 12);
   }
@@ -108,30 +133,30 @@ export const createFixedAssetSchema = Joi.object({
   // ✅ CRITICAL FIX: Keep purchase_date as pure string - NO DATE CONVERSION
   // The date is already validated as YYYY-MM-DD string by Joi.string().pattern()
   // Do NOT parse it or convert to Date object - this prevents timezone shifts
-  
+
   // Just validate it's a valid date
   if (value.purchase_date) {
     const dateRegex = /^(\d{4})-(\d{2})-(\d{2})$/;
     const match = value.purchase_date.match(dateRegex);
-    
+
     if (match) {
       const year = parseInt(match[1], 10);
       const month = parseInt(match[2], 10);
       const day = parseInt(match[3], 10);
-      
+
       // Basic validation
       if (month < 1 || month > 12) {
         return helpers.error('date.invalid', {
           message: 'Invalid month in purchase_date'
         });
       }
-      
+
       if (day < 1 || day > 31) {
         return helpers.error('date.invalid', {
           message: 'Invalid day in purchase_date'
         });
       }
-      
+
       // ✅ VALIDATION: Prevent unreasonable future dates
       // Compare as strings to avoid timezone issues
       const today = new Date();
@@ -139,7 +164,7 @@ export const createFixedAssetSchema = Joi.object({
       const maxFutureDate = new Date(today);
       maxFutureDate.setFullYear(today.getFullYear() + 1);
       const maxFutureStr = maxFutureDate.toISOString().split('T')[0];
-      
+
       if (value.purchase_date > maxFutureStr) {
         return helpers.error('date.max', {
           message: 'purchase_date cannot be more than 1 year in the future'
@@ -257,13 +282,13 @@ export const registerExistingAssetSchema = Joi.object({
   if (value.purchase_date) {
     const dateRegex = /^(\d{4})-(\d{2})-(\d{2})$/;
     const match = value.purchase_date.match(dateRegex);
-    
+
     if (match) {
       const today = new Date().toISOString().split('T')[0];
       const maxFuture = new Date();
       maxFuture.setFullYear(maxFuture.getFullYear() + 1);
       const maxFutureStr = maxFuture.toISOString().split('T')[0];
-      
+
       if (value.purchase_date > maxFutureStr) {
         return helpers.error('date.max', {
           message: 'purchase_date cannot be more than 1 year in the future'
@@ -325,7 +350,7 @@ export const disposeAssetSchema = Joi.object({
     const maxFuture = new Date();
     maxFuture.setFullYear(maxFuture.getFullYear() + 1);
     const maxFutureStr = maxFuture.toISOString().split('T')[0];
-    
+
     if (value.disposal_date > maxFutureStr) {
       return helpers.error('date.max', {
         message: 'disposal_date cannot be more than 1 year in the future'

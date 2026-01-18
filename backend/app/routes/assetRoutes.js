@@ -111,6 +111,41 @@ router.post(
   assetController.disposeAsset
 );
 
+// NEW: Asset transfer (handles both UUID and asset_code)
+router.post(
+  '/:id/transfer',
+  requirePermission('asset:update'),
+  assetController.transferAsset
+);
+
+// NEW: Asset transfer history
+router.get(
+  '/:id/transfers',
+  requirePermission('asset:read'),
+  assetController.getTransferHistory
+);
+
+// Get asset by asset code
+router.get(
+  '/code/:asset_code',
+  requirePermission('asset:read'),
+  assetController.getByAssetCode
+);
+
+// NEW: Asset transfer by asset code (alternative endpoint)
+router.post(
+  '/code/:asset_code/transfer',
+  requirePermission('asset:update'),
+  assetController.transferAsset
+);
+
+// NEW: Asset transfer history by asset code
+router.get(
+  '/code/:asset_code/transfers',
+  requirePermission('asset:read'),
+  assetController.getTransferHistory
+);
+
 // NEW: System test
 router.get(
   '/test/system',

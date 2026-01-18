@@ -99,6 +99,34 @@ export const assetController = {
     }
   },
 
+  // NEW: Get asset by asset code
+  async getByAssetCode(req, res, next) {
+    try {
+      const { asset_code } = req.params;
+      const businessId = req.user.businessId;
+
+      // We need to add this method to the service first
+      const asset = await AssetService.getAssetByCode(businessId, asset_code);
+
+      if (!asset) {
+        return res.status(404).json({
+          success: false,
+          message: 'Asset not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: asset,
+        message: 'Asset fetched successfully by asset code'
+      });
+
+    } catch (error) {
+      log.error('Asset fetch by code controller error', error);
+      next(error);
+    }
+  },
+
   async update(req, res, next) {
     try {
       const { id } = req.params;
@@ -238,6 +266,15 @@ export const assetController = {
       });
 
     } catch (error) {
+      // FIX 2: Handle already-posted months with better error message
+      if (error.message.includes('already posted') || error.message.includes('already posted') || error.message.includes('Cannot post')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+          suggestion: 'Check depreciation history or use correction workflow for this period'
+        });
+      }
+
       log.error('Monthly depreciation posting error', error);
       next(error);
     }
@@ -257,7 +294,8 @@ export const assetController = {
         });
       }
 
-      const depreciationAmount = await AssetService.calculateDepreciation(businessId, assetId, month, year);
+      // FIX 3: Updated to handle the enhanced response
+      const result = await AssetService.calculateDepreciation(businessId, assetId, month, year);
 
       res.json({
         success: true,
@@ -265,7 +303,8 @@ export const assetController = {
           asset_id: assetId,
           month,
           year,
-          depreciation_amount: depreciationAmount
+          depreciation_amount: result.amount,
+          note: result.note || 'Depreciation calculated successfully'
         },
         message: 'Depreciation calculated successfully'
       });
@@ -365,6 +404,84 @@ export const assetController = {
     }
   },
 
+  // NEW: Transfer asset (handles both UUID and asset_code)
+  async transferAsset(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const userId = req.user.userId;
+      const assetIdentifier = req.params.id; // Could be UUID or asset_code
+      const transferData = req.body;
+
+      // Basic validation - same pattern as disposeAsset
+      if (!transferData.to_department_id && !transferData.to_location) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one of to_department_id or to_location is required for transfer'
+        });
+      }
+
+      const result = await AssetService.transferAsset(businessId, assetIdentifier, transferData, userId);
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'Asset transferred successfully'
+      });
+
+    } catch (error) {
+      // Handle specific errors - same pattern as other controller methods
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.message.includes('No valid transfer fields')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      log.error('Asset transfer error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Get transfer history for an asset
+  async getTransferHistory(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const assetIdentifier = req.params.id; // Could be UUID or asset_code
+      const { start_date, end_date } = req.query;
+
+      const filters = {};
+      if (start_date) filters.start_date = start_date;
+      if (end_date) filters.end_date = end_date;
+
+      const history = await AssetService.getAssetTransferHistory(businessId, assetIdentifier, filters);
+
+      res.json({
+        success: true,
+        data: history,
+        count: history.length,
+        message: 'Transfer history fetched successfully'
+      });
+
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      log.error('Transfer history fetch error', error);
+      next(error);
+    }
+  },
+
   // NEW: Get assets by category summary
   async getAssetsByCategory(req, res, next) {
     try {
@@ -404,6 +521,8 @@ export const assetController = {
             'Historical depreciation posting',
             'Depreciation tracking',
             'Asset disposal',
+            'Asset transfer',
+            'Asset transfer history',
             'Asset register reports',
             'Enhanced asset register',
             'Depreciation schedule',
