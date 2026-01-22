@@ -37,6 +37,18 @@ export const createFixedAssetSchema = Joi.object({
   purchase_price: Joi.number().precision(2).positive().optional(),
   purchase_cost: Joi.number().precision(2).positive().optional(),
 
+  // ✅ NEW: Payment method for accounting entries
+  payment_method: Joi.string()
+    .valid('cash', 'bank', 'mobile_money', 'mobile', 'credit', 'payable', 'account_payable')
+    .optional()
+    .default('cash'),
+
+  // Optional: Specific account code for payment method
+  payment_account_code: Joi.string()
+    .pattern(/^(1110|1120|1130|2100)$/)
+    .optional()
+    .allow(null),
+
   // ✅ NEW: Acquisition method and related fields
   acquisition_method: Joi.string()
     .valid('purchase', 'existing', 'transfer', 'donation', 'construction', 'exchange')
@@ -118,7 +130,7 @@ export const createFixedAssetSchema = Joi.object({
         message: 'initial_book_value is required for existing assets'
       });
     }
-    
+
     // Calculate purchase_cost if not provided
     if (!value.purchase_cost && value.initial_book_value && value.existing_accumulated_depreciation) {
       value.purchase_cost = value.initial_book_value + value.existing_accumulated_depreciation;
@@ -176,6 +188,14 @@ export const createFixedAssetSchema = Joi.object({
   // Map description → notes for database compatibility
   if (value.description && !value.notes) {
     value.notes = value.description;
+  }
+
+  // Normalize payment method for accounting
+  if (value.payment_method === 'mobile') {
+    value.payment_method = 'mobile_money';
+  }
+  if (value.payment_method === 'payable') {
+    value.payment_method = 'account_payable';
   }
 
   // Normalize depreciation_method

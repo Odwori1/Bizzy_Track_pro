@@ -436,14 +436,14 @@ export const assetController = {
           message: error.message
         });
       }
-      
+
       if (error.message.includes('No valid transfer fields')) {
         return res.status(400).json({
           success: false,
           message: error.message
         });
       }
-      
+
       log.error('Asset transfer error', error);
       next(error);
     }
@@ -476,7 +476,7 @@ export const assetController = {
           message: error.message
         });
       }
-      
+
       log.error('Transfer history fetch error', error);
       next(error);
     }
@@ -535,6 +535,91 @@ export const assetController = {
 
     } catch (error) {
       log.error('System test error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Override/correct depreciation
+  async overrideDepreciation(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const userId = req.user.userId;
+      const assetIdentifier = req.params.id; // Could be UUID or asset_code
+      const overrideData = req.body;
+
+      // Basic validation
+      if (!overrideData.month || !overrideData.year || !overrideData.override_amount || !overrideData.reason) {
+        return res.status(400).json({
+          success: false,
+          message: 'month, year, override_amount, and reason are required'
+        });
+      }
+
+      const result = await AssetService.overrideDepreciation(businessId, assetIdentifier, overrideData, userId);
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'Depreciation override applied successfully'
+      });
+
+    } catch (error) {
+      // Handle specific errors
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.message.includes('required')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.message.includes('already exists') || error.message.includes('No depreciation found')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      log.error('Depreciation override error', error);
+      next(error);
+    }
+  },
+
+  // NEW: Get depreciation overrides for an asset
+  async getDepreciationOverrides(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+      const assetIdentifier = req.params.id; // Could be UUID or asset_code
+      const { start_date, end_date } = req.query;
+
+      const filters = {};
+      if (start_date) filters.start_date = start_date;
+      if (end_date) filters.end_date = end_date;
+
+      const overrides = await AssetService.getDepreciationOverrides(businessId, assetIdentifier, filters);
+
+      res.json({
+        success: true,
+        data: overrides,
+        count: overrides.length,
+        message: 'Depreciation overrides fetched successfully'
+      });
+
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      log.error('Depreciation overrides fetch error', error);
       next(error);
     }
   }

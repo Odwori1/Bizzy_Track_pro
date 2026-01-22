@@ -146,6 +146,34 @@ router.get(
   assetController.getTransferHistory
 );
 
+// NEW: Depreciation override (correct posted depreciation)
+router.post(
+  '/:id/depreciation-override',
+  requirePermission('asset:update'),
+  assetController.overrideDepreciation
+);
+
+// NEW: Get depreciation overrides
+router.get(
+  '/:id/depreciation-overrides',
+  requirePermission('asset:read'),
+  assetController.getDepreciationOverrides
+);
+
+// NEW: Depreciation override by asset code
+router.post(
+  '/code/:asset_code/depreciation-override',
+  requirePermission('asset:update'),
+  assetController.overrideDepreciation
+);
+
+// NEW: Get depreciation overrides by asset code
+router.get(
+  '/code/:asset_code/depreciation-overrides',
+  requirePermission('asset:read'),
+  assetController.getDepreciationOverrides
+);
+
 // NEW: System test
 router.get(
   '/test/system',

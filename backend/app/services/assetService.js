@@ -38,6 +38,10 @@ export class AssetService {
 
   /**
    * Create a new fixed asset - PRODUCTION READY with RLS fix
+   * @param {string} businessId - Business UUID
+   * @param {object} assetData - Asset data including payment_method
+   * @param {string} userId - User UUID
+   * @param {string} [assetData.payment_method] - Payment method: cash, bank, mobile_money, credit (default: cash)
    */
   static async createFixedAsset(businessId, assetData, userId) {
     const client = await getClient();
@@ -213,20 +217,24 @@ export class AssetService {
             ? new Date().toISOString().split('T')[0]
             : purchaseDate;
 
+          // Extract payment method from assetData, default to 'cash' for backward compatibility
+          const paymentMethod = assetData.payment_method || assetData.paymentMethod || 'cash';
+
           // Add this logging before the journal creation
-          log.info('Calling create_asset_purchase_journal with:', {
+          log.info('Calling create_asset_purchase_journal_v2 with:', {
             businessId,
             assetId: asset.id,
             assetIdType: typeof asset.id,
             userId,
             effectiveJournalDate,
-            functionSignature: 'create_asset_purchase_journal(p_business_id uuid, p_asset_id uuid, p_user_id uuid, p_journal_date date)'
+            paymentMethod,
+            functionSignature: 'create_asset_purchase_journal_v2(p_business_id uuid, p_asset_id uuid, p_user_id uuid, p_journal_date date, p_payment_method text)'
           });
 
-          // 🚨 FIX THIS LINE - Remove "as journal_entry_id"
+          // 🚨 UPDATED: Call V2 function with payment method parameter
           const journalResult = await client.query(
-            'SELECT create_asset_purchase_journal($1, $2, $3, $4)',
-            [businessId, asset.id, userId, effectiveJournalDate]
+            'SELECT create_asset_purchase_journal_v2($1, $2, $3, $4, $5)',
+            [businessId, asset.id, userId, effectiveJournalDate, paymentMethod]
           );
 
           // After getting the result
@@ -238,11 +246,12 @@ export class AssetService {
           });
 
           // 🚨 FIX THIS LINE - Use the function name as property
-          asset.journal_entry_id = journalResult.rows[0].create_asset_purchase_journal;
+          asset.journal_entry_id = journalResult.rows[0].create_asset_purchase_journal_v2;
 
-          log.info('Asset purchase journal created:', {
+          log.info('Asset purchase journal created with payment method:', {
             asset_id: asset.id,
-            journal_entry_id: asset.journal_entry_id,  // Now will be correct!
+            journal_entry_id: asset.journal_entry_id,
+            payment_method: paymentMethod,
             purchase_date: purchaseDate,
             effective_journal_date: effectiveJournalDate,
             is_future_purchase: new Date(purchaseDate) > new Date()
@@ -251,7 +260,8 @@ export class AssetService {
           log.warn('Failed to create asset purchase journal entry:', {
             error: journalError.message,
             asset_id: asset.id,
-            purchase_date: purchaseDate
+            purchase_date: purchaseDate,
+            payment_method: assetData.payment_method
           });
           // Continue without journal entry - don't fail the transaction
           asset.journal_entry_warning = journalError.message;
@@ -272,7 +282,8 @@ export class AssetService {
           useful_life_months: asset.useful_life_months,
           purchase_date: asset.purchase_date,
           acquisition_method: asset.acquisition_method,
-          is_existing_asset: asset.is_existing_asset
+          is_existing_asset: asset.is_existing_asset,
+          payment_method: assetData.payment_method || 'cash'
         }
       });
 
@@ -284,7 +295,8 @@ export class AssetService {
         purchase_cost: asset.purchase_cost,
         initial_book_value: asset.initial_book_value,
         acquisition_method: asset.acquisition_method,
-        is_existing_asset: asset.is_existing_asset
+        is_existing_asset: asset.is_existing_asset,
+        payment_method: assetData.payment_method || 'cash'
       });
 
       // Commit the transaction
@@ -373,7 +385,8 @@ export class AssetService {
           useful_life_months: assetData.useful_life_months,
           purchase_date: assetData.purchase_date,
           category: assetData.category,
-          acquisition_method: assetData.acquisition_method
+          acquisition_method: assetData.acquisition_method,
+          payment_method: assetData.payment_method
         }
       });
 
@@ -1134,7 +1147,7 @@ export class AssetService {
 
       // ✅ Use the DATE-FIXED function
       const result = await client.query(
-        'SELECT * FROM post_monthly_depreciation_date_fixed($1, $2, $3, $4)',
+        'SELECT * FROM post_monthly_depreciation_fixed_bug($1, $2, $3, $4)',
         [businessId, month, year, userId]
       );
 
@@ -1359,18 +1372,18 @@ export class AssetService {
       // Check if assetIdentifier is UUID or asset_code
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let assetId = assetIdentifier;
-      
+
       if (!uuidRegex.test(assetIdentifier)) {
         // It's an asset_code, look up the UUID
         const codeResult = await client.query(
           'SELECT id FROM assets WHERE business_id = $1 AND asset_code = $2 AND is_active = true',
           [businessId, assetIdentifier]
         );
-        
+
         if (codeResult.rows.length === 0) {
           throw new Error(`Asset with code ${assetIdentifier} not found`);
         }
-        
+
         assetId = codeResult.rows[0].id;
       }
 
@@ -1572,23 +1585,23 @@ export class AssetService {
    */
   static async getAssetTransferHistory(businessId, assetIdentifier, filters = {}) {
     const client = await getClient();
-    
+
     try {
       // Check if assetIdentifier is UUID or asset_code
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let assetId = assetIdentifier;
-      
+
       if (!uuidRegex.test(assetIdentifier)) {
         // It's an asset_code, look up the UUID
         const codeResult = await client.query(
           'SELECT id FROM assets WHERE business_id = $1 AND asset_code = $2',
           [businessId, assetIdentifier]
         );
-        
+
         if (codeResult.rows.length === 0) {
           throw new Error(`Asset with code ${assetIdentifier} not found`);
         }
-        
+
         assetId = codeResult.rows[0].id;
       }
 
@@ -1603,7 +1616,7 @@ export class AssetService {
         LEFT JOIN users u ON at.created_by = u.id
         WHERE at.business_id = $1 AND at.asset_id = $2
       `;
-      
+
       const params = [businessId, assetId];
       let paramCount = 2;
 
@@ -1622,7 +1635,7 @@ export class AssetService {
       query += ' ORDER BY at.transfer_date DESC, at.created_at DESC';
 
       const result = await client.query(query, params);
-      
+
       // Format dates in response (same pattern as depreciation history)
       const formattedTransfers = result.rows.map(transfer => {
         const formatted = { ...transfer };
@@ -1673,6 +1686,226 @@ export class AssetService {
 
     } catch (error) {
       log.error('Error fetching assets by category:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Override/correct posted depreciation
+   */
+  static async overrideDepreciation(businessId, assetIdentifier, overrideData, userId) {
+    const client = await getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if assetIdentifier is UUID or asset_code
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let assetId = assetIdentifier;
+
+      if (!uuidRegex.test(assetIdentifier)) {
+        // It's an asset_code, look up the UUID
+        const codeResult = await client.query(
+          'SELECT id FROM assets WHERE business_id = $1 AND asset_code = $2 AND is_active = true',
+          [businessId, assetIdentifier]
+        );
+
+        if (codeResult.rows.length === 0) {
+          throw new Error(`Asset with code ${assetIdentifier} not found`);
+        }
+
+        assetId = codeResult.rows[0].id;
+      }
+
+      // Validate required fields
+      if (!overrideData.month || !overrideData.year || !overrideData.override_amount || !overrideData.reason) {
+        throw new Error('month, year, override_amount, and reason are required');
+      }
+
+      // Apply the override using the database function
+      const result = await client.query(
+        'SELECT * FROM apply_depreciation_override($1, $2, $3, $4, $5, $6, $7)',
+        [
+          businessId,
+          assetId,
+          overrideData.month,
+          overrideData.year,
+          overrideData.override_amount,
+          overrideData.reason,
+          userId
+        ]
+      );
+
+      const overrideResult = result.rows[0];
+
+      if (!overrideResult.success) {
+        throw new Error(overrideResult.message);
+      }
+
+      // Get the override record with details
+      const overrideRecordResult = await client.query(
+        `SELECT dpo.*,
+                a.asset_code,
+                a.asset_name,
+                u.email as created_by_email,
+                u2.email as approved_by_email
+         FROM depreciation_overrides dpo
+         JOIN assets a ON dpo.asset_id = a.id
+         JOIN users u ON dpo.created_by = u.id
+         LEFT JOIN users u2 ON dpo.approved_by = u2.id
+         WHERE dpo.id = $1 AND dpo.business_id = $2`,
+        [overrideResult.override_id, businessId]
+      );
+
+      const overrideRecord = overrideRecordResult.rows[0];
+
+      // Format dates (same pattern as other methods)
+      if (overrideRecord.created_at instanceof Date) {
+        const d = overrideRecord.created_at;
+        overrideRecord.created_at = {
+          date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+          time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+        };
+      }
+
+      // Audit log
+      await auditLogger.logAction({
+        businessId,
+        userId,
+        action: 'depreciation.overridden',
+        resourceType: 'asset',
+        resourceId: assetId,
+        oldValues: {
+          original_amount: overrideResult.original_amount
+        },
+        newValues: {
+          new_amount: overrideResult.new_amount,
+          period_month: overrideData.month,
+          period_year: overrideData.year,
+          reason: overrideData.reason
+        },
+        metadata: {
+          asset_code: overrideRecord.asset_code,
+          override_id: overrideResult.override_id
+        }
+      });
+
+      log.info('Depreciation override applied', {
+        businessId,
+        userId,
+        assetId,
+        assetCode: overrideRecord.asset_code,
+        period: `${overrideData.month}/${overrideData.year}`,
+        original_amount: overrideResult.original_amount,
+        new_amount: overrideResult.new_amount,
+        override_id: overrideResult.override_id
+      });
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        override: overrideRecord,
+        summary: {
+          original_amount: overrideResult.original_amount,
+          new_amount: overrideResult.new_amount,
+          difference: overrideResult.new_amount - overrideResult.original_amount,
+          message: overrideResult.message
+        }
+      };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      log.error('Error overriding depreciation:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get depreciation overrides for an asset
+   */
+  static async getDepreciationOverrides(businessId, assetIdentifier, filters = {}) {
+    const client = await getClient();
+
+    try {
+      // Check if assetIdentifier is UUID or asset_code
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let assetId = assetIdentifier;
+
+      if (!uuidRegex.test(assetIdentifier)) {
+        // It's an asset_code, look up the UUID
+        const codeResult = await client.query(
+          'SELECT id FROM assets WHERE business_id = $1 AND asset_code = $2',
+          [businessId, assetIdentifier]
+        );
+
+        if (codeResult.rows.length === 0) {
+          throw new Error(`Asset with code ${assetIdentifier} not found`);
+        }
+
+        assetId = codeResult.rows[0].id;
+      }
+
+      let query = `
+        SELECT dpo.*,
+               a.asset_code,
+               a.asset_name,
+               u.email as created_by_email,
+               u2.email as approved_by_email,
+               ad.depreciation_amount as current_depreciation_amount
+        FROM depreciation_overrides dpo
+        JOIN assets a ON dpo.asset_id = a.id
+        JOIN users u ON dpo.created_by = u.id
+        LEFT JOIN users u2 ON dpo.approved_by = u2.id
+        LEFT JOIN asset_depreciations ad ON dpo.asset_id = ad.asset_id
+          AND dpo.period_month = ad.period_month
+          AND dpo.period_year = ad.period_year
+        WHERE dpo.business_id = $1 AND dpo.asset_id = $2
+      `;
+
+      const params = [businessId, assetId];
+      let paramCount = 2;
+
+      if (filters.start_date) {
+        paramCount++;
+        query += ` AND dpo.created_at >= $${paramCount}`;
+        params.push(filters.start_date);
+      }
+
+      if (filters.end_date) {
+        paramCount++;
+        query += ` AND dpo.created_at <= $${paramCount}`;
+        params.push(filters.end_date);
+      }
+
+      query += ' ORDER BY dpo.period_year DESC, dpo.period_month DESC, dpo.created_at DESC';
+
+      const result = await client.query(query, params);
+
+      // Format dates (same pattern as other methods)
+      const formattedOverrides = result.rows.map(override => {
+        const formatted = { ...override };
+
+        // Format created_at
+        if (formatted.created_at instanceof Date) {
+          const d = formatted.created_at;
+          formatted.created_at = {
+            date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+            time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+          };
+        }
+
+        return formatted;
+      });
+
+      return formattedOverrides;
+
+    } catch (error) {
+      log.error('Error fetching depreciation overrides:', error);
       throw error;
     } finally {
       client.release();

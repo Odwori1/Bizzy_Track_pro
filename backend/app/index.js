@@ -28,9 +28,18 @@ import assetRoutes from './routes/assetRoutes.js';
 //hire assets route
 import assetHireRoutes from './routes/assetHireRoutes.js';
 import equipmentHireRoutes from './routes/equipmentHireRoutes.js';
+import assetSearchRoutes from './routes/assetSearchRoutes.js';
 //additional assets and equipment routes
 import maintenanceRoutes from './routes/maintenanceRoutes.js';
 import depreciationRoutes from './routes/depreciationRoutes.js';
+//additional depreciation routes
+
+// Advanced depreciation features
+import depreciationAdvancedRoutes from './routes/depreciationAdvancedRoutes.js';
+import depreciationBulkRoutes from './routes/depreciationBulkRoutes.js';
+
+// Asset advanced features
+import assetAdvancedRoutes from './routes/assetAdvancedRoutes.js';
 
 import businessValuationRoutes from './routes/businessValuationRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
@@ -104,6 +113,7 @@ import { setRLSContext } from './middleware/rlsContext.js'; // REMOVED releaseRL
 import { timezoneMiddleware } from './middleware/timezone.js';
 
 // Import timezone test routes
+import docsRoutes from './routes/docs.js';
 import timezoneTestRoutes from './routes/timezoneTestRoutes.js';
 
 // Load environment variables
@@ -151,6 +161,9 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// API Documentation (public - no authentication required)
+app.use('/api/docs', docsRoutes);
+
 // Public routes (no authentication required)
 app.use('/api/businesses', businessRoutes);
 app.use('/api/staff', staffRoutes);
@@ -193,12 +206,20 @@ app.use('/api/demo-data', demoDataRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/pricing-rules', pricingRuleRoutes);
 app.use('/api/discount-approvals', discountApprovalRoutes);
+
+// CRITICAL: assetSearchRoutes MUST come BEFORE assetRoutes
+app.use('/api/assets/search', assetSearchRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/asset-hire', assetHireRoutes);
 app.use('/api/equipment-hire', equipmentHireRoutes);
+
 //additional assets and equipment routes
 app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/depreciation', depreciationRoutes);
+// Add these after your existing depreciation routes
+app.use('/api/depreciation/advanced', depreciationAdvancedRoutes);
+app.use('/api/depreciation/bulk', depreciationBulkRoutes);
+app.use('/api/assets/advanced', assetAdvancedRoutes);
 
 app.use('/api/business-valuation', businessValuationRoutes);
 app.use('/api/inventory', inventoryRoutes);
@@ -275,6 +296,7 @@ app.use('*', (req, res) => {
     message: 'Check the API documentation for available endpoints',
     availableEndpoints: [
       'GET /api/health',
+      'GET /api/docs',
       'GET /api/businesses/config',
       'POST /api/businesses/validate-timezone',
       'POST /api/businesses/register',
