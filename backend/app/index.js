@@ -85,6 +85,8 @@ import branchRoutes from './routes/branchRoutes.js';
 //accounting route
 // Add this import with other route imports
 import accountingRoutes from './routes/accountingRoutes.js';
+import taxRoutes from './routes/taxRoutes.js';
+
 
 
 //additional invoice routes
@@ -238,6 +240,7 @@ app.use('/api/analytics/sales', salesAnalyticsRoutes);
 //Acconting route
 // Add this with other protected routes (after authentication middleware)
 app.use('/api/accounting', accountingRoutes);
+app.use('/api/tax', taxRoutes);
 
 
 //department routes
