@@ -90,8 +90,8 @@ export class ProductService {
           business_id, name, description, sku, barcode, category_id,
           cost_price, selling_price, current_stock, min_stock_level,
           max_stock_level, unit_of_measure, is_active, has_variants,
-          variant_data, image_urls, tags
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          variant_data, image_urls, tags, tax_category_code
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *`,
         [
           businessId,
@@ -110,7 +110,8 @@ export class ProductService {
           productData.has_variants,
           productData.variant_data || null,
           productData.image_urls || [],
-          productData.tags || []
+          productData.tags || [],
+          productData.tax_category_code || 'STANDARD_GOODS'
         ]
       );
 
@@ -123,15 +124,15 @@ export class ProductService {
         try {
           const syncResult = await InventorySyncService.syncProductToInventory(product.id, userId);
           log.info(`Auto-created inventory item from product: ${product.id} → ${syncResult.inventory_item.id}`);
-          
+
           // Update product with inventory_item_id
           await client.query(
-            `UPDATE products 
+            `UPDATE products
              SET inventory_item_id = $1, updated_at = NOW()
              WHERE id = $2`,
             [syncResult.inventory_item.id, product.id]
           );
-          
+
           product.inventory_item_id = syncResult.inventory_item.id;
         } catch (syncError) {
           log.warn(`Failed to auto-create inventory item from product:`, syncError);
@@ -150,6 +151,7 @@ export class ProductService {
           sku: product.sku,
           cost_price: product.cost_price,
           selling_price: product.selling_price,
+          tax_category_code: product.tax_category_code,
           auto_inventory_created: productData.auto_create_inventory || false
         }
       });
@@ -175,6 +177,8 @@ export class ProductService {
         SELECT
           p.*,
           ic.name as category_name,
+          ptc.category_name as tax_category_name,  -- NEW
+          ptc.global_treatment as tax_treatment,   -- NEW
           CASE
             WHEN p.current_stock <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
             WHEN p.current_stock = 0 THEN 'out_of_stock'
@@ -182,7 +186,7 @@ export class ProductService {
           END as stock_status,
           COUNT(pv.id) as variant_count,
           -- Inventory sync status
-          CASE 
+          CASE
             WHEN p.inventory_item_id IS NOT NULL THEN 'synced'
             ELSE 'not_synced'
           END as inventory_sync_status,
@@ -191,11 +195,12 @@ export class ProductService {
           ii.cost_price as inventory_cost,
           -- Accounting metrics
           (SELECT COUNT(*) FROM inventory_transactions it
-           WHERE it.inventory_item_id = ii.id 
+           WHERE it.inventory_item_id = ii.id
              AND it.transaction_type = 'sale'
              AND it.created_at >= CURRENT_DATE - INTERVAL '30 days') as recent_sales_count
         FROM products p
         LEFT JOIN inventory_categories ic ON p.category_id = ic.id
+        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code  -- NEW JOIN
         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
         LEFT JOIN product_variants pv ON p.id = pv.product_id AND pv.is_active = true
         WHERE p.business_id = $1
@@ -241,7 +246,7 @@ export class ProductService {
         queryStr += ` AND p.inventory_item_id IS NOT NULL`;
       }
 
-      queryStr += ' GROUP BY p.id, ic.name, ii.id, ii.name, ii.current_stock, ii.cost_price ORDER BY p.name';
+      queryStr += ' GROUP BY p.id, ic.name, ii.id, ii.name, ii.current_stock, ii.cost_price, ptc.category_name, ptc.global_treatment ORDER BY p.name';
 
       if (filters.page && filters.limit) {
         const offset = (filters.page - 1) * filters.limit;
@@ -288,6 +293,8 @@ export class ProductService {
         SELECT
           p.*,
           ic.name as category_name,
+          ptc.category_name as tax_category_name,  -- NEW
+          ptc.global_treatment as tax_treatment,   -- NEW
           CASE
             WHEN p.current_stock <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
             WHEN p.current_stock = 0 THEN 'out_of_stock'
@@ -301,12 +308,13 @@ export class ProductService {
           ii.selling_price as inventory_selling_price,
           -- Sales history
           (SELECT COUNT(*) FROM pos_transaction_items pti
-           WHERE pti.product_id = p.id 
+           WHERE pti.product_id = p.id
              AND pti.created_at >= CURRENT_DATE - INTERVAL '30 days') as recent_sales_count,
           (SELECT COALESCE(SUM(pti.quantity), 0) FROM pos_transaction_items pti
            WHERE pti.product_id = p.id) as total_sold
         FROM products p
         LEFT JOIN inventory_categories ic ON p.category_id = ic.id
+        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code  -- NEW JOIN
         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
         WHERE p.business_id = $1 AND p.id = $2
       `;
@@ -323,7 +331,7 @@ export class ProductService {
 
       // Get recent POS sales
       const salesQuery = `
-        SELECT 
+        SELECT
           pti.*,
           pt.transaction_number,
           pt.transaction_date,
@@ -358,7 +366,8 @@ export class ProductService {
       log.info('✅ Product query successful', {
         productId,
         businessId,
-        inventory_linked: !!product.inventory_item_id
+        inventory_linked: !!product.inventory_item_id,
+        tax_category: product.tax_category_code
       });
 
       return product;
@@ -464,7 +473,7 @@ export class ProductService {
           'SELECT current_stock FROM inventory_items WHERE id = $1',
           [current.inventory_item_id]
         );
-        
+
         if (inventoryResult.rows.length > 0) {
           const inventoryStock = parseFloat(inventoryResult.rows[0].current_stock);
           if (Math.abs(productStock - inventoryStock) > 0.01) {
@@ -626,6 +635,12 @@ export class ProductService {
           -- Inventory sync metrics
           COUNT(*) FILTER (WHERE inventory_item_id IS NOT NULL) as synced_with_inventory,
           COUNT(*) FILTER (WHERE inventory_item_id IS NULL) as not_synced_with_inventory,
+          -- Tax category distribution
+          COUNT(*) FILTER (WHERE tax_category_code = 'STANDARD_GOODS') as standard_goods_count,
+          COUNT(*) FILTER (WHERE tax_category_code = 'ESSENTIAL_GOODS') as essential_goods_count,
+          COUNT(*) FILTER (WHERE tax_category_code = 'PHARMACEUTICALS') as pharmaceuticals_count,
+          COUNT(*) FILTER (WHERE tax_category_code = 'DIGITAL_SERVICES') as digital_services_count,
+          COUNT(*) FILTER (WHERE tax_category_code = 'EXPORT_GOODS') as export_goods_count,
           -- Sales metrics (last 30 days)
           (SELECT COUNT(DISTINCT pti.product_id) FROM pos_transaction_items pti
            JOIN pos_transactions pt ON pti.pos_transaction_id = pt.id

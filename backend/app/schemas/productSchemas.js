@@ -1,9 +1,22 @@
 import Joi from 'joi';
 
+// List of valid tax categories (from database)
+const VALID_TAX_CATEGORIES = [
+  'STANDARD_GOODS',
+  'ESSENTIAL_GOODS',
+  'PHARMACEUTICALS',
+  'DIGITAL_SERVICES',
+  'FINANCIAL_SERVICES',
+  'EDUCATION_SERVICES',
+  'AGRICULTURAL',
+  'EXPORT_GOODS',
+  'SERVICES'
+];
+
 export const createProductSchema = Joi.object({
   name: Joi.string().max(255).required(),
   description: Joi.string().max(1000).optional().allow(''),
-  sku: Joi.string().max(100).optional().allow(''), // ⭐ CHANGED TO OPTIONAL ⭐
+  sku: Joi.string().max(100).optional().allow(''),
   barcode: Joi.string().max(100).optional().allow(''),
   category_id: Joi.string().uuid().required(),
   cost_price: Joi.number().precision(2).min(0).required(),
@@ -16,7 +29,18 @@ export const createProductSchema = Joi.object({
   has_variants: Joi.boolean().default(false),
   variant_data: Joi.object().optional(),
   image_urls: Joi.array().items(Joi.string()).optional(),
-  tags: Joi.array().items(Joi.string()).optional()
+  tags: Joi.array().items(Joi.string()).optional(),
+  
+  // ================ NEW: TAX INTEGRATION ================
+  tax_category_code: Joi.string()
+    .valid(...VALID_TAX_CATEGORIES)
+    .default('STANDARD_GOODS')
+    .messages({
+      'any.only': `Tax category must be one of: ${VALID_TAX_CATEGORIES.join(', ')}`
+    })
+    .optional(),
+  
+  auto_create_inventory: Joi.boolean().default(false)
 });
 
 export const updateProductSchema = Joi.object({
@@ -34,7 +58,17 @@ export const updateProductSchema = Joi.object({
   has_variants: Joi.boolean().optional(),
   variant_data: Joi.object().optional(),
   image_urls: Joi.array().items(Joi.string()).optional(),
-  tags: Joi.array().items(Joi.string()).optional()
+  tags: Joi.array().items(Joi.string()).optional(),
+  
+  // ================ NEW: TAX INTEGRATION ================
+  tax_category_code: Joi.string()
+    .valid(...VALID_TAX_CATEGORIES)
+    .messages({
+      'any.only': `Tax category must be one of: ${VALID_TAX_CATEGORIES.join(', ')}`
+    })
+    .optional(),
+  
+  auto_sync_inventory: Joi.boolean().optional()
 });
 
 export const createProductVariantSchema = Joi.object({

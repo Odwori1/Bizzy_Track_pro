@@ -17,7 +17,8 @@ const validateRequest = (schema) => {
   return (req, res, next) => {
     const { error, value } = schema.validate(req.body, {
       abortEarly: false,
-      stripUnknown: true
+      stripUnknown: true,
+      convert: true // ✅ Ensure date strings are converted properly by Joi
     });
 
     if (error) {
@@ -46,7 +47,7 @@ router.get('/:id', requirePermission('invoice:read'), invoiceController.getById)
 // GET /api/invoices/consolidated/:id - Get consolidated invoice details with department breakdown
 router.get('/consolidated/:id', requirePermission('invoice:read'), async (req, res) => {
   const client = await getClient();
-  
+
   try {
     const { id } = req.params;
     const businessId = req.user?.business_id || req.user?.businessId;
@@ -60,7 +61,7 @@ router.get('/consolidated/:id', requirePermission('invoice:read'), async (req, r
 
     // Get invoice with job and service details
     const invoiceQuery = await client.query(`
-      SELECT 
+      SELECT
         i.*,
         j.job_number,
         j.title as job_title,
@@ -89,7 +90,7 @@ router.get('/consolidated/:id', requirePermission('invoice:read'), async (req, r
 
     // Get line items
     const lineItemsQuery = await client.query(`
-      SELECT 
+      SELECT
         description,
         quantity,
         unit_price,
@@ -102,7 +103,7 @@ router.get('/consolidated/:id', requirePermission('invoice:read'), async (req, r
 
     // Get payments
     const paymentsQuery = await client.query(`
-      SELECT 
+      SELECT
         amount,
         payment_method,
         reference,

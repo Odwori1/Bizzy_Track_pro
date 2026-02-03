@@ -2,6 +2,15 @@ import { invoiceService } from '../services/invoiceService.js';
 import { businessService } from '../services/businessService.js';
 import { log } from '../utils/logger.js';
 
+/**
+ * PRODUCTION-READY INVOICE CONTROLLER
+ * 
+ * Features:
+ * - ✅ Enhanced error handling for tax calculation failures
+ * - ✅ Clear error messages for debugging
+ * - ✅ Proper validation feedback
+ * - ✅ Comprehensive logging
+ */
 export const invoiceController = {
   async create(req, res, next) {
     try {
@@ -32,6 +41,17 @@ export const invoiceController = {
         });
       }
 
+      // ✅ ENHANCED: Validate line items have proper references
+      for (let i = 0; i < invoiceData.line_items.length; i++) {
+        const item = invoiceData.line_items[i];
+        if (!item.product_id && !item.service_id && !item.tax_category_code && item.tax_rate === undefined) {
+          return res.status(400).json({
+            success: false,
+            error: `Line item ${i + 1}: Must have either product_id, service_id, tax_category_code, or tax_rate`
+          });
+        }
+      }
+
       const newInvoice = await invoiceService.createInvoice(
         invoiceData,
         userId,
@@ -53,7 +73,8 @@ export const invoiceController = {
       log.info('Invoice creation completed successfully', {
         invoiceId: newInvoice.id,
         invoiceNumber: formattedInvoice.invoice_number,
-        totalAmount: formattedInvoice.total_amount
+        totalAmount: formattedInvoice.total_amount,
+        taxAmount: formattedInvoice.tax_amount
       });
 
       res.status(201).json({
@@ -63,23 +84,53 @@ export const invoiceController = {
       });
 
     } catch (error) {
-      log.error('Invoice creation controller error', error);
-      
-      // Provide more specific error messages
+      log.error('Invoice creation controller error', {
+        error: error.message,
+        stack: error.stack,
+        businessId: req.user?.businessId
+      });
+
+      // ✅ ENHANCED: Provide specific error messages for tax calculation failures
       let errorMessage = error.message;
       let statusCode = 500;
-      
-      if (error.message.includes('violates foreign key constraint')) {
-        errorMessage = 'Invalid customer, job, or service reference';
+
+      // Tax calculation errors
+      if (error.message.includes('Tax calculation failed')) {
+        errorMessage = error.message;
         statusCode = 400;
-      } else if (error.message.includes('required')) {
+        log.error('Tax calculation error details', {
+          error: errorMessage,
+          businessId: req.user?.businessId,
+          hint: 'Check if business has country set and product/service exists'
+        });
+      }
+      // Product/Service not found
+      else if (error.message.includes('not found for this business')) {
+        errorMessage = error.message;
+        statusCode = 404;
+      }
+      // Foreign key constraint violations
+      else if (error.message.includes('violates foreign key constraint')) {
+        errorMessage = 'Invalid customer, job, product, or service reference';
+        statusCode = 400;
+      }
+      // Validation errors
+      else if (error.message.includes('required')) {
         errorMessage = error.message;
         statusCode = 400;
       }
-      
+      // Business not found
+      else if (error.message.includes('Business not found')) {
+        errorMessage = 'Business account not found. Please check your business settings.';
+        statusCode = 404;
+      }
+
       res.status(statusCode).json({
         success: false,
-        error: errorMessage
+        error: errorMessage,
+        ...(process.env.NODE_ENV === 'development' && {
+          details: error.stack
+        })
       });
     }
   },
@@ -126,7 +177,11 @@ export const invoiceController = {
       });
 
     } catch (error) {
-      log.error('Invoices fetch controller error', error);
+      log.error('Invoices fetch controller error', {
+        error: error.message,
+        stack: error.stack,
+        businessId: req.user?.businessId
+      });
       res.status(500).json({
         success: false,
         error: 'Failed to fetch invoices'
@@ -177,7 +232,12 @@ export const invoiceController = {
       });
 
     } catch (error) {
-      log.error('Invoice fetch by ID controller error', error);
+      log.error('Invoice fetch by ID controller error', {
+        error: error.message,
+        stack: error.stack,
+        invoiceId: req.params?.id,
+        businessId: req.user?.businessId
+      });
       res.status(500).json({
         success: false,
         error: 'Failed to fetch invoice'
@@ -247,17 +307,22 @@ export const invoiceController = {
       });
 
     } catch (error) {
-      log.error('Invoice payment recording controller error', error);
-      
+      log.error('Invoice payment recording controller error', {
+        error: error.message,
+        stack: error.stack,
+        invoiceId: req.params?.id,
+        businessId: req.user?.businessId
+      });
+
       let errorMessage = error.message;
       let statusCode = 500;
-      
+
       if (error.message.includes('not found')) {
         statusCode = 404;
       } else if (error.message.includes('amount') || error.message.includes('payment method')) {
         statusCode = 400;
       }
-      
+
       res.status(statusCode).json({
         success: false,
         error: errorMessage
@@ -295,6 +360,18 @@ export const invoiceController = {
         businessId
       );
 
+      // ✅ ADDED: Format invoice for display
+      const business = await businessService.getBusinessProfile(businessId);
+      if (!business) {
+        log.error('Business not found for status update formatting', { businessId });
+        return res.status(500).json({
+          success: false,
+          error: 'Business profile not found'
+        });
+      }
+
+      const formattedInvoice = await invoiceService.formatInvoiceForDisplay(updatedInvoice, business);
+
       log.info('Invoice status updated successfully', {
         invoiceId: id,
         newStatus: status
@@ -303,21 +380,26 @@ export const invoiceController = {
       res.json({
         success: true,
         message: 'Invoice status updated successfully',
-        data: updatedInvoice
+        data: formattedInvoice
       });
 
     } catch (error) {
-      log.error('Invoice status update controller error', error);
-      
+      log.error('Invoice status update controller error', {
+        error: error.message,
+        stack: error.stack,
+        invoiceId: req.params?.id,
+        businessId: req.user?.businessId
+      });
+
       let errorMessage = error.message;
       let statusCode = 500;
-      
+
       if (error.message.includes('not found')) {
         statusCode = 404;
       } else if (error.message.includes('Invalid status')) {
         statusCode = 400;
       }
-      
+
       res.status(statusCode).json({
         success: false,
         error: errorMessage

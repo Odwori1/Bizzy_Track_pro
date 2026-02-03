@@ -15,16 +15,58 @@ export class TaxService {
 
     const {
       businessId,
-      countryCode = 'UG',
+      countryCode,  // ✅ REMOVED DEFAULT - will get from business
       productCategory,
       amount,
       transactionType = 'sale',
       customerType = 'company',
-      isExport = false,
-      transactionDate = new Date().toISOString().split('T')[0]
+      isExempt = false,  // ✅ FIXED: was isExport, should be isExempt
+      transactionDate
     } = params;
 
     try {
+      // ✅ FIX: Convert transactionDate to date-only string for PostgreSQL function
+      const transactionDateForDB = this.parseAsDateOnly(transactionDate);
+
+      // ✅ NEW: Get country from business if not provided
+      let businessCountry = countryCode;
+      if (!businessCountry) {
+        try {
+          const businessQuery = await client.query(
+            `SELECT
+              b.country_code,
+              tc.country_name,
+              b.currency,
+              b.name as business_name
+             FROM businesses b
+             LEFT JOIN tax_countries tc ON b.country_code = tc.country_code
+             WHERE b.id = $1`,
+            [businessId]
+          );
+
+          if (businessQuery.rows.length === 0) {
+            throw new Error(`Business not found: ${businessId}`);
+          }
+
+          const business = businessQuery.rows[0];
+          businessCountry = business.country_code || 'UG';
+
+          log.debug('Retrieved country from business', {
+            businessId,
+            country: businessCountry,
+            businessName: business.business_name,
+            currency: business.currency
+          });
+
+        } catch (error) {
+          log.warn('Failed to get business country, defaulting to UG', {
+            businessId,
+            error: error.message
+          });
+          businessCountry = 'UG';
+        }
+      }
+
       // FIXED: Don't specify column definitions for functions with OUT parameters
       const query = `
         SELECT * FROM calculate_item_tax(
@@ -34,19 +76,21 @@ export class TaxService {
 
       const values = [
         businessId,
-        countryCode,
+        businessCountry,  // ✅ FIXED: Use businessCountry (dynamic)
         productCategory,
         parseFloat(amount),
         transactionType,
         customerType,
-        isExport,
-        transactionDate
+        isExempt,  // ✅ FIXED: was isExport, now isExempt
+        transactionDateForDB  // ✅ FIXED: Use date-only string
       ];
 
       log.debug('Calculating tax for item', {
         businessId,
+        country: businessCountry,
         productCategory,
-        amount
+        amount,
+        transactionDate: transactionDateForDB
       });
 
       const result = await client.query(query, values);
@@ -56,6 +100,12 @@ export class TaxService {
       }
 
       const tax = result.rows[0];
+
+      log.debug('Tax calculation successful', {
+        taxCode: tax.tax_type_code,
+        taxRate: tax.tax_rate,
+        taxAmount: tax.tax_amount
+      });
 
       return {
         taxId: tax.tax_id,
@@ -68,18 +118,24 @@ export class TaxService {
         isZeroRated: tax.is_zero_rated,
         ledgerAccount: tax.ledger_account,
         calculationDetails: {
-          countryCode,
+          countryCode: businessCountry,
           productCategory,
           transactionType,
-          transactionDate,
+          transactionDate: transactionDateForDB,
           amount: parseFloat(amount),
           customerType,
-          isExport
+          isExempt
         }
       };
 
     } catch (error) {
-      log.error('Tax calculation error:', error);
+      log.error('Tax calculation error:', {
+        error: error.message,
+        stack: error.stack,
+        businessId,
+        productCategory,
+        amount
+      });
       throw new Error(`Tax calculation failed: ${error.message}`);
     } finally {
       client.release();
@@ -87,9 +143,46 @@ export class TaxService {
   }
 
   /**
+   * Parse any date input to date-only string (YYYY-MM-DD)
+   * ✅ ASSETS SYSTEM PATTERN: Simple date extraction without timezone complications
+   */
+  static parseAsDateOnly(dateInput) {
+    if (!dateInput) {
+      // Use assets system pattern: get current date components directly
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // If it's already a date-only string, return as-is
+    if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      return dateInput;
+    }
+    
+    // If it's any other format, create Date object and extract components
+    const date = new Date(dateInput);
+    if (isNaN(date.getTime())) {
+      // Invalid date, return current date
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // ✅ ASSETS SYSTEM PATTERN: Extract date components directly
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
    * Calculate tax for multiple line items (invoice)
    */
-  static async calculateInvoiceTax(lineItems, businessId, countryCode = 'UG') {
+  static async calculateInvoiceTax(lineItems, businessId, countryCode) {
     const calculations = [];
     let totalTaxableAmount = 0;
     let totalTaxAmount = 0;
@@ -97,19 +190,20 @@ export class TaxService {
 
     log.info('Calculating invoice tax', {
       businessId,
-      lineItemCount: lineItems.length
+      lineItemCount: lineItems.length,
+      countryCode: countryCode || 'from business'
     });
 
     for (const [index, item] of lineItems.entries()) {
       try {
         const tax = await this.calculateItemTax({
           businessId,
-          countryCode,
+          countryCode,  // Will get from business if not provided
           productCategory: item.productCategory,
           amount: item.amount,
           transactionType: item.transactionType || 'sale',
           customerType: item.customerType || 'company',
-          isExport: item.isExport || false,
+          isExempt: item.isExempt || false,  // FIXED: was isExport
           transactionDate: item.transactionDate
         });
 
@@ -369,11 +463,14 @@ export class TaxService {
    */
   static async getTaxRate(productCategory, countryCode = 'UG', date = new Date().toISOString().split('T')[0]) {
     const client = await getClient();
-    
+
     try {
+      // ✅ FIX: Ensure date-only string using assets system pattern
+      const dateForDB = this.parseAsDateOnly(date);
+
       // Use a test business ID since function requires it
       const testBusinessId = 'ac7de9dd-7cc8-41c9-94f7-611a4ade5256';
-      
+
       const query = `
         SELECT * FROM calculate_item_tax(
           $1, $2, $3, 100.00, 'sale', 'company', false, $4
@@ -384,21 +481,21 @@ export class TaxService {
         testBusinessId,
         countryCode,
         productCategory,
-        date
+        dateForDB  // ✅ FIXED: Use date-only string
       ];
 
       const result = await client.query(query, values);
-      
+
       if (result.rows.length === 0) {
         throw new Error('No tax rate found');
       }
 
       const tax = result.rows[0];
-      
+
       return {
         productCategory,
         countryCode,
-        date,
+        date: dateForDB,
         taxCode: tax.tax_type_code,
         taxName: tax.tax_type_name,
         taxRate: parseFloat(tax.tax_rate),
@@ -419,10 +516,10 @@ export class TaxService {
    */
   static async getTaxRules(countryCode = 'UG') {
     const client = await getClient();
-    
+
     try {
       const query = `
-        SELECT 
+        SELECT
           ctm.id,
           ctm.country_code,
           ctm.product_category_code,

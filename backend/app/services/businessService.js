@@ -190,16 +190,16 @@ export const businessService = {
 
       // 4. CREATE ACCOUNTING FOUNDATION - CRITICAL FIX HERE
       log.info('Creating accounting foundation', { businessId: business.id });
-      
+
       // IMPORTANT: Call functions in correct order with proper user ID
-      
+
       // 4a. Ensure chart of accounts exist
       await client.query(`SELECT ensure_business_has_complete_accounts($1)`, [business.id]);
-      
+
       // 4b. Create wallets with the ACTUAL user ID (not a placeholder)
       // The function now handles NULL user_id gracefully
       await client.query(`SELECT ensure_business_has_default_wallets($1, $2)`, [business.id, user.id]);
-      
+
       log.info('Accounting foundation created', { businessId: business.id });
 
       // 5. Generate JWT token with timezone info
@@ -348,6 +348,55 @@ export const businessService = {
       );
 
       return result.rows[0];
+    } finally {
+      client.release();
+    }
+  },
+
+  // Add this method to businessService.js (or update if exists)
+  async updateBusinessCountry(businessId, countryCode) {
+    const client = await getClient();
+    
+    try {
+      // Validate country exists in tax_countries
+      const countryCheck = await client.query(
+        'SELECT 1 FROM tax_countries WHERE country_code = $1',
+        [countryCode]
+      );
+      
+      if (countryCheck.rows.length === 0) {
+        throw new Error(`Invalid country code: ${countryCode}`);
+      }
+      
+      // Update business country
+      const result = await client.query(
+        `UPDATE businesses 
+         SET country_code = $1, 
+             country_name = (SELECT country_name FROM tax_countries WHERE country_code = $1)
+         WHERE id = $2
+         RETURNING id, name, country_code, country_name`,
+        [countryCode, businessId]
+      );
+      
+      if (result.rows.length === 0) {
+        throw new Error(`Business not found: ${businessId}`);
+      }
+      
+      log.info('Business country updated', {
+        businessId,
+        countryCode,
+        businessName: result.rows[0].name
+      });
+      
+      return result.rows[0];
+      
+    } catch (error) {
+      log.error('Failed to update business country', {
+        businessId,
+        countryCode,
+        error: error.message
+      });
+      throw error;
     } finally {
       client.release();
     }

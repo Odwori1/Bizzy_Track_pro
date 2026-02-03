@@ -1,4 +1,5 @@
 import { ProductService } from '../services/productService.js';
+import { TaxService } from '../services/taxService.js';  // NEW IMPORT
 import { log } from '../utils/logger.js';
 
 export const productController = {
@@ -8,7 +9,23 @@ export const productController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Creating product', { businessId, userId, productName: productData.name });
+      log.info('Creating product', { 
+        businessId, 
+        userId, 
+        productName: productData.name,
+        taxCategory: productData.tax_category_code || 'STANDARD_GOODS (default)'
+      });
+
+      // ================ NEW: TAX CATEGORY VALIDATION ================
+      // Note: Joi schema already validates, but we add extra logging
+      if (productData.tax_category_code) {
+        log.debug('Product tax category provided:', {
+          category: productData.tax_category_code,
+          businessId
+        });
+      } else {
+        log.debug('Using default tax category: STANDARD_GOODS', { businessId });
+      }
 
       const newProduct = await ProductService.createProduct(businessId, productData, userId);
 
@@ -27,7 +44,15 @@ export const productController = {
   async getProducts(req, res, next) {
     try {
       const businessId = req.user.businessId;
-      const { category_id, is_active, low_stock, has_variants, search, page, limit } = req.query;
+      const { 
+        category_id, 
+        is_active, 
+        low_stock, 
+        has_variants, 
+        search, 
+        page, 
+        limit 
+      } = req.query;
 
       const filters = {};
       if (category_id) filters.category_id = category_id;
@@ -60,6 +85,35 @@ export const productController = {
 
       const product = await ProductService.getProductById(businessId, id);
 
+      // ================ NEW: ADD TAX INFO TO PRODUCT RESPONSE ================
+      if (product && product.tax_category_code) {
+        try {
+          const taxRateInfo = await TaxService.getTaxRate(
+            product.tax_category_code, 
+            'UG' // Default to Uganda for now
+          );
+          
+          // Add tax info to product response
+          product.tax_info = {
+            category_code: product.tax_category_code,
+            tax_rate: taxRateInfo.taxRate,
+            tax_code: taxRateInfo.taxCode,
+            is_exempt: taxRateInfo.isExempt,
+            is_zero_rated: taxRateInfo.isZeroRated
+          };
+        } catch (taxError) {
+          log.warn('Could not fetch tax info for product:', {
+            productId: id,
+            taxCategory: product.tax_category_code,
+            error: taxError.message
+          });
+          product.tax_info = {
+            error: 'Tax information unavailable',
+            category_code: product.tax_category_code
+          };
+        }
+      }
+
       res.json({
         success: true,
         data: product,
@@ -79,7 +133,21 @@ export const productController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Updating product', { businessId, userId, productId: id });
+      log.info('Updating product', { 
+        businessId, 
+        userId, 
+        productId: id,
+        taxCategory: updateData.tax_category_code || 'not updated'
+      });
+
+      // ================ NEW: LOG TAX CATEGORY CHANGE ================
+      if (updateData.tax_category_code) {
+        log.debug('Updating product tax category:', {
+          productId: id,
+          newTaxCategory: updateData.tax_category_code,
+          businessId
+        });
+      }
 
       const updatedProduct = await ProductService.updateProduct(businessId, id, updateData, userId);
 
