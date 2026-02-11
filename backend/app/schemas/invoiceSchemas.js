@@ -9,6 +9,7 @@ import Joi from 'joi';
  * - ✅ tax_rate is optional (calculated by tax engine)
  * - ✅ Backward compatible with manual tax rates
  * - ✅ AUTO-SET DEFAULT DATES in schema validation
+ * - ✅ Supports both 'line_items' and 'items' (alias for backward compatibility)
  */
 
 export const createInvoiceSchema = Joi.object({
@@ -70,15 +71,15 @@ export const createInvoiceSchema = Joi.object({
 
       // ✅ FIXED: Make description optional if product_id or service_id is provided
       description: Joi.string().min(1).max(500)
-        .when('product_id', { 
-          is: Joi.exist(), 
-          then: Joi.optional(), 
-          otherwise: Joi.required() 
+        .when('product_id', {
+          is: Joi.exist(),
+          then: Joi.optional(),
+          otherwise: Joi.required()
         })
-        .when('service_id', { 
-          is: Joi.exist(), 
-          then: Joi.optional(), 
-          otherwise: Joi.required() 
+        .when('service_id', {
+          is: Joi.exist(),
+          then: Joi.optional(),
+          otherwise: Joi.required()
         })
         .messages({
           'string.min': 'Description is required',
@@ -131,11 +132,72 @@ export const createInvoiceSchema = Joi.object({
       }
       return value;
     })
-  ).min(1).required()
-    .messages({
-      'array.min': 'At least one line item is required',
-      'any.required': 'Line items are required'
+  ).min(1)
+    .when('items', {
+      is: Joi.exist(),
+      then: Joi.forbidden().messages({
+        'any.unknown': 'Please use "line_items" instead of "items"'
+      }),
+      otherwise: Joi.required()
     })
+    .messages({
+      'array.min': 'At least one line item is required'
+    }),
+
+  // ✅ NEW: Alias for backward compatibility - accepts 'items' as alternative to 'line_items'
+  items: Joi.array().items(
+    Joi.object({
+      product_id: Joi.string().uuid().optional(),
+      service_id: Joi.string().uuid().optional(),
+      description: Joi.string().min(1).max(500)
+        .when('product_id', {
+          is: Joi.exist(),
+          then: Joi.optional(),
+          otherwise: Joi.required()
+        })
+        .when('service_id', {
+          is: Joi.exist(),
+          then: Joi.optional(),
+          otherwise: Joi.required()
+        }),
+      quantity: Joi.number().min(0.01).default(1),
+      unit_price: Joi.number().min(0).required(),
+      tax_category_code: Joi.string()
+        .valid(
+          'STANDARD_GOODS',
+          'SERVICES',
+          'PHARMACEUTICALS',
+          'DIGITAL_SERVICES',
+          'AGRICULTURAL',
+          'ESSENTIAL_GOODS',
+          'EXPORT_GOODS',
+          'FINANCIAL_SERVICES',
+          'EDUCATION_SERVICES'
+        )
+        .optional(),
+      tax_rate: Joi.number().min(0).max(100).optional()
+    })
+    .custom((value, helpers) => {
+      if (!value.product_id && !value.service_id && !value.tax_category_code && value.tax_rate === undefined) {
+        return helpers.message(
+          'Line item must have either product_id, service_id, tax_category_code, or tax_rate'
+        );
+      }
+      return value;
+    })
+  ).min(1).optional()
+    .messages({
+      'array.min': 'At least one line item is required'
+    })
+
+// ✅ Custom validation: Handle both 'line_items' and 'items' for backward compatibility
+}).custom((value, helpers) => {
+  // If 'items' is provided but 'line_items' is not, copy items to line_items
+  if (value.items && !value.line_items) {
+    value.line_items = value.items;
+    delete value.items;
+  }
+  return value;
 });
 
 export const updateInvoiceSchema = Joi.object({

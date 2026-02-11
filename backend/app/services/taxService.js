@@ -20,7 +20,7 @@ export class TaxService {
       amount,
       transactionType = 'sale',
       customerType = 'company',
-      isExempt = false,  // ✅ FIXED: was isExport, should be isExempt
+      isExempt = false,
       transactionDate
     } = params;
 
@@ -81,7 +81,7 @@ export class TaxService {
         parseFloat(amount),
         transactionType,
         customerType,
-        isExempt,  // ✅ FIXED: was isExport, now isExempt
+        isExempt,
         transactionDateForDB  // ✅ FIXED: Use date-only string
       ];
 
@@ -104,7 +104,9 @@ export class TaxService {
       log.debug('Tax calculation successful', {
         taxCode: tax.tax_type_code,
         taxRate: tax.tax_rate,
-        taxAmount: tax.tax_amount
+        taxAmount: tax.tax_amount,
+        isWithholding: tax.is_withholding,
+        thresholdApplied: tax.threshold_applied
       });
 
       return {
@@ -117,6 +119,12 @@ export class TaxService {
         isExempt: tax.is_exempt,
         isZeroRated: tax.is_zero_rated,
         ledgerAccount: tax.ledger_account,
+
+        // ✅ FIXED: Convert null to false
+        isWithholding: tax.is_withholding || false,
+        thresholdApplied: tax.threshold_applied || false,
+        whtCertificateRequired: (tax.is_withholding && tax.threshold_applied) || false,
+
         calculationDetails: {
           countryCode: businessCountry,
           productCategory,
@@ -124,7 +132,21 @@ export class TaxService {
           transactionDate: transactionDateForDB,
           amount: parseFloat(amount),
           customerType,
-          isExempt
+          isExempt,
+
+          // ✅ ADDED BUSINESS LOGIC FIELDS:
+          businessId: businessId,
+          taxDecision: tax.is_withholding ?
+            `WHT applied (${tax.tax_type_code})` :
+            `Regular tax (${tax.tax_type_code})`,
+          thresholdAmount: 1000000, // Default, should come from wht_thresholds table
+          amountExceedsThreshold: parseFloat(amount) > 1000000, // ✅ FIXED: > not >=
+          databaseFields: {
+            is_withholding: tax.is_withholding,
+            threshold_applied: tax.threshold_applied,
+            tax_type_code: tax.tax_type_code,
+            tax_type_name: tax.tax_type_name
+          }
         }
       };
 
@@ -155,12 +177,12 @@ export class TaxService {
       const day = String(now.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     }
-    
+
     // If it's already a date-only string, return as-is
     if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
       return dateInput;
     }
-    
+
     // If it's any other format, create Date object and extract components
     const date = new Date(dateInput);
     if (isNaN(date.getTime())) {
@@ -171,7 +193,7 @@ export class TaxService {
       const day = String(now.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     }
-    
+
     // ✅ ASSETS SYSTEM PATTERN: Extract date components directly
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -187,6 +209,8 @@ export class TaxService {
     let totalTaxableAmount = 0;
     let totalTaxAmount = 0;
     const taxBreakdown = {};
+    let withholdingCount = 0;
+    let thresholdAppliedCount = 0;
 
     log.info('Calculating invoice tax', {
       businessId,
@@ -203,13 +227,17 @@ export class TaxService {
           amount: item.amount,
           transactionType: item.transactionType || 'sale',
           customerType: item.customerType || 'company',
-          isExempt: item.isExempt || false,  // FIXED: was isExport
+          isExempt: item.isExempt || false,
           transactionDate: item.transactionDate
         });
 
         calculations.push(tax);
         totalTaxableAmount += tax.taxableAmount;
         totalTaxAmount += tax.taxAmount;
+
+        // Track withholding taxes
+        if (tax.isWithholding) withholdingCount++;
+        if (tax.thresholdApplied) thresholdAppliedCount++;
 
         // Group by tax code
         if (!taxBreakdown[tax.taxCode]) {
@@ -218,6 +246,7 @@ export class TaxService {
             taxName: tax.taxName,
             taxRate: tax.taxRate,
             totalAmount: 0,
+            isWithholding: tax.isWithholding,
             items: []
           };
         }
@@ -226,7 +255,9 @@ export class TaxService {
         taxBreakdown[tax.taxCode].items.push({
           taxableAmount: tax.taxableAmount,
           taxAmount: tax.taxAmount,
-          productCategory: item.productCategory
+          productCategory: item.productCategory,
+          isWithholding: tax.isWithholding,
+          thresholdApplied: tax.thresholdApplied
         });
 
       } catch (error) {
@@ -239,12 +270,15 @@ export class TaxService {
       calculations,
       totals: {
         totalTaxableAmount,
-        totalTaxAmount
+        totalTaxAmount,
+        withholdingCount,
+        thresholdAppliedCount
       },
       taxBreakdown: Object.values(taxBreakdown),
       summary: {
         lineItemCount: lineItems.length,
         uniqueTaxTypes: Object.keys(taxBreakdown).length,
+        withholdingItems: withholdingCount,
         timestamp: new Date().toISOString()
       }
     };
@@ -271,6 +305,7 @@ export class TaxService {
                 'taxName', tt.tax_name,
                 'priority', ctm.priority,
                 'isActive', ctm.is_active
+                // ❌ REMOVED: 'isWithholding', tt.is_withholding
               )
             ) FILTER (WHERE tt.id IS NOT NULL),
             '[]'::json
@@ -311,6 +346,7 @@ export class TaxService {
           tt.description,
           tt.tax_category,
           tt.is_recoverable,
+          tt.is_withholding,
           ctr.tax_rate,
           ctr.effective_from,
           ctr.effective_to,
@@ -322,12 +358,26 @@ export class TaxService {
         ORDER BY tt.tax_code, ctr.effective_from
       `, [countryCode]);
 
+      // Get withholding thresholds
+      const thresholdsQuery = await client.query(`
+        SELECT
+          product_category_code,
+          threshold_amount,
+          effective_from,
+          effective_to,
+          is_active
+        FROM wht_thresholds
+        WHERE country_code = $1
+        ORDER BY product_category_code, effective_from
+      `, [countryCode]);
+
       // Get categories
       const categories = await this.getTaxCategories(countryCode);
 
       return {
         countryCode,
         taxRates: ratesQuery.rows,
+        withholdingThresholds: thresholdsQuery.rows,
         taxCategories: categories,
         lastUpdated: new Date().toISOString()
       };
@@ -367,6 +417,7 @@ export class TaxService {
             test: test.description,
             expected: test.expectedRate,
             actual: result.taxRate,
+            isWithholding: result.isWithholding,
             passed: result.taxRate === test.expectedRate,
             error: null
           });
@@ -414,30 +465,47 @@ export class TaxService {
         }
       }
 
-      // Test 3: WHT calculation
-      try {
-        const whtResult = await this.calculateItemTax({
-          businessId,
-          productCategory: 'SERVICES',
-          amount: 1000000,
-          transactionType: 'sale'
-        });
+      // Test 3: WHT calculation with threshold
+      const whtTests = [
+        { amount: 500000, expectedWHT: false, expectedThreshold: false, description: 'Services 500K (No WHT, below threshold)' },
+        { amount: 1200000, expectedWHT: true, expectedThreshold: true, description: 'Services 1.2M (WHT applied, above threshold)' }
+      ];
 
-        tests.push({
-          test: 'Services WHT (6%)',
-          expected: 6.00,
-          actual: whtResult.taxRate,
-          passed: whtResult.taxRate === 6.00,
-          error: null
-        });
-      } catch (error) {
-        tests.push({
-          test: 'Services WHT (6%)',
-          expected: 6.00,
-          actual: null,
-          passed: false,
-          error: error.message
-        });
+      for (const test of whtTests) {
+        try {
+          const result = await this.calculateItemTax({
+            businessId,
+            productCategory: 'SERVICES',
+            amount: test.amount,
+            customerType: 'company',
+            transactionType: 'sale'
+          });
+
+          tests.push({
+            test: test.description,
+            expected: {
+              isWithholding: test.expectedWHT,
+              thresholdApplied: test.expectedThreshold
+            },
+            actual: {
+              isWithholding: result.isWithholding,
+              thresholdApplied: result.thresholdApplied,
+              taxCode: result.taxCode,
+              taxRate: result.taxRate
+            },
+            passed: result.isWithholding === test.expectedWHT &&
+                   result.thresholdApplied === test.expectedThreshold,
+            error: null
+          });
+        } catch (error) {
+          tests.push({
+            test: test.description,
+            expected: test,
+            actual: null,
+            passed: false,
+            error: error.message
+          });
+        }
       }
 
       return {
@@ -500,7 +568,8 @@ export class TaxService {
         taxName: tax.tax_type_name,
         taxRate: parseFloat(tax.tax_rate),
         isExempt: tax.is_exempt,
-        isZeroRated: tax.is_zero_rated
+        isZeroRated: tax.is_zero_rated,
+        isWithholding: tax.is_withholding || false  // ✅ FIXED: Convert null to false
       };
 
     } catch (error) {
@@ -527,6 +596,7 @@ export class TaxService {
           pc.global_treatment,
           tt.tax_code,
           tt.tax_name,
+          tt.is_withholding,
           ctm.conditions,
           ctm.priority,
           ctm.is_active,

@@ -5,10 +5,339 @@ import { TransactionAccountingService } from './transactionAccountingService.js'
 import { InventorySyncService } from './inventorySyncService.js';
 import { AccountingService } from './accountingService.js';
 import { InventoryAccountingService } from './inventoryAccountingService.js';
+import { TaxService } from './taxService.js';
+
+// ============================================================================
+// POSTaxCalculator - TAX CALCULATION FOR POS TRANSACTIONS
+// Patterned after InvoiceTaxCalculator with POS-specific optimizations
+// ============================================================================
+
+class POSTaxCalculator {
+  /**
+   * Get customer type for tax calculation
+   * @param {Object} client - Database client
+   * @param {string} customerId - Customer ID (optional)
+   * @param {string} businessId - Business ID
+   * @returns {Promise<string>} 'company' or 'individual'
+   */
+  static async getCustomerType(client, customerId, businessId) {
+    if (!customerId) {
+      // Walk-in customer (no ID) = individual (B2C)
+      log.debug('Walk-in customer, defaulting to individual for tax', {
+        businessId,
+        defaultType: 'individual'
+      });
+      return 'individual';
+    }
+
+    try {
+      const customerQuery = await client.query(
+        `SELECT customer_type FROM customers
+         WHERE id = $1 AND business_id = $2`,
+        [customerId, businessId]
+      );
+
+      if (customerQuery.rows.length === 0) {
+        log.warn('Customer not found, using default type "individual"', {
+          customerId,
+          businessId
+        });
+        return 'individual'; // Default to B2C if customer not found
+      }
+
+      const customerType = customerQuery.rows[0].customer_type || 'individual';
+      log.debug('Customer type retrieved for tax', {
+        customerId,
+        customerType,
+        businessId
+      });
+
+      return customerType;
+    } catch (error) {
+      log.error('Failed to get customer type, defaulting to individual', {
+        customerId,
+        error: error.message
+      });
+      return 'individual'; // Default to B2C on error
+    }
+  }
+
+  /**
+   * Get product tax category
+   * @param {Object} client - Database client
+   * @param {string} productId - Product ID
+   * @param {string} businessId - Business ID
+   * @returns {Promise<string>} Tax category code
+   */
+  static async getProductTaxCategory(client, productId, businessId) {
+    if (!productId) {
+      return 'STANDARD_GOODS'; // Default for manual items
+    }
+
+    try {
+      const productQuery = await client.query(
+        `SELECT tax_category_code, name as product_name
+         FROM products 
+         WHERE id = $1 AND business_id = $2`,
+        [productId, businessId]
+      );
+
+      if (productQuery.rows.length === 0) {
+        log.warn('Product not found, using default tax category', {
+          productId,
+          businessId
+        });
+        return 'STANDARD_GOODS';
+      }
+
+      const taxCategory = productQuery.rows[0].tax_category_code || 'STANDARD_GOODS';
+      log.debug('Product tax category retrieved', {
+        productId,
+        productName: productQuery.rows[0].product_name,
+        taxCategory
+      });
+
+      return taxCategory;
+    } catch (error) {
+      log.error('Failed to get product tax category', {
+        productId,
+        error: error.message
+      });
+      return 'STANDARD_GOODS'; // Default on error
+    }
+  }
+
+  /**
+   * Calculate tax for a single POS line item
+   * @param {Object} client - Database client
+   * @param {string} businessId - Business ID
+   * @param {Object} item - POS item data
+   * @param {string} customerType - 'company' or 'individual'
+   * @param {Date} transactionDate - Transaction date
+   * @returns {Promise<Object>} Tax calculation result
+   */
+  static async calculateLineItemTax(client, businessId, item, customerType, transactionDate) {
+    let taxRate = 0;
+    let taxAmount = 0;
+    let taxCategoryCode = 'STANDARD_GOODS';
+    const itemTotal = item.quantity * item.unit_price;
+
+    // Get tax category based on item type
+    if (item.item_type === 'product' && item.product_id) {
+      taxCategoryCode = await this.getProductTaxCategory(client, item.product_id, businessId);
+    } else if (item.item_type === 'service' && item.service_id) {
+      // Services typically have SERVICE tax category
+      taxCategoryCode = 'SERVICES';
+    } else if (item.tax_category_code) {
+      // Manual override provided
+      taxCategoryCode = item.tax_category_code;
+    } else if (item.item_type === 'inventory' && item.inventory_item_id) {
+      // For inventory items, try to get from products table first
+      try {
+        const productQuery = await client.query(
+          `SELECT p.tax_category_code, p.name
+           FROM products p
+           WHERE p.inventory_item_id = $1 AND p.business_id = $2
+           LIMIT 1`,
+          [item.inventory_item_id, businessId]
+        );
+
+        if (productQuery.rows.length > 0) {
+          taxCategoryCode = productQuery.rows[0].tax_category_code || 'STANDARD_GOODS';
+          log.debug('Found product tax category for inventory item', {
+            inventoryItemId: item.inventory_item_id,
+            taxCategory: taxCategoryCode
+          });
+        } else {
+          // No linked product, use default
+          taxCategoryCode = 'STANDARD_GOODS';
+        }
+      } catch (error) {
+        log.warn('Failed to get tax category for inventory item', {
+          inventoryItemId: item.inventory_item_id,
+          error: error.message
+        });
+        taxCategoryCode = 'STANDARD_GOODS';
+      }
+    }
+
+    // Calculate tax using existing TaxService
+    try {
+      // Get business country for tax calculation
+      const businessQuery = await client.query(
+        `SELECT country_code FROM businesses WHERE id = $1`,
+        [businessId]
+      );
+
+      const businessCountry = businessQuery.rows[0]?.country_code || 'UG';
+
+      // Convert date to date-only string (YYYY-MM-DD)
+      const dateForTax = transactionDate ? 
+        new Date(transactionDate).toISOString().split('T')[0] : 
+        new Date().toISOString().split('T')[0];
+
+      // Use existing TaxService for calculation
+      const taxResult = await TaxService.calculateItemTax({
+        businessId,
+        countryCode: businessCountry,
+        productCategory: taxCategoryCode,
+        amount: itemTotal,
+        transactionType: 'sale',
+        customerType: customerType,
+        isExempt: false,
+        transactionDate: dateForTax
+      });
+
+      taxRate = taxResult.taxRate;
+      taxAmount = taxResult.taxAmount;
+
+      log.debug('POS item tax calculated successfully', {
+        itemName: item.item_name,
+        itemType: item.item_type,
+        taxCategory: taxCategoryCode,
+        taxCode: taxResult.taxCode,
+        taxRate,
+        taxAmount,
+        customerType
+      });
+
+    } catch (error) {
+      log.error('Tax calculation failed for POS item', {
+        itemName: item.item_name,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      // Don't fail transaction if tax calculation fails
+      // Use zero tax as fallback
+      taxRate = 0;
+      taxAmount = 0;
+    }
+
+    return {
+      taxRate,
+      taxAmount,
+      taxCategoryCode,
+      itemTotal,
+      lineTotal: itemTotal + taxAmount
+    };
+  }
+
+  /**
+   * Create transaction_taxes record for POS audit trail
+   * @param {Object} client - Database client
+   * @param {string} businessId - Business ID
+   * @param {string} posTransactionId - POS transaction ID
+   * @param {Object} lineItem - POS line item
+   * @param {Object} taxCalculation - Tax calculation result
+   * @param {Date} transactionDate - Transaction date
+   * @param {string} customerType - Customer type
+   * @param {string} customerId - Customer ID (optional)
+   * @returns {Promise<string|null>} Transaction tax ID or null
+   */
+  static async createTaxTransaction(client, businessId, posTransactionId, lineItem, taxCalculation, transactionDate, customerType, customerId = null) {
+    if (!taxCalculation.taxAmount || taxCalculation.taxAmount <= 0) {
+      return null; // Skip zero-tax items
+    }
+
+    try {
+      // Get business country
+      const businessQuery = await client.query(
+        `SELECT country_code FROM businesses WHERE id = $1`,
+        [businessId]
+      );
+
+      const businessCountry = businessQuery.rows[0]?.country_code || 'UG';
+
+      // Get tax type info
+      const taxInfo = await TaxService.getTaxRate(
+        taxCalculation.taxCategoryCode,
+        businessCountry,
+        transactionDate ? new Date(transactionDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+      );
+
+      // Get tax_type_id
+      const taxTypeQuery = await client.query(
+        'SELECT id FROM tax_types WHERE tax_code = $1',
+        [taxInfo.taxCode]
+      );
+
+      // Get tax_rate_id
+      const taxRateQuery = await client.query(
+        `SELECT id FROM country_tax_rates 
+         WHERE country_code = $1 AND tax_type_id = $2 
+         AND is_default = true
+         AND effective_from <= $3 
+         AND (effective_to IS NULL OR effective_to >= $3)`,
+        [
+          businessCountry, 
+          taxTypeQuery.rows[0]?.id,
+          transactionDate || new Date()
+        ]
+      );
+
+      // Create tax audit record
+      const taxTransactionQuery = `
+        INSERT INTO transaction_taxes (
+          business_id, transaction_id, transaction_type, transaction_date,
+          tax_type_id, tax_rate_id, taxable_amount, tax_rate, tax_amount,
+          country_code, product_category_code, tax_period, calculation_context,
+          customer_type, customer_id, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+        RETURNING id
+      `;
+
+      const result = await client.query(taxTransactionQuery, [
+        businessId,
+        posTransactionId,
+        'pos_sale',
+        transactionDate || new Date(),
+        taxTypeQuery.rows[0]?.id,
+        taxRateQuery.rows[0]?.id,
+        taxCalculation.itemTotal,
+        taxCalculation.taxRate,
+        taxCalculation.taxAmount,
+        businessCountry,
+        taxCalculation.taxCategoryCode,
+        new Date().toISOString().substring(0, 7) + '-01', // tax_period
+        JSON.stringify({
+          pos_transaction_id: posTransactionId,
+          line_item_description: lineItem.item_name,
+          item_type: lineItem.item_type,
+          product_id: lineItem.product_id,
+          inventory_item_id: lineItem.inventory_item_id,
+          calculated_by: 'POSTaxCalculator',
+          tax_engine_version: '1.0',
+          business_country: businessCountry
+        }),
+        customerType,
+        customerId
+      ]);
+
+      log.debug('POS tax transaction recorded', {
+        transactionId: result.rows[0]?.id,
+        posTransactionId,
+        taxAmount: taxCalculation.taxAmount,
+        taxCategory: taxCalculation.taxCategoryCode,
+        customerType
+      });
+
+      return result.rows[0]?.id;
+    } catch (error) {
+      log.error('Failed to create POS tax transaction record', {
+        posTransactionId,
+        error: error.message,
+        note: 'Transaction will continue without tax audit trail'
+      });
+      return null;
+    }
+  }
+}
 
 export class POSService {
   /**
-   * Create a new POS transaction with database trigger accounting
+   * Create a new POS transaction with TAX CALCULATION
    */
   static async createTransaction(businessId, transactionData, userId) {
     const client = await getClient();
@@ -24,6 +353,20 @@ export class POSService {
 
       const transactionNumberValue = transactionNumber.rows[0].transaction_number;
 
+      // ✅ STEP 1: GET CUSTOMER TYPE FOR TAX CALCULATION
+      const customerType = await POSTaxCalculator.getCustomerType(
+        client,
+        transactionData.customer_id,
+        businessId
+      );
+
+      log.info('POS transaction customer type determined', {
+        businessId,
+        customerId: transactionData.customer_id,
+        customerType,
+        taxImplication: customerType === 'company' ? '6% WHT' : '20% VAT'
+      });
+
       // Verify customer belongs to business if provided
       if (transactionData.customer_id) {
         const customerCheck = await client.query(
@@ -37,9 +380,12 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 1: VALIDATE AND PREPARE ITEMS WITH INVENTORY SYNC
+      // STEP 2: VALIDATE AND PREPARE ITEMS WITH TAX CALCULATION
       // ========================================================================
       const processedItems = [];
+      let totalSubtotal = 0;
+      let totalTax = 0;
+      let totalDiscount = 0;
 
       for (const item of transactionData.items) {
         let inventoryItemId = item.inventory_item_id;
@@ -70,28 +416,26 @@ export class POSService {
             // Continue without inventory tracking
           }
         }
-        // ========================================================================
-        // NEW: Handle direct inventory items (item_type === 'inventory')
-        // ========================================================================
+        // Handle direct inventory items
         else if (item.item_type === 'inventory') {
           if (!item.inventory_item_id) {
             throw new Error(`Inventory item ID required for inventory type items: ${item.item_name}`);
           }
-          
+
           // Validate inventory item exists and has stock
           const inventoryCheck = await client.query(
             `SELECT name, cost_price, selling_price, current_stock, category_id
-             FROM inventory_items 
+             FROM inventory_items
              WHERE id = $1 AND business_id = $2 AND is_active = true`,
             [item.inventory_item_id, businessId]
           );
-          
+
           if (inventoryCheck.rows.length === 0) {
             throw new Error(`Inventory item not found or inactive: ${item.inventory_item_id}`);
           }
-          
+
           const inventoryItem = inventoryCheck.rows[0];
-          
+
           // Check stock availability
           if (inventoryItem.current_stock < item.quantity) {
             throw new Error(
@@ -99,72 +443,122 @@ export class POSService {
               `Required: ${item.quantity}, Available: ${inventoryItem.current_stock}`
             );
           }
-          
+
           // Use inventory item's selling price if not specified
           if (!item.unit_price || item.unit_price === 0) {
             item.unit_price = inventoryItem.selling_price;
           }
-          
+
           itemCost = inventoryItem.cost_price * item.quantity;
-          
-          log.info('Direct inventory sale item processed', {
-            item_name: inventoryItem.name,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            cost_price: inventoryItem.cost_price,
-            item_cost: itemCost
-          });
         }
+
+        // ✅ STEP 3: CALCULATE TAX FOR THIS ITEM
+        const taxCalculation = await POSTaxCalculator.calculateLineItemTax(
+          client,
+          businessId,
+          item,
+          customerType,
+          transactionData.transaction_date || new Date()
+        );
+
+        const itemTotal = item.quantity * item.unit_price;
+        const itemDiscount = item.discount_amount || 0;
+        const itemTotalAfterDiscount = itemTotal - itemDiscount;
+        const itemTax = taxCalculation.taxAmount || 0;
+        const itemFinal = itemTotalAfterDiscount + itemTax;
+
+        totalSubtotal += itemTotal;
+        totalTax += itemTax;
+        totalDiscount += itemDiscount;
 
         processedItems.push({
           ...item,
           product_id: productId || null,
-          inventory_item_id: inventoryItemId || null
+          inventory_item_id: inventoryItemId || null,
+          // Add tax fields for database insertion
+          tax_rate: taxCalculation.taxRate,
+          tax_amount: itemTax,
+          tax_category_code: taxCalculation.taxCategoryCode,
+          total_price: itemFinal  // This will be stored in total_price column
+        });
+
+        log.debug('POS item processed with tax', {
+          itemName: item.item_name,
+          itemType: item.item_type,
+          quantity: item.quantity,
+          unitPrice: item.unit_price,
+          itemTotal,
+          discount: itemDiscount,
+          taxRate: taxCalculation.taxRate,
+          taxAmount: itemTax,
+          taxCategory: taxCalculation.taxCategoryCode,
+          finalAmount: itemFinal,
+          customerType
         });
       }
 
+      // Calculate final amounts
+      const finalAmount = totalSubtotal - totalDiscount + totalTax;
+      
+      // Calculate average tax rate for the transaction
+      const averageTaxRate = totalSubtotal > 0 ? (totalTax / totalSubtotal) * 100 : 0;
+
+      log.info('POS transaction totals calculated', {
+        businessId,
+        subtotal: totalSubtotal,
+        discount: totalDiscount,
+        tax: totalTax,
+        averageTaxRate: averageTaxRate.toFixed(2),
+        finalAmount,
+        itemCount: processedItems.length,
+        customerType
+      });
+
       // ========================================================================
-      // STEP 2: CREATE POS TRANSACTION (WITH accounting_processed = FALSE)
+      // STEP 4: CREATE POS TRANSACTION WITH TAX DATA
       // ========================================================================
       const transactionResult = await client.query(
         `INSERT INTO pos_transactions (
           business_id, transaction_number, customer_id, transaction_date,
           total_amount, tax_amount, discount_amount, final_amount,
           payment_method, payment_status, status, notes, created_by,
-          accounting_processed, accounting_error
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          accounting_processed, accounting_error, tax_rate
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING *`,
         [
           businessId,
           transactionNumberValue,
           transactionData.customer_id || null,
           transactionData.transaction_date || new Date(),
-          transactionData.total_amount,
-          transactionData.tax_amount || 0,
-          transactionData.discount_amount || 0,
-          transactionData.final_amount,
+          totalSubtotal,  // total_amount (subtotal)
+          totalTax,       // tax_amount
+          totalDiscount,  // discount_amount
+          finalAmount,    // final_amount
           transactionData.payment_method,
           transactionData.payment_status || 'completed',
           transactionData.status || 'completed',
           transactionData.notes || '',
           userId,
           false,  // accounting_processed = false initially
-          null    // accounting_error = null initially
+          null,   // accounting_error = null initially
+          averageTaxRate  // tax_rate (average)
         ]
       );
 
       const transaction = transactionResult.rows[0];
 
       // ========================================================================
-      // STEP 3: INSERT TRANSACTION ITEMS
+      // STEP 5: INSERT TRANSACTION ITEMS WITH TAX DATA
       // ========================================================================
       for (const item of processedItems) {
-        await client.query(
+        const itemResult = await client.query(
           `INSERT INTO pos_transaction_items (
             business_id, pos_transaction_id, product_id, inventory_item_id, service_id,
             equipment_id, booking_id,
-            item_type, item_name, quantity, unit_price, total_price, discount_amount
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            item_type, item_name, quantity, unit_price, total_price, discount_amount,
+            tax_rate, tax_amount, tax_category_code
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          RETURNING id`,
           [
             businessId,
             transaction.id,
@@ -177,14 +571,44 @@ export class POSService {
             item.item_name,
             item.quantity,
             item.unit_price,
-            item.total_price,
-            item.discount_amount || 0
+            item.total_price,  // This already includes tax
+            item.discount_amount || 0,
+            item.tax_rate,
+            item.tax_amount,
+            item.tax_category_code
           ]
         );
+
+        const insertedItemId = itemResult.rows[0].id;
+
+        // ✅ STEP 6: CREATE TAX AUDIT TRAIL FOR EACH ITEM
+        await POSTaxCalculator.createTaxTransaction(
+          client,
+          businessId,
+          transaction.id,
+          item,
+          {
+            taxRate: item.tax_rate,
+            taxAmount: item.tax_amount,
+            taxCategoryCode: item.tax_category_code,
+            itemTotal: item.quantity * item.unit_price
+          },
+          transactionData.transaction_date || new Date(),
+          customerType,
+          transactionData.customer_id || null
+        );
+
+        log.debug('POS item inserted with tax data', {
+          itemId: insertedItemId,
+          transactionId: transaction.id,
+          itemName: item.item_name,
+          taxAmount: item.tax_amount,
+          taxCategory: item.tax_category_code
+        });
       }
 
       // ========================================================================
-      // STEP 4: HANDLE EQUIPMENT HIRE IF PRESENT
+      // STEP 7: HANDLE EQUIPMENT HIRE IF PRESENT
       // ========================================================================
       const equipmentItems = processedItems.filter(item => item.item_type === 'equipment_hire');
       if (equipmentItems.length > 0) {
@@ -198,35 +622,33 @@ export class POSService {
       }
 
       // ========================================================================
-      // NEW: Process accounting for direct inventory sales
+      // STEP 8: PROCESS ACCOUNTING FOR DIRECT INVENTORY SALES
       // ========================================================================
       const inventorySaleItems = processedItems.filter(item => item.item_type === 'inventory');
       if (inventorySaleItems.length > 0) {
         try {
-          // Call inventory accounting service for direct inventory sales
           await InventoryAccountingService.recordPosSaleWithCogs({
             business_id: businessId,
             pos_transaction_id: transaction.id,
             items: inventorySaleItems.map(item => ({
               inventory_item_id: item.inventory_item_id,
-              product_id: null,  // No product link for direct inventory sales
+              product_id: null,
               quantity: item.quantity,
               unit_price: item.unit_price
             }))
           }, userId);
-          
+
           log.info('Direct inventory sales accounting completed', {
             transactionId: transaction.id,
             itemCount: inventorySaleItems.length
           });
         } catch (cogsError) {
           log.error('Failed to record COGS for direct inventory sales:', cogsError);
-          // Don't fail the transaction, but log the error
         }
       }
 
       // ========================================================================
-      // STEP 5: AUDIT LOG FOR TRANSACTION CREATION
+      // STEP 9: AUDIT LOG FOR TRANSACTION CREATION
       // ========================================================================
       await auditLogger.logAction({
         businessId,
@@ -236,28 +658,34 @@ export class POSService {
         resourceId: transaction.id,
         newValues: {
           transaction_number: transaction.transaction_number,
+          subtotal: totalSubtotal,
+          tax_amount: totalTax,
+          tax_rate: averageTaxRate,
           final_amount: transaction.final_amount,
           payment_method: transaction.payment_method,
           item_count: processedItems.length,
-          inventory_items_count: processedItems.filter(item => item.inventory_item_id).length,
-          direct_inventory_items: inventorySaleItems.length,
-          equipment_items_count: equipmentItems.length,
-          accounting_processed: false // Initial state
+          customer_type: customerType,  // ✅ Now includes customer type
+          tax_items_count: processedItems.filter(item => item.tax_amount > 0).length
         }
       });
 
       // ========================================================================
-      // STEP 6: COMMIT THE TRANSACTION BEFORE ACCOUNTING
+      // STEP 10: COMMIT THE TRANSACTION
       // ========================================================================
       await client.query('COMMIT');
 
-      log.info('✅ POS transaction committed, starting accounting process', {
+      log.info('✅ POS transaction with tax created successfully', {
         transactionId: transaction.id,
-        businessId
+        businessId,
+        subtotal: totalSubtotal,
+        tax: totalTax,
+        finalAmount: finalAmount,
+        customerType,
+        itemCount: processedItems.length
       });
 
       // ========================================================================
-      // STEP 7: PROCESS ACCOUNTING (WITH SEPARATE CONNECTION - NOW SAFE)
+      // STEP 11: PROCESS ACCOUNTING (WITH SEPARATE CONNECTION - NOW SAFE)
       // ========================================================================
       let accountingResult;
       try {
@@ -348,11 +776,19 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 8: RETURN RESPONSE WITH UPDATED FIELDS
+      // STEP 12: RETURN RESPONSE WITH TAX BREAKDOWN AND UPDATED FIELDS
       // ========================================================================
       const response = {
         ...transaction,
         items: processedItems,
+        tax_breakdown: {
+          subtotal: totalSubtotal,
+          tax_amount: totalTax,
+          tax_rate: averageTaxRate,
+          discount_amount: totalDiscount,
+          final_amount: finalAmount,
+          customer_type: customerType
+        },
         accounting_info: {
           method: 'manual_service',
           status: accountingResult?.success === true ? 'created' : 'failed',
@@ -360,6 +796,9 @@ export class POSService {
           note: accountingResult?.success === true
             ? 'Accounting entries created successfully'
             : accountingResult?.message || 'Accounting creation failed',
+          tax_calculated: true,
+          customer_type_used: customerType,
+          items_with_tax: processedItems.filter(item => item.tax_amount > 0).length,
           verify_with: `SELECT * FROM journal_entries WHERE reference_id = '${transaction.id}'::text`
         }
       };
@@ -524,7 +963,7 @@ export class POSService {
   }
 
   /**
-   * Get POS transaction by ID with complete accounting info - FIXED VERSION
+   * Get POS transaction by ID with TAX DETAILS - FIXED VERSION
    */
   static async getTransactionById(businessId, transactionId) {
     const client = await getClient();
@@ -536,6 +975,7 @@ export class POSService {
           CONCAT(c.first_name, ' ', c.last_name) as customer_name,
           c.phone as customer_phone,
           c.email as customer_email,
+          c.customer_type,
           u.full_name as created_by_name
         FROM pos_transactions pt
         LEFT JOIN customers c ON pt.customer_id = c.id
@@ -550,7 +990,7 @@ export class POSService {
 
       const transaction = transactionResult.rows[0];
 
-      // Get transaction items
+      // Get transaction items WITH TAX DATA
       const itemsQuery =
         `SELECT
           pti.*,
@@ -564,7 +1004,8 @@ export class POSService {
           ii.cost_price as inventory_cost_price,
           ii.current_stock as inventory_current_stock,
           -- Product info
-          p.inventory_item_id as product_inventory_link
+          p.inventory_item_id as product_inventory_link,
+          p.tax_category_code as product_tax_category
         FROM pos_transaction_items pti
         LEFT JOIN products p ON pti.product_id = p.id
         LEFT JOIN inventory_items ii ON pti.inventory_item_id = ii.id OR p.inventory_item_id = ii.id
@@ -577,6 +1018,28 @@ export class POSService {
 
       const itemsResult = await client.query(itemsQuery, [businessId, transactionId]);
       transaction.items = itemsResult.rows;
+
+      // Calculate tax summary
+      const taxSummary = {
+        items_with_tax: transaction.items.filter(item => item.tax_amount > 0).length,
+        total_tax: transaction.tax_amount || 0,
+        average_tax_rate: transaction.tax_rate || 0
+      };
+      
+      transaction.tax_summary = taxSummary;
+
+      // Get tax audit trail from transaction_taxes
+      const taxAuditQuery = 
+        `SELECT tt.*, ttypes.tax_code, ttypes.tax_name
+         FROM transaction_taxes tt
+         LEFT JOIN tax_types ttypes ON tt.tax_type_id = ttypes.id
+         WHERE tt.business_id = $1 
+           AND tt.transaction_id = $2
+           AND tt.transaction_type = 'pos_sale'
+         ORDER BY tt.created_at`;
+
+      const taxAuditResult = await client.query(taxAuditQuery, [businessId, transactionId]);
+      transaction.tax_audit_trail = taxAuditResult.rows;
 
       // Get journal entries for this transaction - FIXED: pt.id needs ::text cast for VARCHAR reference_id
       const journalEntriesQuery =
@@ -641,6 +1104,8 @@ export class POSService {
         itemCount: transaction.items.length,
         journalEntryCount: transaction.journal_entries.length,
         inventoryTransactionCount: transaction.inventory_transactions.length,
+        taxItemsCount: taxSummary.items_with_tax,
+        totalTax: taxSummary.total_tax,
         castingFix: 'Applied correct UUID/TEXT casts per schema'
       });
 

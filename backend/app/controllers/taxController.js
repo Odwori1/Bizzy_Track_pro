@@ -17,7 +17,7 @@ export class TaxController {
         amount,
         transactionType = 'sale',
         customerType = 'company',
-        isExport = false,
+        isExempt = false,
         transactionDate,
         countryCode = 'UG'
       } = req.body;
@@ -52,7 +52,7 @@ export class TaxController {
         amount,
         transactionType,
         customerType,
-        isExport,
+        isExempt,
         transactionDate
       });
 
@@ -67,7 +67,9 @@ export class TaxController {
           taxCode: tax.taxCode,
           taxAmount: tax.taxAmount,
           productCategory,
-          amount
+          amount,
+          isWithholding: tax.isWithholding,
+          thresholdApplied: tax.thresholdApplied
         }
       });
 
@@ -138,7 +140,8 @@ export class TaxController {
         newValues: {
           lineItemCount: lineItems.length,
           totalTaxAmount: invoiceTax.totals.totalTaxAmount,
-          uniqueTaxTypes: invoiceTax.summary.uniqueTaxTypes
+          uniqueTaxTypes: invoiceTax.summary.uniqueTaxTypes,
+          withholdingItems: invoiceTax.calculations.filter(t => t.isWithholding).length
         }
       });
 
@@ -213,20 +216,197 @@ export class TaxController {
   }
 
   /**
-   * Run test scenarios
+   * Run test scenarios - UPDATED to use current calculateItemTax method
    */
   static async runTests(req, res) {
     try {
       // Get businessId from user session or use default test business
       const businessId = req.user?.businessId || req.user?.business_id || 'ac7de9dd-7cc8-41c9-94f7-611a4ade5256';
+      const testDate = '2026-02-10'; // Use current date
 
       log.info('Running tax test scenarios', { businessId });
 
-      const testResults = await TaxService.runTestScenarios(businessId);
+      const tests = [
+        // Test 1: Service below threshold (500K < 1M)
+        {
+          name: 'Services 500K to Company (No WHT, below threshold)',
+          request: {
+            productCategory: 'SERVICES',
+            amount: 500000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'VAT_STD',
+            taxRate: 20.00,
+            isWithholding: false,
+            thresholdApplied: false
+          }
+        },
+        // Test 2: Service above threshold (1.2M > 1M)
+        {
+          name: 'Services 1.2M to Company (WHT applied, above threshold)',
+          request: {
+            productCategory: 'SERVICES',
+            amount: 1200000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'WHT_SERVICES',
+            taxRate: 6.00,
+            isWithholding: true,
+            thresholdApplied: true
+          }
+        },
+        // Test 3: Goods (always WHT for companies regardless of amount)
+        {
+          name: 'Goods 300K to Company (WHT, no threshold check)',
+          request: {
+            productCategory: 'STANDARD_GOODS',
+            amount: 300000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'WHT_GOODS',
+            taxRate: 6.00,
+            isWithholding: true,
+            thresholdApplied: false  // Goods don't have threshold, always WHT
+          }
+        },
+        // Test 4: Individual customer (never WHT)
+        {
+          name: 'Services 2M to Individual (No WHT, individual customer)',
+          request: {
+            productCategory: 'SERVICES',
+            amount: 2000000,
+            customerType: 'individual',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'VAT_STD',
+            taxRate: 20.00,
+            isWithholding: false,
+            thresholdApplied: false
+          }
+        },
+        // Test 5: Zero-rated category
+        {
+          name: 'Essential Goods (Zero-rated VAT)',
+          request: {
+            productCategory: 'ESSENTIAL_GOODS',
+            amount: 500000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'VAT_ZERO',
+            taxRate: 0.00,
+            isWithholding: false,
+            thresholdApplied: false
+          }
+        },
+        // Test 6: Exempt category
+        {
+          name: 'Financial Services (VAT Exempt)',
+          request: {
+            productCategory: 'FINANCIAL_SERVICES',
+            amount: 500000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'VAT_EXEMPT',
+            taxRate: 0.00,
+            isWithholding: false,
+            thresholdApplied: false
+          }
+        },
+        // Test 7: Test threshold edge case (exactly at threshold) - FIXED
+        {
+          name: 'Services 1M to Company (At threshold - should be VAT)', // ✅ Fixed name
+          request: {
+            productCategory: 'SERVICES',
+            amount: 1000000,
+            customerType: 'company',
+            transactionDate: testDate
+          },
+          expectations: {
+            taxCode: 'VAT_STD',  // ✅ Fixed: Should be VAT, not WHT
+            taxRate: 20.00,
+            isWithholding: false,
+            thresholdApplied: false  // ✅ Fixed: Exactly at threshold, not above
+          }
+        }
+      ];
+
+      const results = [];
+
+      for (const test of tests) {
+        try {
+          const tax = await TaxService.calculateItemTax({
+            businessId,
+            ...test.request
+          });
+
+          const passed =
+            tax.taxCode === test.expectations.taxCode &&
+            Math.abs(tax.taxRate - test.expectations.taxRate) < 0.01 &&
+            tax.isWithholding === test.expectations.isWithholding &&
+            tax.thresholdApplied === test.expectations.thresholdApplied;
+
+          results.push({
+            test: test.name,
+            passed,
+            expected: test.expectations,
+            actual: {
+              taxCode: tax.taxCode,
+              taxRate: tax.taxRate,
+              taxAmount: tax.taxAmount,
+              isWithholding: tax.isWithholding,
+              thresholdApplied: tax.thresholdApplied,
+              whtCertificateRequired: tax.whtCertificateRequired
+            },
+            error: null
+          });
+
+        } catch (error) {
+          results.push({
+            test: test.name,
+            passed: false,
+            expected: test.expectations,
+            actual: null,
+            error: error.message
+          });
+        }
+      }
+
+      const passedTests = results.filter(r => r.passed).length;
+      const totalTests = results.length;
 
       return res.status(200).json({
         success: true,
-        data: testResults,
+        data: {
+          tests: results,
+          summary: {
+            total: totalTests,
+            passed: passedTests,
+            failed: totalTests - passedTests,
+            percentage: Math.round((passedTests / totalTests) * 100),
+            businessId,
+            timestamp: new Date().toISOString(),
+            systemStatus: passedTests === totalTests ? '✅ HEALTHY' : '⚠️ DEGRADED'
+          },
+          businessLogic: {
+            whtThreshold: 1000000, // UGX
+            servicesRules: 'WHT applies when amount > 1M AND customer is company',
+            goodsRules: 'WHT always applies for companies (no threshold)',
+            individualRules: 'No WHT for individual customers',
+            zeroRated: '0% VAT for essential goods',
+            exempt: '0% VAT for financial services'
+          }
+        },
         message: 'Tax tests completed'
       });
 
@@ -259,11 +439,20 @@ export class TaxController {
             'Invoice tax calculation',
             'Tax categories lookup',
             'Tax configuration',
-            'Test scenarios'
+            'Test scenarios',
+            'System testing',
+            'WHT threshold tracking',
+            'WHT certificate requirement flag'
           ],
           database: 'Uses PostgreSQL calculate_item_tax function',
           supportedCountries: ['UG'],
-          notes: 'WHT mappings fixed for Uganda'
+          notes: 'WHT mappings fixed for Uganda with threshold tracking',
+          fieldSupport: {
+            isWithholding: '✓ Included in response',
+            thresholdApplied: '✓ Included in response',
+            whtCertificateRequired: '✓ Computed field (isWithholding && thresholdApplied)',
+            calculationDetails: '✓ Includes database fields and business logic'
+          }
         },
         message: 'Tax system is working correctly'
       });
@@ -334,6 +523,164 @@ export class TaxController {
       return res.status(500).json({
         success: false,
         message: 'Failed to retrieve tax rules',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Comprehensive tax system test endpoint
+   * GET /api/tax/system-test
+   */
+  static async systemTest(req, res) {
+    try {
+      // ✅ FIXED: Use authenticated business or provide clear error
+      const businessId = req.user?.businessId || req.user?.business_id;
+
+      if (!businessId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Business ID required for system tests. Please authenticate or provide businessId in request.'
+        });
+      }
+
+      // Test scenarios - updated to use actual business logic
+      const testResults = [];
+      const scenarios = [
+        {
+          name: 'Service 500K to Company',
+          data: {
+            productCategory: 'SERVICES',
+            amount: 500000,
+            customerType: 'company',
+            expectedTaxCode: 'VAT_STD',
+            expectedRate: 20.00,
+            expectedWHT: false,
+            expectedThreshold: false
+          }
+        },
+        {
+          name: 'Service 1.2M to Company',
+          data: {
+            productCategory: 'SERVICES',
+            amount: 1200000,
+            customerType: 'company',
+            expectedTaxCode: 'WHT_SERVICES',
+            expectedRate: 6.00,
+            expectedWHT: true,
+            expectedThreshold: true
+          }
+        },
+        {
+          name: 'Goods 300K to Company',
+          data: {
+            productCategory: 'STANDARD_GOODS',
+            amount: 300000,
+            customerType: 'company',
+            expectedTaxCode: 'WHT_GOODS',
+            expectedRate: 6.00,
+            expectedWHT: true,
+            expectedThreshold: false  // Goods don't check threshold
+          }
+        },
+        {
+          name: 'Service 2M to Individual',
+          data: {
+            productCategory: 'SERVICES',
+            amount: 2000000,
+            customerType: 'individual',
+            expectedTaxCode: 'VAT_STD',
+            expectedRate: 20.00,
+            expectedWHT: false,
+            expectedThreshold: false
+          }
+        }
+      ];
+
+      // Run all tests
+      for (const scenario of scenarios) {
+        try {
+          const tax = await TaxService.calculateItemTax({
+            businessId,
+            productCategory: scenario.data.productCategory,
+            amount: scenario.data.amount,
+            customerType: scenario.data.customerType,
+            transactionDate: '2026-02-10'
+          });
+
+          const passed =
+            tax.taxCode === scenario.data.expectedTaxCode &&
+            Math.abs(tax.taxRate - scenario.data.expectedRate) < 0.01 &&
+            tax.isWithholding === scenario.data.expectedWHT &&
+            tax.thresholdApplied === scenario.data.expectedThreshold;
+
+          testResults.push({
+            scenario: scenario.name,
+            passed,
+            expected: {
+              taxCode: scenario.data.expectedTaxCode,
+              taxRate: scenario.data.expectedRate,
+              isWHT: scenario.data.expectedWHT,
+              thresholdApplied: scenario.data.expectedThreshold
+            },
+            actual: {
+              taxCode: tax.taxCode,
+              taxRate: tax.taxRate,
+              taxAmount: tax.taxAmount,
+              isWHT: tax.isWithholding,
+              thresholdApplied: tax.thresholdApplied,
+              whtCertificateRequired: tax.whtCertificateRequired
+            }
+          });
+        } catch (error) {
+          testResults.push({
+            scenario: scenario.name,
+            passed: false,
+            error: error.message
+          });
+        }
+      }
+
+      // Calculate summary
+      const passed = testResults.filter(r => r.passed).length;
+      const total = testResults.length;
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          system: 'BizzyTrack Tax Engine',
+          version: '2.0.0',
+          timestamp: new Date().toISOString(),
+          status: passed === total ? '✅ HEALTHY' : '⚠️ DEGRADED',
+          businessId,
+          testResults,
+          summary: {
+            totalTests: total,
+            passedTests: passed,
+            failedTests: total - passed,
+            successRate: Math.round((passed / total) * 100)
+          },
+          featuresVerified: [
+            'WHT Threshold Logic (1M UGX)',
+            'Goods vs Services Differentiation',
+            'Customer Type Awareness',
+            'Tax Category Mapping',
+            'Withholding Tax Detection',
+            'Threshold Application Tracking',
+            'WHT Certificate Requirement Flag'
+          ],
+          businessConfiguration: {
+            businessId,
+            usesAuthenticatedBusiness: true,
+            note: 'All tests use the authenticated business for accurate results'
+          }
+        }
+      });
+
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'System test failed',
         error: error.message
       });
     }
