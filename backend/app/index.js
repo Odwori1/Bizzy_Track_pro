@@ -90,6 +90,7 @@ import taxRoutes from './routes/taxRoutes.js';
 // Import WHT Certificate Routes - ADD THIS LINE
 import whtCertificateRoutes from './routes/whtCertificateRoutes.js';
 import whtReturnRoutes from './routes/whtReturnRoutes.js';
+import vatReturnRoutes from './routes/vatReturnRoutes.js';
 
 //additional invoice routes
 import invoiceTemplateRoutes from './routes/invoiceTemplateRoutes.js';
@@ -246,6 +247,7 @@ app.use('/api/tax', taxRoutes);
 //wht routes
 app.use('/api/wht/certificates', whtCertificateRoutes);
 app.use('/api/wht/returns', whtReturnRoutes);
+app.use('/api/vat/returns', vatReturnRoutes);
 
 //department routes
 app.use('/api/departments', departmentRoutes);
