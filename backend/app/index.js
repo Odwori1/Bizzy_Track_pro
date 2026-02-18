@@ -91,6 +91,13 @@ import taxRoutes from './routes/taxRoutes.js';
 import whtCertificateRoutes from './routes/whtCertificateRoutes.js';
 import whtReturnRoutes from './routes/whtReturnRoutes.js';
 import vatReturnRoutes from './routes/vatReturnRoutes.js';
+// Add purchase tax route
+import supplierComplianceRoutes from './routes/supplierComplianceRoutes.js';
+import purchaseTaxRoutes from './routes/purchaseTaxRoutes.js';
+import vendorPaymentRoutes from './routes/vendorPaymentRoutes.js';
+// tax dashboard
+import taxDashboardRoutes from './routes/taxDashboardRoutes.js';
+
 
 //additional invoice routes
 import invoiceTemplateRoutes from './routes/invoiceTemplateRoutes.js';
@@ -248,6 +255,15 @@ app.use('/api/tax', taxRoutes);
 app.use('/api/wht/certificates', whtCertificateRoutes);
 app.use('/api/wht/returns', whtReturnRoutes);
 app.use('/api/vat/returns', vatReturnRoutes);
+
+//tax routes
+app.use('/api/tax/dashboard', taxDashboardRoutes);
+app.use('/api/tax/reports', taxDashboardRoutes);
+
+// Add purchase tax routes
+app.use('/api/supplier-compliance', supplierComplianceRoutes);
+app.use('/api/purchase-tax', purchaseTaxRoutes);
+app.use('/api/vendor-payments', vendorPaymentRoutes);
 
 //department routes
 app.use('/api/departments', departmentRoutes);
