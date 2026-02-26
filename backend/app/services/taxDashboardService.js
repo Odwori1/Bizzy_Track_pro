@@ -5,38 +5,70 @@ import { log } from '../utils/logger.js';
 /**
  * TAX DASHBOARD SERVICE - Provides dashboard data and metrics
  * Phase 8: Tax Dashboard & Reporting
+ * 
+ * UPDATED: Consistent date handling with accounting/invoice services
+ * - toUTCISOString() for timestamps
+ * - toDateOnlyString() for date-only values
  */
 export class TaxDashboardService {
 
     /**
-     * Parse date to YYYY-MM-DD format (Assets System Pattern)
+     * Convert any date input to UTC ISO string for database storage
+     * (Matches invoiceService pattern)
+     */
+    static toUTCISOString(dateInput) {
+        if (!dateInput) {
+            return new Date().toISOString();
+        }
+
+        try {
+            // If it's already a string in ISO format, return as-is
+            if (typeof dateInput === "string" && dateInput.includes("T")) {
+                return dateInput;
+            }
+
+            // If it's a date-only string (YYYY-MM-DD), add time component
+            if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                return new Date(dateInput + "T00:00:00Z").toISOString();
+            }
+
+            // Otherwise, create Date object and convert to ISO
+            const date = new Date(dateInput);
+            if (isNaN(date.getTime())) {
+                return new Date().toISOString();
+            }
+            return date.toISOString();
+
+        } catch (error) {
+            return new Date().toISOString();
+        }
+    }
+
+    /**
+     * Convert any date input to date-only string (YYYY-MM-DD)
+     * (Matches invoiceService pattern for tax calculations)
+     */
+    static toDateOnlyString(dateInput) {
+        if (!dateInput) {
+            return new Date().toISOString().split("T")[0];
+        }
+
+        try {
+            const date = new Date(dateInput);
+            if (isNaN(date.getTime())) {
+                return new Date().toISOString().split("T")[0];
+            }
+            return date.toISOString().split("T")[0];
+        } catch (error) {
+            return new Date().toISOString().split("T")[0];
+        }
+    }
+
+    /**
+     * Parse date to YYYY-MM-DD format (legacy method - kept for backward compatibility)
      */
     static parseAsDateOnly(dateInput) {
-        if (!dateInput) {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-
-        if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-            return dateInput;
-        }
-
-        const date = new Date(dateInput);
-        if (isNaN(date.getTime())) {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        return this.toDateOnlyString(dateInput);
     }
 
     /**
@@ -67,8 +99,8 @@ export class TaxDashboardService {
         }
 
         return {
-            startDate: this.parseAsDateOnly(start),
-            endDate: this.parseAsDateOnly(end)
+            startDate: this.toDateOnlyString(start),
+            endDate: this.toDateOnlyString(end)
         };
     }
 
@@ -107,7 +139,7 @@ export class TaxDashboardService {
                 const userResult = await client.query(`
                     SELECT id FROM users WHERE business_id = $1 LIMIT 1
                 `, [businessId]);
-                
+
                 if (userResult.rows.length > 0) {
                     preferences = await this.getUserPreferences(businessId, userResult.rows[0].id);
                 }
@@ -135,7 +167,7 @@ export class TaxDashboardService {
                 compliance: complianceScore,
                 cashFlow: cashFlowImpact,
                 widgets: preferences.widget_config,
-                lastUpdated: new Date().toISOString()
+                lastUpdated: this.toUTCISOString(new Date()) // Use ISO format for timestamps
             };
 
             // Try to cache the result (optional)
@@ -164,14 +196,14 @@ export class TaxDashboardService {
         const client = await getClient();
 
         try {
-            const date = asOfDate || this.parseAsDateOnly(new Date());
+            const date = asOfDate || this.toDateOnlyString(new Date());
 
             log.info('Getting tax liabilities', { businessId, asOfDate: date });
 
             // Query 1: Unpaid WHT from withholding_tax_certificates
             // Using actual column names: withholding_amount, no paid_at column
             const whtQuery = await client.query(`
-                SELECT 
+                SELECT
                     COALESCE(SUM(withholding_amount), 0) as total_unpaid,
                     COUNT(*) as certificate_count,
                     COUNT(CASE WHEN created_at < $2::DATE - INTERVAL '30 days' THEN 1 END) as overdue_count
@@ -183,7 +215,7 @@ export class TaxDashboardService {
 
             // Query 2: Unpaid VAT from vat_returns - this is correct
             const vatQuery = await client.query(`
-                SELECT 
+                SELECT
                     COALESCE(SUM(total_amount_due - COALESCE(paid_amount, 0)), 0) as total_unpaid,
                     COUNT(*) as return_count,
                     COUNT(CASE WHEN due_date < $2 THEN 1 END) as overdue_count
@@ -196,7 +228,7 @@ export class TaxDashboardService {
             // Query 3: Unpaid WHT from purchase_wht_certificates
             // Using actual column names: wht_amount
             const purchaseWhtQuery = await client.query(`
-                SELECT 
+                SELECT
                     COALESCE(SUM(wht_amount), 0) as total_unpaid,
                     COUNT(*) as certificate_count
                 FROM purchase_wht_certificates
@@ -208,7 +240,7 @@ export class TaxDashboardService {
             // Query 4: Upcoming payments (due in next 30 days)
             const upcomingQuery = await client.query(`
                 -- VAT returns due soon
-                SELECT 
+                SELECT
                     'VAT' as tax_type,
                     return_number as reference,
                     due_date,
@@ -218,11 +250,11 @@ export class TaxDashboardService {
                     AND status IN ('submitted', 'calculated', 'approved')
                     AND due_date BETWEEN $2 AND $2::DATE + INTERVAL '30 days'
                     AND (paid_at IS NULL OR paid_amount < total_amount_due)
-                
+
                 UNION ALL
-                
+
                 -- WHT certificates (using created_at + 15 days as proxy)
-                SELECT 
+                SELECT
                     'WHT' as tax_type,
                     certificate_number as reference,
                     (created_at::DATE + INTERVAL '15 days')::DATE as due_date,
@@ -231,7 +263,7 @@ export class TaxDashboardService {
                 WHERE business_id = $1
                     AND status IN ('generated', 'sent', 'issued')
                     AND (created_at::DATE + INTERVAL '15 days') BETWEEN $2 AND $2::DATE + INTERVAL '30 days'
-                
+
                 ORDER BY due_date
             `, [businessId, date]);
 
@@ -271,6 +303,7 @@ export class TaxDashboardService {
                 upcomingPaymentsList: upcomingQuery.rows.map(row => ({
                     ...row,
                     amount_due: parseFloat(row.amount_due),
+                    due_date: this.toDateOnlyString(row.due_date),
                     daysUntil: Math.ceil((new Date(row.due_date) - new Date()) / (1000 * 60 * 60 * 24))
                 })),
                 asOfDate: date
@@ -296,7 +329,7 @@ export class TaxDashboardService {
         const client = await getClient();
 
         try {
-            const today = this.parseAsDateOnly(new Date());
+            const today = this.toDateOnlyString(new Date());
 
             log.info('Getting upcoming deadlines', { businessId, limit });
 
@@ -350,7 +383,9 @@ export class TaxDashboardService {
             const allDeadlines = [...vatDeadlines.rows, ...whtDeadlines.rows]
                 .map(deadline => ({
                     ...deadline,
-                    deadline_date: this.parseAsDateOnly(deadline.deadline_date),
+                    deadline_date: this.toDateOnlyString(deadline.deadline_date),
+                    period_start: deadline.period_start ? this.toDateOnlyString(deadline.period_start) : null,
+                    period_end: deadline.period_end ? this.toDateOnlyString(deadline.period_end) : null,
                     daysUntil: Math.ceil((new Date(deadline.deadline_date) - new Date()) / (1000 * 60 * 60 * 24)),
                     urgency: this.calculateUrgency(deadline.deadline_date)
                 }))
@@ -388,11 +423,11 @@ export class TaxDashboardService {
      */
     static async getRecentReturns(businessId, limit = 5) {
         const client = await getClient();
-        
+
         try {
             // Get recent VAT returns
             const vatReturns = await client.query(`
-                SELECT 
+                SELECT
                     'VAT' as return_type,
                     return_number,
                     period_start,
@@ -410,7 +445,7 @@ export class TaxDashboardService {
 
             // Get recent WHT returns - using wht_returns table
             const whtReturns = await client.query(`
-                SELECT 
+                SELECT
                     'WHT' as return_type,
                     return_number,
                     period_start,
@@ -431,7 +466,12 @@ export class TaxDashboardService {
                 .map(ret => ({
                     ...ret,
                     amount: parseFloat(ret.amount || 0),
-                    period: `${this.parseAsDateOnly(ret.period_start)} to ${this.parseAsDateOnly(ret.period_end)}`
+                    period: `${this.toDateOnlyString(ret.period_start)} to ${this.toDateOnlyString(ret.period_end)}`,
+                    period_start: this.toDateOnlyString(ret.period_start),
+                    period_end: this.toDateOnlyString(ret.period_end),
+                    filing_date: ret.filing_date ? this.toDateOnlyString(ret.filing_date) : null,
+                    paid_at: ret.paid_at ? this.toUTCISOString(ret.paid_at) : null,
+                    created_at: this.toUTCISOString(ret.created_at)
                 }))
                 .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
                 .slice(0, limit);
@@ -454,11 +494,11 @@ export class TaxDashboardService {
      */
     static async getComplianceScore(businessId) {
         const client = await getClient();
-        
+
         try {
             // Calculate filing compliance (VAT returns)
             const vatCompliance = await client.query(`
-                SELECT 
+                SELECT
                     COUNT(*) as total_returns,
                     COUNT(CASE WHEN filing_date <= due_date THEN 1 END) as on_time_filed,
                     COUNT(CASE WHEN paid_at <= due_date + INTERVAL '15 days' THEN 1 END) as on_time_paid
@@ -469,7 +509,7 @@ export class TaxDashboardService {
 
             // Calculate WHT compliance from wht_returns
             const whtCompliance = await client.query(`
-                SELECT 
+                SELECT
                     COUNT(*) as total_returns,
                     COUNT(CASE WHEN submitted_at <= due_date THEN 1 END) as on_time_filed,
                     COUNT(CASE WHEN paid_at <= due_date + INTERVAL '15 days' THEN 1 END) as on_time_paid
@@ -478,16 +518,16 @@ export class TaxDashboardService {
                     AND created_at >= NOW() - INTERVAL '12 months'
             `, [businessId]);
 
-            const totalReturns = 
-                parseInt(vatCompliance.rows[0]?.total_returns || 0) + 
+            const totalReturns =
+                parseInt(vatCompliance.rows[0]?.total_returns || 0) +
                 parseInt(whtCompliance.rows[0]?.total_returns || 0);
-            
-            const onTimeFiled = 
-                parseInt(vatCompliance.rows[0]?.on_time_filed || 0) + 
+
+            const onTimeFiled =
+                parseInt(vatCompliance.rows[0]?.on_time_filed || 0) +
                 parseInt(whtCompliance.rows[0]?.on_time_filed || 0);
-            
-            const onTimePaid = 
-                parseInt(vatCompliance.rows[0]?.on_time_paid || 0) + 
+
+            const onTimePaid =
+                parseInt(vatCompliance.rows[0]?.on_time_paid || 0) +
                 parseInt(whtCompliance.rows[0]?.on_time_paid || 0);
 
             const filingScore = totalReturns > 0 ? (onTimeFiled / totalReturns) * 100 : 100;
@@ -543,11 +583,11 @@ export class TaxDashboardService {
      */
     static async getCashFlowImpact(businessId, dateRange) {
         const client = await getClient();
-        
+
         try {
             // Get VAT payments made
             const vatPayments = await client.query(`
-                SELECT 
+                SELECT
                     DATE_TRUNC('month', paid_at) as month,
                     SUM(paid_amount) as amount
                 FROM vat_returns
@@ -560,7 +600,7 @@ export class TaxDashboardService {
 
             // Get WHT payments from wht_returns
             const whtPayments = await client.query(`
-                SELECT 
+                SELECT
                     DATE_TRUNC('month', paid_at) as month,
                     SUM(paid_amount) as amount
                 FROM wht_returns
@@ -573,9 +613,9 @@ export class TaxDashboardService {
 
             // Combine payments by month
             const paymentsByMonth = new Map();
-            
+
             vatPayments.rows.forEach(row => {
-                const month = this.parseAsDateOnly(row.month);
+                const month = this.toDateOnlyString(row.month);
                 paymentsByMonth.set(month, {
                     month,
                     vat: parseFloat(row.amount || 0),
@@ -585,7 +625,7 @@ export class TaxDashboardService {
             });
 
             whtPayments.rows.forEach(row => {
-                const month = this.parseAsDateOnly(row.month);
+                const month = this.toDateOnlyString(row.month);
                 if (paymentsByMonth.has(month)) {
                     const existing = paymentsByMonth.get(month);
                     existing.wht = parseFloat(row.amount || 0);
@@ -637,13 +677,13 @@ export class TaxDashboardService {
      */
     static async getTaxForecast(businessId, months = 3) {
         const client = await getClient();
-        
+
         try {
             log.info('Getting tax forecast', { businessId, months });
-            
+
             // Get historical VAT payments to identify patterns
             const vatHistory = await client.query(`
-                SELECT 
+                SELECT
                     DATE_TRUNC('month', paid_at) as month,
                     SUM(paid_amount) as amount
                 FROM vat_returns
@@ -656,7 +696,7 @@ export class TaxDashboardService {
 
             // Get historical WHT payments
             const whtHistory = await client.query(`
-                SELECT 
+                SELECT
                     DATE_TRUNC('month', paid_at) as month,
                     SUM(paid_amount) as amount
                 FROM wht_returns
@@ -668,20 +708,20 @@ export class TaxDashboardService {
             `, [businessId]);
 
             // Calculate average monthly payments
-            const vatAvg = vatHistory.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0) / 
+            const vatAvg = vatHistory.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0) /
                           Math.max(vatHistory.rows.length, 1);
-            
-            const whtAvg = whtHistory.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0) / 
+
+            const whtAvg = whtHistory.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0) /
                           Math.max(whtHistory.rows.length, 1);
 
             // Generate forecast for next 'months' months
             const forecast = [];
             const today = new Date();
-            
+
             for (let i = 1; i <= months; i++) {
                 const forecastDate = new Date(today);
                 forecastDate.setMonth(today.getMonth() + i);
-                
+
                 // Check for known upcoming returns in this month
                 const upcomingVAT = await client.query(`
                     SELECT COUNT(*) as count, COALESCE(SUM(total_amount_due), 0) as total
@@ -690,7 +730,7 @@ export class TaxDashboardService {
                         AND status IN ('calculated', 'approved')
                         AND DATE_TRUNC('month', due_date) = DATE_TRUNC('month', $2::DATE)
                 `, [businessId, forecastDate]);
-                
+
                 const upcomingWHT = await client.query(`
                     SELECT COUNT(*) as count, COALESCE(SUM(total_wht_amount), 0) as total
                     FROM wht_returns
@@ -700,7 +740,7 @@ export class TaxDashboardService {
                 `, [businessId, forecastDate]);
 
                 forecast.push({
-                    month: this.parseAsDateOnly(forecastDate),
+                    month: this.toDateOnlyString(forecastDate),
                     monthName: forecastDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
                     vat: {
                         projected: Math.round(vatAvg * 100) / 100,
@@ -724,7 +764,7 @@ export class TaxDashboardService {
                     whtAverage: Math.round(whtAvg * 100) / 100
                 },
                 forecast,
-                generatedAt: new Date().toISOString()
+                generatedAt: this.toUTCISOString(new Date()) // Use ISO format for timestamps
             };
 
         } catch (error) {
@@ -735,7 +775,7 @@ export class TaxDashboardService {
             return {
                 basedOnHistory: { monthsAnalyzed: 0, vatAverage: 0, whtAverage: 0 },
                 forecast: [],
-                generatedAt: new Date().toISOString(),
+                generatedAt: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 error: error.message
             };
         } finally {
@@ -749,16 +789,16 @@ export class TaxDashboardService {
      */
     static async getTaxAlerts(businessId) {
         const client = await getClient();
-        
+
         try {
             log.info('Getting tax alerts', { businessId });
-            
-            const today = this.parseAsDateOnly(new Date());
+
+            const today = this.toDateOnlyString(new Date());
             const alerts = [];
 
             // Alert 1: Overdue returns
             const overdueVAT = await client.query(`
-                SELECT 
+                SELECT
                     'VAT' as type,
                     return_number as reference,
                     due_date,
@@ -780,14 +820,15 @@ export class TaxDashboardService {
                     title: 'Overdue VAT Return',
                     description: `${row.reference} is ${row.days_overdue} days overdue`,
                     amount: parseFloat(row.amount_due || 0),
-                    dueDate: this.parseAsDateOnly(row.due_date),
+                    dueDate: this.toDateOnlyString(row.due_date),
+                    daysOverdue: parseInt(row.days_overdue),
                     action: 'file_now',
                     reference: row.reference
                 });
             });
 
             const overdueWHT = await client.query(`
-                SELECT 
+                SELECT
                     'WHT' as type,
                     return_number as reference,
                     due_date,
@@ -809,7 +850,8 @@ export class TaxDashboardService {
                     title: 'Overdue WHT Return',
                     description: `${row.reference} is ${row.days_overdue} days overdue`,
                     amount: parseFloat(row.amount_due || 0),
-                    dueDate: this.parseAsDateOnly(row.due_date),
+                    dueDate: this.toDateOnlyString(row.due_date),
+                    daysOverdue: parseInt(row.days_overdue),
                     action: 'file_now',
                     reference: row.reference
                 });
@@ -817,7 +859,7 @@ export class TaxDashboardService {
 
             // Alert 2: Upcoming deadlines (next 7 days)
             const upcomingVAT = await client.query(`
-                SELECT 
+                SELECT
                     'VAT' as type,
                     return_number as reference,
                     due_date,
@@ -838,7 +880,7 @@ export class TaxDashboardService {
                     title: 'VAT Return Due Soon',
                     description: `${row.reference} due in ${row.days_until} days`,
                     amount: parseFloat(row.amount_due || 0),
-                    dueDate: this.parseAsDateOnly(row.due_date),
+                    dueDate: this.toDateOnlyString(row.due_date),
                     daysUntil: row.days_until,
                     action: 'prepare_return',
                     reference: row.reference
@@ -867,7 +909,7 @@ export class TaxDashboardService {
 
             // Alert 4: Expiring tax credits
             const expiringCredits = await client.query(`
-                SELECT 
+                SELECT
                     COUNT(*) as count,
                     COALESCE(SUM(remaining_amount), 0) as total
                 FROM purchase_tax_credits
@@ -920,7 +962,7 @@ export class TaxDashboardService {
                     info: alerts.filter(a => a.severity === 'info').length
                 },
                 alerts,
-                generatedAt: new Date().toISOString()
+                generatedAt: this.toUTCISOString(new Date()) // Use ISO format for timestamps
             };
 
         } catch (error) {
@@ -932,7 +974,7 @@ export class TaxDashboardService {
                 total: 0,
                 bySeverity: { critical: 0, warning: 0, info: 0 },
                 alerts: [],
-                generatedAt: new Date().toISOString(),
+                generatedAt: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 error: error.message
             };
         } finally {
@@ -1016,7 +1058,7 @@ export class TaxDashboardService {
                 JSON.stringify(data),
                 dateRange.startDate,
                 dateRange.endDate,
-                expiresAt,
+                this.toUTCISOString(expiresAt),
                 data.generationTimeMs || 0
             ]);
 

@@ -86,6 +86,9 @@ import branchRoutes from './routes/branchRoutes.js';
 // Add this import with other route imports
 import accountingRoutes from './routes/accountingRoutes.js';
 import taxRoutes from './routes/taxRoutes.js';
+//discount accounting routes
+import discountRoutes from './routes/discountRoutes.js';
+import discountAnalyticsRoutes from './routes/discountAnalyticsRoutes.js';
 
 // Import WHT Certificate Routes - ADD THIS LINE
 import whtCertificateRoutes from './routes/whtCertificateRoutes.js';
@@ -251,6 +254,12 @@ app.use('/api/analytics/sales', salesAnalyticsRoutes);
 // Add this with other protected routes (after authentication middleware)
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/tax', taxRoutes);
+
+//discount accounting routes
+app.use('/api/discounts', discountRoutes);
+app.use('/api/discounts/analytics', discountAnalyticsRoutes);
+
+
 //wht routes
 app.use('/api/wht/certificates', whtCertificateRoutes);
 app.use('/api/wht/returns', whtReturnRoutes);

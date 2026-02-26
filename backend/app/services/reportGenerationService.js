@@ -5,38 +5,70 @@ import { log } from '../utils/logger.js';
 /**
  * REPORT GENERATION SERVICE - Generates tax reports in multiple formats
  * Phase 8: Tax Dashboard & Reporting
+ * 
+ * UPDATED: Consistent date handling with accounting/invoice services
+ * - toUTCISOString() for timestamps
+ * - toDateOnlyString() for date-only values
  */
 export class ReportGenerationService {
 
     /**
-     * Parse date to YYYY-MM-DD format
+     * Convert any date input to UTC ISO string for database storage
+     * (Matches invoiceService pattern)
+     */
+    static toUTCISOString(dateInput) {
+        if (!dateInput) {
+            return new Date().toISOString();
+        }
+
+        try {
+            // If it's already a string in ISO format, return as-is
+            if (typeof dateInput === "string" && dateInput.includes("T")) {
+                return dateInput;
+            }
+
+            // If it's a date-only string (YYYY-MM-DD), add time component
+            if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                return new Date(dateInput + "T00:00:00Z").toISOString();
+            }
+
+            // Otherwise, create Date object and convert to ISO
+            const date = new Date(dateInput);
+            if (isNaN(date.getTime())) {
+                return new Date().toISOString();
+            }
+            return date.toISOString();
+
+        } catch (error) {
+            return new Date().toISOString();
+        }
+    }
+
+    /**
+     * Convert any date input to date-only string (YYYY-MM-DD)
+     * (Matches invoiceService pattern for tax calculations)
+     */
+    static toDateOnlyString(dateInput) {
+        if (!dateInput) {
+            return new Date().toISOString().split("T")[0];
+        }
+
+        try {
+            const date = new Date(dateInput);
+            if (isNaN(date.getTime())) {
+                return new Date().toISOString().split("T")[0];
+            }
+            return date.toISOString().split("T")[0];
+        } catch (error) {
+            return new Date().toISOString().split("T")[0];
+        }
+    }
+
+    /**
+     * Parse date to YYYY-MM-DD format (legacy method - kept for backward compatibility)
      */
     static parseAsDateOnly(dateInput) {
-        if (!dateInput) {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-
-        if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-            return dateInput;
-        }
-
-        const date = new Date(dateInput);
-        if (isNaN(date.getTime())) {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        return this.toDateOnlyString(dateInput);
     }
 
     /**
@@ -46,10 +78,10 @@ export class ReportGenerationService {
         const endDate = new Date();
         const startDate = new Date();
         startDate.setFullYear(startDate.getFullYear() - 1);
-        
+
         return {
-            startDate: this.parseAsDateOnly(startDate),
-            endDate: this.parseAsDateOnly(endDate)
+            startDate: this.toDateOnlyString(startDate),
+            endDate: this.toDateOnlyString(endDate)
         };
     }
 
@@ -78,7 +110,7 @@ export class ReportGenerationService {
 
             // Query sales data from vat_return_sales, joining with vat_returns to filter by business_id
             const salesQuery = await client.query(`
-                SELECT 
+                SELECT
                     vrs.vat_category,
                     DATE_TRUNC('month', vrs.transaction_date) as month,
                     COUNT(*) as transaction_count,
@@ -128,18 +160,18 @@ export class ReportGenerationService {
 
             const report = {
                 report_name: 'Sales Tax Summary',
-                generated_at: new Date().toISOString(),
+                generated_at: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 period: dateRange,
                 business_id: businessId,
                 summary: {
                     ...totals,
-                    effective_vat_rate: totals.total_exclusive > 0 
+                    effective_vat_rate: totals.total_exclusive > 0
                         ? (totals.total_vat / totals.total_exclusive * 100).toFixed(2)
                         : 0
                 },
                 by_category: Object.values(categorySummary),
                 monthly_breakdown: salesQuery.rows.map(row => ({
-                    month: this.parseAsDateOnly(row.month),
+                    month: this.toDateOnlyString(row.month),
                     category: row.vat_category,
                     transaction_count: parseInt(row.transaction_count),
                     total_exclusive: parseFloat(row.total_exclusive),
@@ -254,7 +286,7 @@ export class ReportGenerationService {
 
             const report = {
                 report_name: 'WHT Certificate Register',
-                generated_at: new Date().toISOString(),
+                generated_at: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 period: { startDate, endDate },
                 business_id: businessId,
                 type_filter: type,
@@ -264,12 +296,12 @@ export class ReportGenerationService {
                     certificate_number: r.certificate_number,
                     counterparty_name: r.counterparty_name,
                     counterparty_tin: r.counterparty_tin,
-                    transaction_date: this.parseAsDateOnly(r.transaction_date),
+                    transaction_date: this.toDateOnlyString(r.transaction_date),
                     gross_amount: parseFloat(r.gross_amount || 0),
                     withholding_rate: parseFloat(r.withholding_rate || 0),
                     wht_amount: parseFloat(r.withholding_amount || r.wht_amount || 0),
                     status: r.status,
-                    issued_date: this.parseAsDateOnly(r.issued_date),
+                    issued_date: this.toDateOnlyString(r.issued_date),
                     notes: r.notes
                 }))
             };
@@ -387,7 +419,7 @@ export class ReportGenerationService {
 
             const report = {
                 report_name: 'VAT Returns History',
-                generated_at: new Date().toISOString(),
+                generated_at: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 period: { startDate, endDate },
                 business_id: businessId,
                 statistics: stats,
@@ -406,7 +438,15 @@ export class ReportGenerationService {
                     late_payment_penalty: parseFloat(row.late_payment_penalty || 0),
                     interest_amount: parseFloat(row.interest_amount || 0),
                     total_amount_due: parseFloat(row.total_amount_due || 0),
-                    paid_amount: parseFloat(row.paid_amount || 0)
+                    paid_amount: parseFloat(row.paid_amount || 0),
+                    period_start: this.toDateOnlyString(row.period_start),
+                    period_end: this.toDateOnlyString(row.period_end),
+                    due_date: this.toDateOnlyString(row.due_date),
+                    filing_date: this.toDateOnlyString(row.filing_date),
+                    paid_at: row.paid_at ? this.toUTCISOString(row.paid_at) : null,
+                    submitted_at: row.submitted_at ? this.toUTCISOString(row.submitted_at) : null,
+                    approved_at: row.approved_at ? this.toUTCISOString(row.approved_at) : null,
+                    created_at: this.toUTCISOString(row.created_at)
                 }))
             };
 
@@ -519,7 +559,7 @@ export class ReportGenerationService {
 
             const report = {
                 report_name: 'Tax Credit Report',
-                generated_at: new Date().toISOString(),
+                generated_at: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 business_id: businessId,
                 filters: { status, startDate, endDate },
                 summary: stats,
@@ -532,14 +572,16 @@ export class ReportGenerationService {
                     utilized_amount: parseFloat(row.utilized_amount || 0),
                     remaining_amount: parseFloat(row.remaining_amount || 0),
                     status: row.status,
-                    issue_date: this.parseAsDateOnly(row.created_at),
-                    expiry_date: row.expiry_date ? this.parseAsDateOnly(row.expiry_date) : null,
+                    issue_date: this.toDateOnlyString(row.created_at),
+                    expiry_date: row.expiry_date ? this.toDateOnlyString(row.expiry_date) : null,
                     days_until_expiry: row.expiry_date
                         ? Math.ceil((new Date(row.expiry_date) - now) / (1000 * 60 * 60 * 24))
                         : null,
                     tax_type_code: row.tax_type_code,
                     tax_period: row.tax_period,
-                    notes: row.notes
+                    notes: row.notes,
+                    created_at: this.toUTCISOString(row.created_at),
+                    updated_at: row.updated_at ? this.toUTCISOString(row.updated_at) : null
                 }))
             };
 
@@ -597,12 +639,12 @@ export class ReportGenerationService {
                     s.last_compliance_check,
                     s.created_at,
                     s.updated_at,
-                    
+
                     -- Additional stats from related tables
                     (SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id = s.id) as po_count,
                     (SELECT COUNT(*) FROM purchase_wht_certificates pwc WHERE pwc.supplier_id = s.id) as wht_certificate_count,
                     (SELECT COALESCE(SUM(wht_amount), 0) FROM purchase_wht_certificates pwc WHERE pwc.supplier_id = s.id) as total_wht_deducted
-                    
+
                 FROM suppliers s
                 WHERE s.business_id = $1
             `;
@@ -651,7 +693,7 @@ export class ReportGenerationService {
 
             const report = {
                 report_name: 'Supplier Compliance Report',
-                generated_at: new Date().toISOString(),
+                generated_at: this.toUTCISOString(new Date()), // Use ISO format for timestamps
                 business_id: businessId,
                 filters: { minComplianceScore, riskLevel, tinVerified },
                 summary: stats,
@@ -665,8 +707,9 @@ export class ReportGenerationService {
                     tin_verification_status: s.tin_verification_status,
                     compliance_score: parseFloat(s.compliance_score || 0),
                     risk_level: s.risk_level,
-                    last_compliance_check: s.last_compliance_check,
-                    created_at: s.created_at,
+                    last_compliance_check: s.last_compliance_check ? this.toUTCISOString(s.last_compliance_check) : null,
+                    created_at: this.toUTCISOString(s.created_at),
+                    updated_at: s.updated_at ? this.toUTCISOString(s.updated_at) : null,
                     po_count: parseInt(s.po_count || 0),
                     wht_certificate_count: parseInt(s.wht_certificate_count || 0),
                     total_wht_deducted: parseFloat(s.total_wht_deducted || 0),
@@ -709,7 +752,7 @@ export class ReportGenerationService {
         return {
             format: 'json',
             data: report,
-            generated_at: new Date().toISOString()
+            generated_at: this.toUTCISOString(new Date())
         };
     }
 
@@ -745,12 +788,12 @@ export class ReportGenerationService {
             return {
                 format: 'csv',
                 data: 'No data available',
-                filename: `${reportName}_${this.parseAsDateOnly(new Date())}.csv`
+                filename: `${reportName}_${this.toDateOnlyString(new Date())}.csv`
             };
         }
 
         // Get headers from first object
-        const headers = Object.keys(dataArray[0]).filter(key => 
+        const headers = Object.keys(dataArray[0]).filter(key =>
             typeof dataArray[0][key] !== 'object' || dataArray[0][key] === null
         );
 
@@ -773,7 +816,7 @@ export class ReportGenerationService {
         return {
             format: 'csv',
             data: csvRows.join('\n'),
-            filename: `${reportName}_${this.parseAsDateOnly(new Date())}.csv`
+            filename: `${reportName}_${this.toDateOnlyString(new Date())}.csv`
         };
     }
 
