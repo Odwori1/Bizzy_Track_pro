@@ -10,6 +10,7 @@ import { DiscountAllocationService } from '../services/discountAllocationService
 import { DiscountAccountingService } from '../services/discountAccountingService.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
+import { getClient } from '../utils/database.js';
 
 /**
  * DISCOUNT CONTROLLER

@@ -2,6 +2,9 @@ import { query, getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { TaxService } from './taxService.js';
+import { DiscountRuleEngine } from './discountRuleEngine.js';
+import { DiscountSettingsService } from './discountSettingsService.js';
+import { EarlyPaymentService } from './earlyPaymentService.js';
 
 // ================ PRODUCTION-READY TAX CALCULATION MODULE ================
 /**
@@ -21,11 +24,11 @@ class InvoiceTaxCalculator {
   static async getCustomerType(client, customerId, businessId) {
     try {
       const customerQuery = await client.query(
-        `SELECT customer_type FROM customers 
+        `SELECT customer_type FROM customers
          WHERE id = $1 AND business_id = $2`,
         [customerId, businessId]
       );
-      
+
       if (customerQuery.rows.length === 0) {
         log.warn('Customer not found, using default type "company"', {
           customerId,
@@ -33,13 +36,13 @@ class InvoiceTaxCalculator {
         });
         return 'company'; // Default
       }
-      
+
       const customerType = customerQuery.rows[0].customer_type || 'company';
       log.debug('Customer type retrieved', {
         customerId,
         customerType
       });
-      
+
       return customerType;
     } catch (error) {
       log.error('Failed to get customer type', {
@@ -93,7 +96,7 @@ class InvoiceTaxCalculator {
           productCategory: taxCategoryCode,
           amount: itemTotal,
           transactionType: 'sale',
-          customerType: customerType, // ✅ FIX: Use actual customer type
+          customerType: customerType,
           isExport: false,
           transactionDate: transactionDate ? new Date(transactionDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]
         });
@@ -119,61 +122,58 @@ class InvoiceTaxCalculator {
         throw new Error(`Tax calculation failed for product ${item.product_id}: ${error.message}`);
       }
     }
-    // CASE 2: Service-based line item
-    // ✅ FIX: Now uses TaxService instead of manual calculation
+    // CASE 2: Service-based line item - UPDATED SECTION
     else if (item.service_id) {
       try {
-        // Get service info including tax category with business_id check
+        // Get service info - ONLY query existing columns
         const serviceQuery = await client.query(
-          `SELECT s.tax_category_code, s.name as service_name
+          `SELECT s.name as service_name
            FROM services s
            WHERE s.id = $1 AND s.business_id = $2`,
           [item.service_id, businessId]
         );
 
         if (serviceQuery.rows.length === 0) {
-          log.warn('Service not found, will use manual tax rate if provided', {
+          log.warn('Service not found, will use default tax category', {
             serviceId: item.service_id,
             businessId
           });
-          // Service not found - use manual rate if provided
-          taxRate = item.tax_rate || 0;
-          taxAmount = itemTotal * (item.tax_rate || 0) / 100;
-          taxCategoryCode = item.tax_category_code || 'SERVICES';
-        } else {
-          const service = serviceQuery.rows[0];
-          taxCategoryCode = service.tax_category_code || 'SERVICES';
-
-          log.debug('Service found for tax calculation', {
-            serviceId: item.service_id,
-            serviceName: service.service_name,
-            taxCategory: taxCategoryCode
-          });
-
-          // ✅ FIX: Calculate tax using TaxService (country from business)
-          const taxResult = await TaxService.calculateItemTax({
-            businessId,
-            productCategory: taxCategoryCode,
-            amount: itemTotal,
-            transactionType: 'sale',
-            customerType: customerType, // ✅ FIX: Use actual customer type
-            isExport: false,
-            transactionDate: transactionDate ? new Date(transactionDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]
-          });
-
-          taxRate = taxResult.taxRate;
-          taxAmount = taxResult.taxAmount;
-
-          log.debug('Service tax calculated successfully', {
-            serviceId: item.service_id,
-            serviceName: service.service_name,
-            taxCategory: taxCategoryCode,
-            taxCode: taxResult.taxCode,
-            taxRate,
-            taxAmount,
-            customerType
-          });
         }
+
+        const service = serviceQuery.rows[0];
+        
+        // Services use a default tax category - this is configurable per business in future
+        taxCategoryCode = 'SERVICES';
+
+        log.debug('Service found for tax calculation', {
+          serviceId: item.service_id,
+          serviceName: service?.service_name,
+          taxCategory: taxCategoryCode
+        });
+
+        // Calculate tax using TaxService with the SERVICES category
+        const taxResult = await TaxService.calculateItemTax({
+          businessId,
+          productCategory: taxCategoryCode,  // Always 'SERVICES' for service items
+          amount: itemTotal,
+          transactionType: 'sale',
+          customerType: customerType,
+          isExport: false,
+          transactionDate: transactionDate ? new Date(transactionDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]
+        });
+
+        taxRate = taxResult.taxRate;
+        taxAmount = taxResult.taxAmount;
+
+        log.debug('Service tax calculated successfully', {
+          serviceId: item.service_id,
+          serviceName: service?.service_name,
+          taxCategory: taxCategoryCode,
+          taxCode: taxResult.taxCode,
+          taxRate,
+          taxAmount,
+          customerType
+        });
       } catch (error) {
         log.error('Service tax calculation failed', {
           serviceId: item.service_id,
@@ -184,7 +184,6 @@ class InvoiceTaxCalculator {
       }
     }
     // CASE 3: Manual line item
-    // ✅ FIX: Uses TaxService if category provided
     else {
       if (item.tax_category_code) {
         try {
@@ -194,7 +193,7 @@ class InvoiceTaxCalculator {
             productCategory: item.tax_category_code,
             amount: itemTotal,
             transactionType: 'sale',
-            customerType: customerType, // ✅ FIX: Use actual customer type
+            customerType: customerType,
             isExport: false,
             transactionDate: transactionDate ? new Date(transactionDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]
           });
@@ -249,7 +248,6 @@ class InvoiceTaxCalculator {
 
   /**
    * Create transaction_taxes record for audit trail
-   * ✅ FIX: Gets country dynamically from business, not hard-coded
    */
   static async createTaxTransaction(client, businessId, invoiceId, lineItem, taxCalculation, transactionDate, customerType = 'company') {
     if (!taxCalculation.taxAmount || taxCalculation.taxAmount <= 0) {
@@ -257,7 +255,6 @@ class InvoiceTaxCalculator {
     }
 
     try {
-      // ✅ FIX: Get business country dynamically
       const businessQuery = await client.query(
         `SELECT
           b.country_code,
@@ -277,15 +274,12 @@ class InvoiceTaxCalculator {
       const businessCountry = business.country_code || 'UG';
       const businessCountryName = business.country_name || 'Uganda';
 
-      // Get tax type info for ledger accounting
-      // ✅ FIX: Use businessCountry instead of hard-coded 'UG'
       const taxInfo = await TaxService.getTaxRate(
         taxCalculation.taxCategoryCode,
         businessCountry,
         transactionDate || new Date().toISOString().split('T')[0]
       );
 
-      // Get tax_type_id and tax_rate_id
       const taxTypeQuery = await client.query(
         'SELECT id FROM tax_types WHERE tax_code = $1',
         [taxInfo.taxCode]
@@ -312,14 +306,14 @@ class InvoiceTaxCalculator {
         invoiceId,
         'sale',
         transactionDate || new Date(),
-        taxTypeQuery.rows[0]?.id,      // tax_type_id
-        taxRateQuery.rows[0]?.id,      // tax_rate_id
-        taxCalculation.itemTotal,      // taxable_amount
-        taxCalculation.taxRate,        // tax_rate
-        taxCalculation.taxAmount,      // tax_amount
-        businessCountry,               // country_code
-        taxCalculation.taxCategoryCode, // product_category_code
-        new Date().toISOString().substring(0, 7) + '-01', // tax_period
+        taxTypeQuery.rows[0]?.id,
+        taxRateQuery.rows[0]?.id,
+        taxCalculation.itemTotal,
+        taxCalculation.taxRate,
+        taxCalculation.taxAmount,
+        businessCountry,
+        taxCalculation.taxCategoryCode,
+        new Date().toISOString().substring(0, 7) + '-01',
         JSON.stringify({
           invoice_id: invoiceId,
           line_item_description: lineItem.description,
@@ -329,7 +323,7 @@ class InvoiceTaxCalculator {
           tax_engine_version: '1.0',
           business_country: businessCountry,
           business_country_name: businessCountryName,
-          customer_type: customerType  // ✅ FIX: Include customer type in context
+          customer_type: customerType
         })
       ]);
 
@@ -348,7 +342,6 @@ class InvoiceTaxCalculator {
         invoiceId,
         error: error.message
       });
-      // Don't fail the invoice creation if tax audit fails
       return null;
     }
   }
@@ -369,10 +362,10 @@ export const invoiceService = {
         throw new Error('At least one line item is required');
       }
 
-      // ✅ Get customer type for tax calculation
+      // Get customer type for tax calculation
       const customerType = await InvoiceTaxCalculator.getCustomerType(
-        client, 
-        invoiceData.customer_id, 
+        client,
+        invoiceData.customer_id,
         businessId
       );
 
@@ -381,55 +374,32 @@ export const invoiceService = {
         customerType
       });
 
-      // Generate invoice number
-      const invoiceNumberQuery = `
-        SELECT COUNT(*) as invoice_count
-        FROM invoices
-        WHERE business_id = $1
-      `;
-      const countResult = await client.query(invoiceNumberQuery, [businessId]);
-      const invoiceNumber = `INV-${(parseInt(countResult.rows[0].invoice_count) + 1).toString().padStart(4, '0')}`;
-
       // ================ SIMPLE & ROBUST DATE HANDLING ================
-      // Convert any date input to UTC ISO string for database storage
       const toUTCISOString = (dateInput) => {
         if (!dateInput) {
-          // Return current UTC time when no input provided
           return new Date().toISOString();
         }
-
         try {
-          // If it's already a string in ISO format, return as-is
           if (typeof dateInput === "string" && dateInput.includes("T")) {
             return dateInput;
           }
-
-          // If it's a date-only string (YYYY-MM-DD), add time component
           if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
             return new Date(dateInput + "T00:00:00Z").toISOString();
           }
-
-          // Otherwise, create Date object and convert to ISO
           const date = new Date(dateInput);
           if (isNaN(date.getTime())) {
-            // Invalid date, use current time
             return new Date().toISOString();
           }
           return date.toISOString();
-
         } catch (error) {
-          // If anything fails, use current time
           return new Date().toISOString();
         }
       };
 
-      // For tax calculations: convert to date-only string (YYYY-MM-DD)
       const toDateOnlyString = (dateInput) => {
         if (!dateInput) {
-          // Return current date when no input provided
           return new Date().toISOString().split("T")[0];
         }
-
         try {
           const date = new Date(dateInput);
           if (isNaN(date.getTime())) {
@@ -441,7 +411,6 @@ export const invoiceService = {
         }
       };
 
-      // Get dates - handle undefined/invalid inputs
       const invoiceDateInput = invoiceData.invoice_date;
       const dueDateInput = invoiceData.due_date;
 
@@ -452,9 +421,7 @@ export const invoiceService = {
       log.debug("Date parsing debug", {
         input_invoice_date: invoiceDateInput,
         parsed_transactionDate: transactionDate,
-        parsed_transactionDateForTax: transactionDateForTax,
-        type_input: typeof invoiceDateInput,
-        type_parsed: typeof transactionDate
+        parsed_transactionDateForTax: transactionDateForTax
       });
 
       let subtotal = 0;
@@ -464,11 +431,11 @@ export const invoiceService = {
       // Calculate tax for each line item with customer type
       for (const item of invoiceData.line_items) {
         const taxCalculation = await InvoiceTaxCalculator.calculateLineItemTax(
-          client, 
-          businessId, 
-          item, 
+          client,
+          businessId,
+          item,
           transactionDateForTax || new Date().toISOString().split("T")[0],
-          customerType  // ✅ Pass customer type to tax calculation
+          customerType
         );
 
         subtotal += taxCalculation.itemTotal;
@@ -483,38 +450,165 @@ export const invoiceService = {
         });
       }
 
-      const totalAmount = subtotal + totalTax - (invoiceData.discount_amount || 0);
+      // ================ DISCOUNT CALCULATION WITH APPROVAL HANDLING ================
+      let discountResult = null;
+      let requiresApproval = false;
+      let approvalId = null;
 
-      // Create invoice - ✅ FIXED: Use UTC timestamp strings
+      if (invoiceData.promo_code || invoiceData.apply_discounts !== false) {
+        try {
+          // Prepare items for discount calculation
+          const discountItems = invoiceData.line_items.map(item => ({
+            id: item.service_id || item.product_id || `manual-${Date.now()}`,
+            amount: item.unit_price,
+            quantity: item.quantity,
+            type: item.service_id ? 'service' : (item.product_id ? 'product' : 'manual')
+          }));
+
+          log.info('Calculating discounts for invoice', {
+            promoCode: invoiceData.promo_code,
+            itemCount: discountItems.length,
+            subtotal
+          });
+
+          discountResult = await DiscountRuleEngine.calculateFinalPrice({
+            businessId,
+            customerId: invoiceData.customer_id,
+            items: discountItems,
+            amount: subtotal,
+            userId,
+            transactionDate: transactionDateForTax,
+            promoCode: invoiceData.promo_code,
+            transactionId: null,
+            transactionType: 'INVOICE',
+            createAllocation: true,
+            createJournalEntries: false, // Invoices create entries when paid
+            preApproved: invoiceData.pre_approved || false
+          });
+
+          // Check if approval is required
+          if (discountResult.requiresApproval) {
+            requiresApproval = true;
+            log.info('Discount requires approval', {
+              promoCode: invoiceData.promo_code,
+              threshold: discountResult.approvalThreshold
+            });
+
+            // Submit for approval automatically
+            const approvalRequest = await DiscountRuleEngine.submitForApproval({
+              businessId,
+              customerId: invoiceData.customer_id,
+              amount: subtotal,
+              items: discountItems,
+              promoCode: invoiceData.promo_code,
+              transactionId: null,
+              transactionType: 'INVOICE'
+            }, userId);
+
+            approvalId = approvalRequest.approvalId;
+
+            // Store approval info
+            invoiceData.requires_approval = true;
+            invoiceData.approval_id = approvalId;
+          }
+          // Apply discounts if approved
+          else if (discountResult.totalDiscount > 0) {
+            invoiceData.discount_amount = discountResult.totalDiscount;
+            totalAmount = subtotal + totalTax - discountResult.totalDiscount;
+
+            log.info('Discounts applied to invoice', {
+              originalSubtotal: subtotal,
+              totalDiscount: discountResult.totalDiscount,
+              finalTotal: totalAmount,
+              discountCount: discountResult.appliedDiscounts.length
+            });
+          }
+        } catch (discountError) {
+          log.error('Discount calculation failed, continuing without discounts', {
+            error: discountError.message,
+            promoCode: invoiceData.promo_code
+          });
+          // Continue without discounts
+        }
+      }
+
+      // Generate invoice number
+      const invoiceNumberQuery = `
+        SELECT COUNT(*) as invoice_count
+        FROM invoices
+        WHERE business_id = $1
+      `;
+      const countResult = await client.query(invoiceNumberQuery, [businessId]);
+      const invoiceNumber = `INV-${(parseInt(countResult.rows[0].invoice_count) + 1).toString().padStart(4, '0')}`;
+
+      // Apply discounts if any
+      const discountAmount = discountResult?.totalDiscount || invoiceData.discount_amount || 0;
+      const totalAmount = subtotal + totalTax - discountAmount;
+
+      // Create invoice
       const createInvoiceQuery = `
         INSERT INTO invoices (
           business_id, invoice_number, invoice_date, due_date,
           job_id, customer_id, subtotal, tax_amount, tax_rate,
-          discount_amount, total_amount, notes, terms, created_by
+          discount_amount, total_amount, notes, terms, created_by,
+          requires_approval, approval_id, discount_breakdown
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING *
       `;
 
       const invoiceValues = [
         businessId,
         invoiceNumber,
-        transactionDate,  // ✅ Now properly parsed UTC timestamp
-        dueDate,          // ✅ Now properly parsed UTC timestamp or null
+        transactionDate,
+        dueDate,
         invoiceData.job_id || null,
         invoiceData.customer_id,
         subtotal,
         totalTax,
-        totalTax > 0 ? (totalTax / subtotal * 100) : 0, // Average tax rate
-        invoiceData.discount_amount || 0,
+        totalTax > 0 ? (totalTax / subtotal * 100) : 0,
+        discountAmount,
         totalAmount,
         invoiceData.notes || '',
         invoiceData.terms || '',
-        userId
+        userId,
+        requiresApproval,
+        approvalId,
+        invoiceData.discount_breakdown || null
       ];
 
       const invoiceResult = await client.query(createInvoiceQuery, invoiceValues);
       const newInvoice = invoiceResult.rows[0];
+
+      // ================ LINK DISCOUNT ALLOCATION AND APPROVAL ================
+      if (discountResult && discountResult.allocation) {
+        await client.query(
+          `UPDATE discount_allocations
+           SET invoice_id = $1
+           WHERE id = $2`,
+          [newInvoice.id, discountResult.allocation.id]
+        );
+
+        // Store allocation reference in invoice data for return
+        newInvoice.discount_allocation_id = discountResult.allocation.id;
+        newInvoice.discount_info = {
+          total_discount: discountResult.totalDiscount,
+          applied_discounts: discountResult.appliedDiscounts,
+          allocation: discountResult.allocation
+        };
+      }
+
+      // If approval was created, update it with the invoice ID
+      if (approvalId) {
+        await client.query(
+          `UPDATE discount_approvals
+           SET invoice_id = $1
+           WHERE id = $2`,
+          [newInvoice.id, approvalId]
+        );
+        newInvoice.approval_id = approvalId;
+        newInvoice.requires_approval = true;
+      }
 
       // Create line items with tax information
       for (const item of lineItemsWithTax) {
@@ -522,10 +616,10 @@ export const invoiceService = {
           INSERT INTO invoice_line_items (
             invoice_id, service_id, product_id, description,
             quantity, unit_price, tax_rate,
-            tax_category_code  -- REMOVED: tax_amount (it's generated)
+            tax_category_code
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          RETURNING id, total_price, tax_amount  -- ADDED: Get generated values
+          RETURNING id, total_price, tax_amount
         `;
 
         const lineItemResult = await client.query(lineItemQuery, [
@@ -549,10 +643,10 @@ export const invoiceService = {
         // Create tax audit trail (only for items with tax)
         if (item.tax_amount && item.tax_amount > 0) {
           await InvoiceTaxCalculator.createTaxTransaction(
-            client, 
-            businessId, 
-            newInvoice.id, 
-            item, 
+            client,
+            businessId,
+            newInvoice.id,
+            item,
             {
               taxRate: item.tax_rate,
               taxAmount: item.tax_amount,
@@ -560,19 +654,19 @@ export const invoiceService = {
               itemTotal: item.quantity * item.unit_price
             },
             transactionDate,
-            customerType  // ✅ Pass customer type to tax transaction
+            customerType
           );
         }
       }
 
-      // Get complete invoice with line items using the same client
+      // Get complete invoice with line items
       const completeInvoice = await this.getInvoiceById(newInvoice.id, businessId, client);
 
       if (!completeInvoice) {
         throw new Error('Failed to retrieve created invoice from database');
       }
 
-      // Log the audit action
+      // Log the audit action with discount info
       await auditLogger.logAction({
         businessId,
         userId,
@@ -584,8 +678,13 @@ export const invoiceService = {
           subtotal,
           tax_amount: totalTax,
           total_amount: totalAmount,
+          discount_amount: discountResult?.totalDiscount || 0,
           line_item_count: invoiceData.line_items.length,
-          customer_type: customerType  // ✅ Include customer type in audit
+          customer_type: customerType,
+          has_discounts: discountResult ? true : false,
+          discount_count: discountResult?.appliedDiscounts?.length || 0,
+          requires_approval: requiresApproval,
+          approval_id: approvalId
         }
       });
 
@@ -598,11 +697,18 @@ export const invoiceService = {
         userId,
         subtotal,
         taxAmount: totalTax,
+        discountAmount,
         totalAmount,
-        customerType
+        customerType,
+        hasDiscounts: discountResult ? true : false,
+        requiresApproval
       });
 
-      return completeInvoice;
+      return {
+        ...completeInvoice,
+        requires_approval: requiresApproval,
+        approval_id: approvalId
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       log.error('Invoice creation failed', error);
@@ -763,8 +869,62 @@ export const invoiceService = {
         throw new Error('Invoice not found');
       }
 
-      const newAmountPaid = (parseFloat(currentInvoice.amount_paid) || 0) + parseFloat(paymentData.amount);
-      const balanceDue = parseFloat(currentInvoice.total_amount) - newAmountPaid;
+      // ================ EARLY PAYMENT DISCOUNT CHECK ================
+      let earlyPaymentDiscount = 0;
+      let earlyPaymentResult = null;
+
+      // Check if invoice has early payment terms and payment is before due date
+      if (currentInvoice.payment_terms_id && paymentData.payment_date) {
+        try {
+          const isEligible = await EarlyPaymentService.isEligible(
+            currentInvoice.id,
+            paymentData.payment_date,
+            businessId
+          );
+
+          if (isEligible) {
+            earlyPaymentResult = await EarlyPaymentService.calculateEarlyPaymentDiscount(
+              currentInvoice.id,
+              paymentData.payment_date,
+              businessId
+            );
+
+            if (earlyPaymentResult.eligible && earlyPaymentResult.discountAmount > 0) {
+              earlyPaymentDiscount = earlyPaymentResult.discountAmount;
+
+              // Create journal entry for early payment discount
+              await EarlyPaymentService.createEarlyPaymentJournalEntry(
+                currentInvoice,
+                earlyPaymentResult.discountAmount,
+                userId
+              );
+
+              log.info('Early payment discount applied', {
+                invoiceId: currentInvoice.id,
+                invoiceNumber: currentInvoice.invoice_number,
+                discountAmount: earlyPaymentDiscount,
+                paymentDate: paymentData.payment_date,
+                dueDate: currentInvoice.due_date
+              });
+            }
+          }
+        } catch (earlyPaymentError) {
+          log.error('Early payment discount calculation failed', {
+            error: earlyPaymentError.message,
+            invoiceId: currentInvoice.id
+          });
+          // Continue without early payment discount
+        }
+      }
+
+      const paymentAmount = parseFloat(paymentData.amount);
+      const newAmountPaid = (parseFloat(currentInvoice.amount_paid) || 0) + paymentAmount;
+      let balanceDue = parseFloat(currentInvoice.total_amount) - newAmountPaid;
+
+      // If early payment discount was applied, adjust the balance due
+      if (earlyPaymentDiscount > 0) {
+        balanceDue -= earlyPaymentDiscount;
+      }
 
       let newStatus = currentInvoice.status;
       if (balanceDue <= 0) {
@@ -797,7 +957,7 @@ export const invoiceService = {
       await client.query(updateQuery, values);
       const completeUpdatedInvoice = await this.getInvoiceById(invoiceId, businessId, client);
 
-      // Accounting integration
+      // Accounting integration with early payment discount
       if (paymentData.amount > 0) {
         try {
           const { AccountingService } = await import('./accountingService.js');
@@ -810,26 +970,39 @@ export const invoiceService = {
             revenueAccount = hasServices ? '4200' : '4100';
           }
 
+          // Build journal entry lines
+          const journalLines = [
+            {
+              account_code: '1110',
+              description: `Payment received for Invoice ${currentInvoice.invoice_number}`,
+              amount: paymentAmount,
+              line_type: 'debit'
+            },
+            {
+              account_code: revenueAccount,
+              description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
+              amount: paymentAmount,
+              line_type: 'credit'
+            }
+          ];
+
+          // Add early payment discount line if applicable
+          if (earlyPaymentDiscount > 0) {
+            journalLines.push({
+              account_code: '4112', // Early Payment Discount account
+              description: `Early payment discount for Invoice ${currentInvoice.invoice_number}`,
+              amount: earlyPaymentDiscount,
+              line_type: 'debit'
+            });
+          }
+
           const journalEntryData = {
             business_id: businessId,
-            description: `Invoice Payment: ${currentInvoice.invoice_number}`,
+            description: `Invoice Payment${earlyPaymentDiscount > 0 ? ' with early discount' : ''}: ${currentInvoice.invoice_number}`,
             journal_date: paymentData.payment_date || new Date(),
             reference_type: 'invoice',
             reference_id: invoiceId,
-            lines: [
-              {
-                account_code: '1110',
-                description: `Payment received for Invoice ${currentInvoice.invoice_number}`,
-                amount: paymentData.amount,
-                line_type: 'debit'
-              },
-              {
-                account_code: revenueAccount,
-                description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
-                amount: paymentData.amount,
-                line_type: 'credit'
-              }
-            ]
+            lines: journalLines
           };
 
           await AccountingService.createJournalEntry(journalEntryData, userId);
@@ -837,7 +1010,8 @@ export const invoiceService = {
           log.info('Accounting journal entry created for invoice payment', {
             invoiceId,
             invoiceNumber: currentInvoice.invoice_number,
-            amount: paymentData.amount,
+            amount: paymentAmount,
+            earlyDiscount: earlyPaymentDiscount,
             revenueAccount
           });
         } catch (accountingError) {
@@ -860,7 +1034,8 @@ export const invoiceService = {
           amount_paid: completeUpdatedInvoice.amount_paid,
           status: completeUpdatedInvoice.status,
           balance_due: completeUpdatedInvoice.balance_due,
-          payment_method: paymentData.payment_method
+          payment_method: paymentData.payment_method,
+          early_payment_discount: earlyPaymentDiscount
         }
       });
 
@@ -868,14 +1043,18 @@ export const invoiceService = {
 
       log.info('Invoice payment recorded', {
         invoiceId,
-        amountPaid: paymentData.amount,
+        amountPaid: paymentAmount,
+        earlyDiscount: earlyPaymentDiscount,
         newStatus: completeUpdatedInvoice.status,
         newBalanceDue: completeUpdatedInvoice.balance_due,
         businessId,
         userId
       });
 
-      return completeUpdatedInvoice;
+      return {
+        ...completeUpdatedInvoice,
+        early_payment_discount: earlyPaymentDiscount
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       log.error('Invoice payment recording failed', error);
@@ -945,17 +1124,14 @@ export const invoiceService = {
       throw new Error('Business data is required for formatting');
     }
 
-    // ✅ ASSETS SYSTEM PROVEN FIX: Handle both Date objects and timestamps
     const formatDateForDisplay = (dateValue) => {
       if (!dateValue) return null;
 
       let date;
 
-      // Handle Date objects
       if (dateValue instanceof Date) {
         date = dateValue;
       }
-      // Handle strings
       else if (typeof dateValue === 'string') {
         date = new Date(dateValue);
       }
@@ -963,25 +1139,21 @@ export const invoiceService = {
         return dateValue;
       }
 
-      // If date is invalid, return original value
       if (isNaN(date.getTime())) {
         return dateValue;
       }
 
-      // ✅ ASSETS SYSTEM PROVEN METHOD: Extract date components directly
-      // This is the exact fix that worked for fixed assets
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
 
       const dateStr = `${year}-${month}-${day}`;
 
-      // Return structured object (consistent with current API)
       return {
         date: dateStr,
         utc: date.toISOString(),
-        local: `${dateStr} 00:00:00`, // ✅ Assets system fix: Show date only
-        iso_local: `${dateStr} 00:00:00`, // ✅ Assets system fix: Show date only
+        local: `${dateStr} 00:00:00`,
+        iso_local: `${dateStr} 00:00:00`,
         formatted: date.toLocaleDateString('en-US', {
           weekday: 'short',
           month: 'short',
@@ -999,7 +1171,6 @@ export const invoiceService = {
 
     const lineItems = invoice.line_items || [];
 
-    // ✅ Apply date fixes
     const formattedInvoice = {
       ...invoice,
       invoice_date: formatDateForDisplay(invoice.invoice_date),

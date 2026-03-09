@@ -89,6 +89,12 @@ import taxRoutes from './routes/taxRoutes.js';
 //discount accounting routes
 import discountRoutes from './routes/discountRoutes.js';
 import discountAnalyticsRoutes from './routes/discountAnalyticsRoutes.js';
+import discountSettingsRoutes from './routes/discountSettingsRoutes.js';
+
+// Discount integration routes
+import posDiscountRoutes from './routes/posDiscountRoutes.js';
+import invoiceDiscountRoutes from './routes/invoiceDiscountRoutes.js';
+import discountAllocationRoutes from './routes/discountAllocationRoutes.js';
 
 // Import WHT Certificate Routes - ADD THIS LINE
 import whtCertificateRoutes from './routes/whtCertificateRoutes.js';
@@ -258,8 +264,13 @@ app.use('/api/tax', taxRoutes);
 //discount accounting routes
 app.use('/api/discounts', discountRoutes);
 app.use('/api/discounts/analytics', discountAnalyticsRoutes);
+app.use('/api/discounts/settings', discountSettingsRoutes);
 
 
+// Discount integration routes
+app.use('/api/pos', posDiscountRoutes);
+app.use('/api/invoices', invoiceDiscountRoutes);
+app.use('/api/discount-allocations', discountAllocationRoutes);
 //wht routes
 app.use('/api/wht/certificates', whtCertificateRoutes);
 app.use('/api/wht/returns', whtReturnRoutes);

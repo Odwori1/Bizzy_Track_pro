@@ -6,6 +6,7 @@ import { InventorySyncService } from './inventorySyncService.js';
 import { AccountingService } from './accountingService.js';
 import { InventoryAccountingService } from './inventoryAccountingService.js';
 import { TaxService } from './taxService.js';
+import { DiscountRuleEngine } from './discountRuleEngine.js';
 
 // ============================================================================
 // POSTaxCalculator - TAX CALCULATION FOR POS TRANSACTIONS
@@ -77,7 +78,7 @@ class POSTaxCalculator {
     try {
       const productQuery = await client.query(
         `SELECT tax_category_code, name as product_name
-         FROM products 
+         FROM products
          WHERE id = $1 AND business_id = $2`,
         [productId, businessId]
       );
@@ -172,8 +173,8 @@ class POSTaxCalculator {
       const businessCountry = businessQuery.rows[0]?.country_code || 'UG';
 
       // Convert date to date-only string (YYYY-MM-DD)
-      const dateForTax = transactionDate ? 
-        new Date(transactionDate).toISOString().split('T')[0] : 
+      const dateForTax = transactionDate ?
+        new Date(transactionDate).toISOString().split('T')[0] :
         new Date().toISOString().split('T')[0];
 
       // Use existing TaxService for calculation
@@ -207,7 +208,7 @@ class POSTaxCalculator {
         error: error.message,
         stack: error.stack
       });
-      
+
       // Don't fail transaction if tax calculation fails
       // Use zero tax as fallback
       taxRate = 0;
@@ -264,13 +265,13 @@ class POSTaxCalculator {
 
       // Get tax_rate_id
       const taxRateQuery = await client.query(
-        `SELECT id FROM country_tax_rates 
-         WHERE country_code = $1 AND tax_type_id = $2 
+        `SELECT id FROM country_tax_rates
+         WHERE country_code = $1 AND tax_type_id = $2
          AND is_default = true
-         AND effective_from <= $3 
+         AND effective_from <= $3
          AND (effective_to IS NULL OR effective_to >= $3)`,
         [
-          businessCountry, 
+          businessCountry,
           taxTypeQuery.rows[0]?.id,
           transactionDate || new Date()
         ]
@@ -335,9 +336,131 @@ class POSTaxCalculator {
   }
 }
 
+/**
+ * Helper function to create allocation after transaction items exist
+ * This solves the foreign key constraint issue
+ */
+async function createAllocationAfterTransaction(params, client) {
+    const { businessId, transactionId, transactionType, discountResult, items, userId } = params;
+    
+    try {
+        log.info('Creating discount allocation after transaction', {
+            transactionId,
+            transactionType,
+            itemCount: items.length,
+            discountAmount: discountResult.totalDiscount
+        });
+
+        // Get discount IDs from applied discounts
+        // Separate by type
+        const volumeDiscount = discountResult.appliedDiscounts.find(d => d.type === 'VOLUME' || d.type === 'PRICING_RULE');
+        const earlyDiscount = discountResult.appliedDiscounts.find(d => d.type === 'EARLY_PAYMENT');
+        const categoryDiscount = discountResult.appliedDiscounts.find(d => d.type === 'CATEGORY');
+        const promoDiscount = discountResult.appliedDiscounts.find(d => d.type === 'PROMOTIONAL');
+
+        // Combine all non-promotional discounts into one rule ID (use the first one)
+        // The constraint requires EITHER discount_rule_id OR promotional_discount_id
+        // But having both is also fine
+        const ruleDiscount = volumeDiscount || earlyDiscount || categoryDiscount;
+
+        // Prepare line items for allocation
+        const lineItems = items.map(item => ({
+            line_item_id: item.id, // This is the pos_transaction_item_id
+            line_type: transactionType,
+            line_amount: item.total_price - (item.tax_amount || 0), // Amount before tax
+            discount_amount: (discountResult.totalDiscount / items.length) // Simple equal distribution for now
+        }));
+
+        // Adjust last item to ensure total matches
+        const totalAllocated = lineItems.reduce((sum, item) => sum + item.discount_amount, 0);
+        if (Math.abs(totalAllocated - discountResult.totalDiscount) > 0.01) {
+            const diff = discountResult.totalDiscount - totalAllocated;
+            lineItems[lineItems.length - 1].discount_amount += diff;
+        }
+
+        // Create allocation data with all applicable IDs
+        const allocationData = {
+            [transactionType === 'POS' ? 'pos_transaction_id' : 'invoice_id']: transactionId,
+            total_discount_amount: discountResult.totalDiscount,
+            allocation_method: 'PRO_RATA_AMOUNT',
+            status: 'APPLIED',
+            applied_at: new Date(),
+            lines: lineItems
+        };
+
+        // Add discount rule ID if we have any rule-based discounts
+        if (ruleDiscount) {
+            allocationData.discount_rule_id = ruleDiscount.id;
+        }
+
+        // Add promotional discount ID if we have a promo discount
+        if (promoDiscount) {
+            allocationData.promotional_discount_id = promoDiscount.id;
+        }
+
+        // Log what we're creating for debugging
+        log.debug('Creating allocation with IDs', {
+            discount_rule_id: allocationData.discount_rule_id,
+            promotional_discount_id: allocationData.promotional_discount_id,
+            pos_transaction_id: allocationData.pos_transaction_id
+        });
+
+        // Create allocation using the existing service WITH THE SAME CLIENT CONNECTION
+        const { DiscountAllocationService } = await import('./discountAllocationService.js');
+        
+        // CRITICAL FIX: Pass the existing client to the allocation service
+        // This ensures the allocation sees the uncommitted transaction
+        const allocation = await DiscountAllocationService.createAllocationWithClient(
+            allocationData,
+            userId,
+            businessId,
+            client  // Pass the existing client connection
+        );
+
+        // Create journal entries if needed
+        let accounting = null;
+        if (allocation) {
+            try {
+                const { DiscountAccountingService } = await import('./discountAccountingService.js');
+                accounting = await DiscountAccountingService.createBulkDiscountJournalEntries(
+                    {
+                        business_id: businessId,
+                        id: transactionId,
+                        type: transactionType
+                    },
+                    discountResult.appliedDiscounts.map(d => ({
+                        rule_type: d.type,
+                        discount_amount: d.amount,
+                        allocation_id: allocation.id,
+                        name: d.name
+                    })),
+                    userId
+                );
+            } catch (accountingError) {
+                log.warn('Accounting entries not created for allocation', {
+                    error: accountingError.message,
+                    allocationId: allocation.id
+                });
+                // Don't fail if accounting fails
+            }
+        }
+
+        return { allocation, accounting };
+
+    } catch (error) {
+        log.error('Error creating allocation after transaction', {
+            error: error.message,
+            transactionId,
+            transactionType,
+            stack: error.stack
+        });
+        throw error;
+    }
+}
+
 export class POSService {
   /**
-   * Create a new POS transaction with TAX CALCULATION
+   * Create a new POS transaction with TAX CALCULATION and DISCOUNT APPROVAL FLOW
    */
   static async createTransaction(businessId, transactionData, userId) {
     const client = await getClient();
@@ -385,7 +508,6 @@ export class POSService {
       const processedItems = [];
       let totalSubtotal = 0;
       let totalTax = 0;
-      let totalDiscount = 0;
 
       for (const item of transactionData.items) {
         let inventoryItemId = item.inventory_item_id;
@@ -469,7 +591,6 @@ export class POSService {
 
         totalSubtotal += itemTotal;
         totalTax += itemTax;
-        totalDiscount += itemDiscount;
 
         processedItems.push({
           ...item,
@@ -497,35 +618,163 @@ export class POSService {
         });
       }
 
+      // ================ DISCOUNT CALCULATION WITH APPROVAL HANDLING ================
+      let discountResult = null;
+      let requiresApproval = false;
+      let approvalId = null;
+      const transactionDateForTax = transactionData.transaction_date ?
+        new Date(transactionData.transaction_date).toISOString().split('T')[0] :
+        new Date().toISOString().split('T')[0];
+
+      // Calculate total discount from items first (if any)
+      let totalDiscount = 0;
+      if (transactionData.discount_amount) {
+          totalDiscount = parseFloat(transactionData.discount_amount) || 0;
+      }
+
+      // Check if we have a promo code to process
+      if (transactionData.promo_code || transactionData.apply_discounts !== false) {
+          try {
+              // Prepare items for discount calculation
+              const discountItems = transactionData.items.map(item => ({
+                  id: item.service_id || item.product_id || `manual-${Date.now()}`,
+                  amount: item.unit_price,
+                  quantity: item.quantity,
+                  type: item.item_type || (item.service_id ? 'service' : 'product')
+              }));
+
+              log.info('Calculating discounts for POS transaction', {
+                  promoCode: transactionData.promo_code,
+                  itemCount: discountItems.length,
+                  subtotal: totalSubtotal
+              });
+
+              // Calculate discounts WITHOUT creating allocation yet
+              // We need to check if approval is required first
+              const discountCheck = await DiscountRuleEngine.calculateFinalPrice({
+                  businessId,
+                  customerId: transactionData.customer_id,
+                  items: discountItems,
+                  amount: totalSubtotal,
+                  userId,
+                  transactionDate: transactionDateForTax,
+                  promoCode: transactionData.promo_code,
+                  transactionId: null,
+                  transactionType: 'POS',
+                  createAllocation: false, // CRITICAL: Don't create allocation yet
+                  createJournalEntries: false,
+                  preApproved: transactionData.pre_approved || false
+              });
+
+              // Check if approval is required AND not pre-approved
+              if (discountCheck.requiresApproval && !transactionData.pre_approved) {
+                  requiresApproval = true;
+                  log.info('Discount requires approval', {
+                      promoCode: transactionData.promo_code,
+                      threshold: discountCheck.approvalThreshold
+                  });
+
+                  // Submit for approval
+                  const approvalRequest = await DiscountRuleEngine.submitForApproval({
+                      businessId,
+                      customerId: transactionData.customer_id,
+                      amount: totalSubtotal,
+                      items: discountItems,
+                      promoCode: transactionData.promo_code,
+                      transactionId: null,
+                      transactionType: 'POS',
+                      discountDetails: discountCheck // Pass the discount details
+                  }, userId);
+
+                  approvalId = approvalRequest.approvalId;
+
+                  // Store discount result for later use (after approval)
+                  discountResult = discountCheck;
+
+                  log.info('Approval request created', {
+                      approvalId,
+                      requiresApproval: true
+                  });
+              }
+              // Apply discounts if approved or pre-approved
+              else if (discountCheck.totalDiscount > 0) {
+                  // Store discount info to be applied after transaction creation
+                  discountResult = discountCheck;
+                  totalDiscount = discountCheck.totalDiscount;
+
+                  log.info('Discounts will be applied to POS transaction', {
+                      originalSubtotal: totalSubtotal,
+                      totalDiscount: discountCheck.totalDiscount,
+                      discountCount: discountCheck.appliedDiscounts.length,
+                      requiresApproval: false
+                  });
+              }
+          } catch (discountError) {
+              log.error('Discount calculation failed, continuing without discounts', {
+                  error: discountError.message,
+                  promoCode: transactionData.promo_code
+              });
+              // Continue without discounts - don't fail the transaction
+          }
+      }
+
       // Calculate final amounts
       const finalAmount = totalSubtotal - totalDiscount + totalTax;
-      
+
       // Calculate average tax rate for the transaction
       const averageTaxRate = totalSubtotal > 0 ? (totalTax / totalSubtotal) * 100 : 0;
 
       log.info('POS transaction totals calculated', {
-        businessId,
-        subtotal: totalSubtotal,
-        discount: totalDiscount,
-        tax: totalTax,
-        averageTaxRate: averageTaxRate.toFixed(2),
-        finalAmount,
-        itemCount: processedItems.length,
-        customerType
+          businessId,
+          subtotal: totalSubtotal,
+          discount: totalDiscount,
+          tax: totalTax,
+          averageTaxRate: averageTaxRate.toFixed(2),
+          finalAmount,
+          itemCount: processedItems.length,
+          customerType,
+          requiresApproval
       });
 
       // ========================================================================
       // STEP 4: CREATE POS TRANSACTION WITH TAX DATA
       // ========================================================================
-      const transactionResult = await client.query(
-        `INSERT INTO pos_transactions (
-          business_id, transaction_number, customer_id, transaction_date,
-          total_amount, tax_amount, discount_amount, final_amount,
-          payment_method, payment_status, status, notes, created_by,
-          accounting_processed, accounting_error, tax_rate
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        RETURNING *`,
-        [
+      // Build the INSERT query dynamically based on whether we have approval columns
+      let insertQuery = `
+          INSERT INTO pos_transactions (
+              business_id, transaction_number, customer_id, transaction_date,
+              total_amount, tax_amount, discount_amount, final_amount,
+              payment_method, payment_status, status, notes, created_by,
+              accounting_processed, accounting_error, tax_rate,
+              total_discount, discount_breakdown`;
+
+      // Add approval columns if they exist (we'll check first)
+      try {
+          // Check if requires_approval column exists
+          const checkResult = await client.query(
+              `SELECT column_name
+               FROM information_schema.columns
+               WHERE table_name = 'pos_transactions'
+               AND column_name IN ('requires_approval', 'approval_id')`
+          );
+
+          const existingColumns = checkResult.rows.map(r => r.column_name);
+
+          if (existingColumns.includes('requires_approval')) {
+              insertQuery += `, requires_approval`;
+          }
+          if (existingColumns.includes('approval_id')) {
+              insertQuery += `, approval_id`;
+          }
+      } catch (checkError) {
+          log.warn('Could not check for approval columns', { error: checkError.message });
+      }
+
+      insertQuery += `) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18`;
+
+      // Add placeholders for approval columns
+      let paramCount = 19;
+      const values = [
           businessId,
           transactionNumberValue,
           transactionData.customer_id || null,
@@ -541,70 +790,186 @@ export class POSService {
           userId,
           false,  // accounting_processed = false initially
           null,   // accounting_error = null initially
-          averageTaxRate  // tax_rate (average)
-        ]
-      );
+          averageTaxRate,  // tax_rate (average)
+          totalDiscount,   // total_discount
+          transactionData.discount_breakdown || (discountResult ? JSON.stringify(discountResult.appliedDiscounts) : null)
+      ];
 
+      // Add approval values if they exist
+      try {
+          const checkResult = await client.query(
+              `SELECT column_name
+               FROM information_schema.columns
+               WHERE table_name = 'pos_transactions'
+               AND column_name IN ('requires_approval', 'approval_id')`
+          );
+
+          const existingColumns = checkResult.rows.map(r => r.column_name);
+
+          if (existingColumns.includes('requires_approval')) {
+              insertQuery += `, $${paramCount}`;
+              values.push(requiresApproval);
+              paramCount++;
+          }
+          if (existingColumns.includes('approval_id')) {
+              insertQuery += `, $${paramCount}`;
+              values.push(approvalId);
+              paramCount++;
+          }
+      } catch (checkError) {
+          log.warn('Could not add approval columns to insert', { error: checkError.message });
+      }
+
+      insertQuery += `) RETURNING *`;
+
+      const transactionResult = await client.query(insertQuery, values);
       const transaction = transactionResult.rows[0];
 
       // ========================================================================
       // STEP 5: INSERT TRANSACTION ITEMS WITH TAX DATA
       // ========================================================================
       for (const item of processedItems) {
-        const itemResult = await client.query(
-          `INSERT INTO pos_transaction_items (
-            business_id, pos_transaction_id, product_id, inventory_item_id, service_id,
-            equipment_id, booking_id,
-            item_type, item_name, quantity, unit_price, total_price, discount_amount,
-            tax_rate, tax_amount, tax_category_code
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-          RETURNING id`,
-          [
-            businessId,
-            transaction.id,
-            item.product_id || null,
-            item.inventory_item_id || null,
-            item.service_id || null,
-            item.equipment_id || null,
-            item.booking_id || null,
-            item.item_type,
-            item.item_name,
-            item.quantity,
-            item.unit_price,
-            item.total_price,  // This already includes tax
-            item.discount_amount || 0,
-            item.tax_rate,
-            item.tax_amount,
-            item.tax_category_code
-          ]
-        );
+          const itemResult = await client.query(
+              `INSERT INTO pos_transaction_items (
+                  business_id, pos_transaction_id, product_id, inventory_item_id, service_id,
+                  equipment_id, booking_id,
+                  item_type, item_name, quantity, unit_price, total_price, discount_amount,
+                  tax_rate, tax_amount, tax_category_code
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+              RETURNING id`,
+              [
+                  businessId,
+                  transaction.id,
+                  item.product_id || null,
+                  item.inventory_item_id || null,
+                  item.service_id || null,
+                  item.equipment_id || null,
+                  item.booking_id || null,
+                  item.item_type,
+                  item.item_name,
+                  item.quantity,
+                  item.unit_price,
+                  item.total_price,
+                  item.discount_amount || 0,
+                  item.tax_rate,
+                  item.tax_amount,
+                  item.tax_category_code
+              ]
+          );
 
-        const insertedItemId = itemResult.rows[0].id;
+          const insertedItemId = itemResult.rows[0].id;
 
-        // ✅ STEP 6: CREATE TAX AUDIT TRAIL FOR EACH ITEM
-        await POSTaxCalculator.createTaxTransaction(
-          client,
-          businessId,
-          transaction.id,
-          item,
-          {
-            taxRate: item.tax_rate,
-            taxAmount: item.tax_amount,
-            taxCategoryCode: item.tax_category_code,
-            itemTotal: item.quantity * item.unit_price
-          },
-          transactionData.transaction_date || new Date(),
-          customerType,
-          transactionData.customer_id || null
-        );
+          // ✅ STEP 6: CREATE TAX AUDIT TRAIL FOR EACH ITEM
+          await POSTaxCalculator.createTaxTransaction(
+              client,
+              businessId,
+              transaction.id,
+              item,
+              {
+                  taxRate: item.tax_rate,
+                  taxAmount: item.tax_amount,
+                  taxCategoryCode: item.tax_category_code,
+                  itemTotal: item.quantity * item.unit_price
+              },
+              transactionData.transaction_date || new Date(),
+              customerType,
+              transactionData.customer_id || null
+          );
 
-        log.debug('POS item inserted with tax data', {
-          itemId: insertedItemId,
-          transactionId: transaction.id,
-          itemName: item.item_name,
-          taxAmount: item.tax_amount,
-          taxCategory: item.tax_category_code
-        });
+          // Store the item ID for later use in discount allocation
+          item.id = insertedItemId;
+
+          log.debug('POS item inserted with tax data', {
+              itemId: insertedItemId,
+              transactionId: transaction.id,
+              itemName: item.item_name,
+              taxAmount: item.tax_amount,
+              taxCategory: item.tax_category_code
+          });
+      }
+
+      // ================ CREATE DISCOUNT ALLOCATION AFTER ITEMS EXIST ================
+      // Only create allocation if we have discounts AND they don't require approval
+      // OR if they're pre-approved
+      if (discountResult && discountResult.totalDiscount > 0 && !requiresApproval) {
+          try {
+              // Now create the allocation with the actual transaction items
+              const allocationResult = await createAllocationAfterTransaction({
+                  businessId,
+                  transactionId: transaction.id,
+                  transactionType: 'POS',
+                  discountResult: discountResult,
+                  items: processedItems.map(item => ({
+                      id: item.id,
+                      product_id: item.product_id,
+                      service_id: item.service_id,
+                      quantity: item.quantity,
+                      unit_price: item.unit_price,
+                      total_price: item.total_price,
+                      tax_amount: item.tax_amount
+                  })),
+                  userId
+              }, client);
+
+              if (allocationResult && allocationResult.allocation) {
+                  // FIX: Remove database update - column doesn't exist
+                  // The allocation is already linked via pos_transaction_id in discount_allocations table
+                  
+                  // Just store it in memory for the response
+                  transaction.discount_allocation_id = allocationResult.allocation.id;
+                  transaction.discount_info = {
+                      total_discount: discountResult.totalDiscount,
+                      applied_discounts: discountResult.appliedDiscounts,
+                      allocation: allocationResult.allocation,
+                      accounting: allocationResult.accounting
+                  };
+
+                  log.info('Discount allocation created successfully', {
+                      transactionId: transaction.id,
+                      allocationId: allocationResult.allocation.id,
+                      discountAmount: discountResult.totalDiscount
+                  });
+              }
+          } catch (allocationError) {
+              log.error('Failed to create discount allocation after transaction', {
+                  error: allocationError.message,
+                  transactionId: transaction.id,
+                  stack: allocationError.stack
+              });
+              // Don't fail the transaction if allocation fails
+          }
+      }
+
+      // If approval was created, update it with the transaction ID
+      if (approvalId) {
+          try {
+              await client.query(
+                  `UPDATE discount_approvals
+                   SET pos_transaction_id = $1,
+                       transaction_type = 'POS',
+                       items = $2,
+                       calculated_discount = $3,
+                       updated_at = NOW()
+                   WHERE id = $4`,
+                  [
+                      transaction.id,
+                      JSON.stringify(processedItems),
+                      discountResult ? discountResult.totalDiscount : 0,
+                      approvalId
+                  ]
+              );
+
+              log.info('Approval updated with transaction ID', {
+                  approvalId,
+                  transactionId: transaction.id
+              });
+          } catch (approvalUpdateError) {
+              log.error('Failed to update approval with transaction ID', {
+                  error: approvalUpdateError.message,
+                  approvalId,
+                  transactionId: transaction.id
+              });
+          }
       }
 
       // ========================================================================
@@ -664,8 +1029,11 @@ export class POSService {
           final_amount: transaction.final_amount,
           payment_method: transaction.payment_method,
           item_count: processedItems.length,
-          customer_type: customerType,  // ✅ Now includes customer type
-          tax_items_count: processedItems.filter(item => item.tax_amount > 0).length
+          customer_type: customerType,
+          tax_items_count: processedItems.filter(item => item.tax_amount > 0).length,
+          discount_amount: totalDiscount,
+          requires_approval: requiresApproval,
+          approval_id: approvalId
         }
       });
 
@@ -681,7 +1049,8 @@ export class POSService {
         tax: totalTax,
         finalAmount: finalAmount,
         customerType,
-        itemCount: processedItems.length
+        itemCount: processedItems.length,
+        requiresApproval
       });
 
       // ========================================================================
@@ -789,6 +1158,14 @@ export class POSService {
           final_amount: finalAmount,
           customer_type: customerType
         },
+        discount_info: discountResult && !discountResult.requiresApproval ? {
+          total_discount: discountResult.totalDiscount,
+          applied_discounts: discountResult.appliedDiscounts,
+          allocation: transaction.discount_info?.allocation,
+          accounting: transaction.discount_info?.accounting
+        } : null,
+        requires_approval: requiresApproval,
+        approval_id: approvalId,
         accounting_info: {
           method: 'manual_service',
           status: accountingResult?.success === true ? 'created' : 'failed',
@@ -823,7 +1200,8 @@ export class POSService {
         businessId,
         accounting_processed: response.accounting_processed,
         accounting_success: accountingResult?.success === true,
-        lines_created: accountingResult?.linesCreated || 0
+        lines_created: accountingResult?.linesCreated || 0,
+        requires_approval: requiresApproval
       });
 
       return response;
@@ -1025,15 +1403,15 @@ export class POSService {
         total_tax: transaction.tax_amount || 0,
         average_tax_rate: transaction.tax_rate || 0
       };
-      
+
       transaction.tax_summary = taxSummary;
 
       // Get tax audit trail from transaction_taxes
-      const taxAuditQuery = 
+      const taxAuditQuery =
         `SELECT tt.*, ttypes.tax_code, ttypes.tax_name
          FROM transaction_taxes tt
          LEFT JOIN tax_types ttypes ON tt.tax_type_id = ttypes.id
-         WHERE tt.business_id = $1 
+         WHERE tt.business_id = $1
            AND tt.transaction_id = $2
            AND tt.transaction_type = 'pos_sale'
          ORDER BY tt.created_at`;
@@ -1061,7 +1439,7 @@ export class POSService {
         LEFT JOIN chart_of_accounts ca ON jel.account_id = ca.id
         WHERE je.business_id = $1
           AND je.reference_type = 'pos_transaction'
-          AND je.reference_id = $2::text  // FIXED: transactionId parameter needs ::text cast
+          AND je.reference_id = $2::text
         GROUP BY je.id
         ORDER BY je.created_at`;
 
@@ -1075,12 +1453,12 @@ export class POSService {
         LEFT JOIN inventory_items ii ON it.inventory_item_id = ii.id
         WHERE it.business_id = $1
           AND it.reference_type = 'pos_transaction'
-          AND it.reference_id = $2  // FIXED: NO ::text cast - reference_id is UUID
+          AND it.reference_id = $2
         ORDER BY it.created_at`;
 
       const inventoryTransactionsResult = await client.query(
         inventoryTransactionsQuery,
-        [businessId, transactionId]  // transactionId is UUID, matches reference_id UUID type
+        [businessId, transactionId]
       );
       transaction.inventory_transactions = inventoryTransactionsResult.rows;
 
@@ -1253,7 +1631,7 @@ export class POSService {
       const accountingCheck = await client.query(
         `SELECT COUNT(*) as count FROM journal_entries
          WHERE reference_type = 'pos_transaction' AND reference_id = $1::text`,
-        [transactionId]  // Needs ::text cast for VARCHAR comparison
+        [transactionId]
       );
 
       if (parseInt(accountingCheck.rows[0].count) > 0) {
@@ -1269,7 +1647,7 @@ export class POSService {
       // Delete any inventory transactions - FIXED: NO ::text cast needed
       await client.query(
         `DELETE FROM inventory_transactions WHERE business_id = $1 AND reference_id = $2 AND reference_type = 'pos_transaction'`,
-        [businessId, transactionId]  // NO ::text cast - reference_id is UUID
+        [businessId, transactionId]
       );
 
       // Delete the transaction
@@ -1404,7 +1782,7 @@ export class POSService {
           COUNT(*) FILTER (WHERE pt.payment_method = 'card') as card_count,
           COUNT(*) FILTER (WHERE pt.payment_method = 'mobile_money') as mobile_money_count
         FROM pos_transactions pt
-        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id  // FIXED: NO ::text cast
+        LEFT JOIN inventory_transactions it ON pt.id = it.reference_id
           AND it.reference_type = 'pos_transaction'
           AND it.transaction_type = 'sale'
         WHERE pt.business_id = $1
@@ -1459,7 +1837,7 @@ export class POSService {
       let queryStr =
         `SELECT
           p.*,
-          ic.name as category_name,
+          ic.ne as category_name,
           CASE
             WHEN p.current_stock <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
             WHEN p.current_stock = 0 THEN 'out_of_stock'

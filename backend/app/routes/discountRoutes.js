@@ -71,6 +71,50 @@ router.post(
  */
 
 /**
+ * @route   POST /api/discounts/promotions/bulk
+ * @desc    Bulk create promotions
+ * @access  Private
+ */
+router.post(
+    '/promotions/bulk',
+    validateAccountingRequest(null), // Manual validation in controller
+    DiscountController.bulkCreatePromotions
+);
+
+/**
+ * @route   GET /api/discounts/promotions/expiring
+ * @desc    Get promotions expiring soon
+ * @access  Private
+ */
+router.get(
+    '/promotions/expiring',
+    validateAccountingRequest(null),
+    DiscountController.getExpiringPromotions
+);
+
+/**
+ * @route   GET /api/discounts/promotions/export
+ * @desc    Export promotions to CSV
+ * @access  Private
+ */
+router.get(
+    '/promotions/export',
+    validateAccountingRequest(null),
+    DiscountController.exportPromotions
+);
+
+/**
+ * @route   POST /api/discounts/promotions/validate
+ * @desc    Validate a promo code without applying
+ * @access  Private
+ */
+router.post(
+    '/promotions/validate',
+    validateAccountingRequest(DiscountSchemas.validatePromoSchema),
+    DiscountController.validatePromoCode
+);
+
+/**
  * @route   POST /api/discounts/promotions
  * @desc    Create new promotional discount
  * @access  Private
@@ -90,6 +134,17 @@ router.get(
     '/promotions',
     validateAccountingRequest(null), // No schema for query params
     DiscountController.getPromotions
+);
+
+/**
+ * @route   GET /api/discounts/promotions/:id/stats
+ * @desc    Get usage statistics for a promotion
+ * @access  Private
+ */
+router.get(
+    '/promotions/:id/stats',
+    validateAccountingRequest(null),
+    DiscountController.getPromotionStats
 );
 
 /**
@@ -126,65 +181,65 @@ router.delete(
 );
 
 /**
- * @route   POST /api/discounts/promotions/validate
- * @desc    Validate a promo code without applying
- * @access  Private
- */
-router.post(
-    '/promotions/validate',
-    validateAccountingRequest(DiscountSchemas.validatePromoSchema),
-    DiscountController.validatePromoCode
-);
-
-/**
- * @route   GET /api/discounts/promotions/:id/stats
- * @desc    Get usage statistics for a promotion
- * @access  Private
- */
-router.get(
-    '/promotions/:id/stats',
-    validateAccountingRequest(null),
-    DiscountController.getPromotionStats
-);
-
-/**
- * @route   GET /api/discounts/promotions/expiring
- * @desc    Get promotions expiring soon
- * @access  Private
- */
-router.get(
-    '/promotions/expiring',
-    validateAccountingRequest(null),
-    DiscountController.getExpiringPromotions
-);
-
-/**
- * @route   POST /api/discounts/promotions/bulk
- * @desc    Bulk create promotions
- * @access  Private
- */
-router.post(
-    '/promotions/bulk',
-    validateAccountingRequest(null), // Manual validation in controller
-    DiscountController.bulkCreatePromotions
-);
-
-/**
- * @route   GET /api/discounts/promotions/export
- * @desc    Export promotions to CSV
- * @access  Private
- */
-router.get(
-    '/promotions/export',
-    validateAccountingRequest(null),
-    DiscountController.exportPromotions
-);
-
-/**
  * =====================================================
  * EARLY PAYMENT TERMS
  * =====================================================
  */
+
+/**
+ * @route   POST /api/discounts/early-payment/bulk
+ * @desc    Bulk import early payment terms
+ * @access  Private
+ */
+router.post(
+    '/early-payment/bulk',
+    validateAccountingRequest(null), // Manual validation in controller
+    DiscountController.bulkImportEarlyPaymentTerms
+);
+
+/**
+ * @route   GET /api/discounts/early-payment/export
+ * @desc    Export terms to CSV
+ * @access  Private
+ */
+router.get(
+    '/early-payment/export',
+    validateAccountingRequest(null),
+    DiscountController.exportEarlyPaymentTerms
+);
+
+/**
+ * @route   GET /api/discounts/early-payment/stats
+ * @desc    Get early payment usage statistics
+ * @access  Private
+ */
+router.get(
+    '/early-payment/stats',
+    validateAccountingRequest(null),
+    DiscountController.getEarlyPaymentStats
+);
+
+/**
+ * @route   POST /api/discounts/early-payment/calculate
+ * @desc    Calculate early payment discount for invoice
+ * @access  Private
+ */
+router.post(
+    '/early-payment/calculate',
+    validateAccountingRequest(DiscountSchemas.calculateEarlyPaymentSchema),
+    DiscountController.calculateEarlyPaymentDiscount
+);
+
+/**
+ * @route   POST /api/discounts/early-payment/assign
+ * @desc    Assign terms to a customer
+ * @access  Private
+ */
+router.post(
+    '/early-payment/assign',
+    validateAccountingRequest(DiscountSchemas.assignTermsSchema),
+    DiscountController.assignTermsToCustomer
+);
 
 /**
  * @route   POST /api/discounts/early-payment/terms
@@ -206,6 +261,17 @@ router.get(
     '/early-payment/terms',
     validateAccountingRequest(null),
     DiscountController.getEarlyPaymentTerms
+);
+
+/**
+ * @route   GET /api/discounts/early-payment/customer/:customerId
+ * @desc    Get terms assigned to a customer
+ * @access  Private
+ */
+router.get(
+    '/early-payment/customer/:customerId',
+    validateAccountingRequest(null),
+    DiscountController.getCustomerPaymentTerms
 );
 
 /**
@@ -242,76 +308,65 @@ router.delete(
 );
 
 /**
- * @route   POST /api/discounts/early-payment/assign
- * @desc    Assign terms to a customer
- * @access  Private
- */
-router.post(
-    '/early-payment/assign',
-    validateAccountingRequest(DiscountSchemas.assignTermsSchema),
-    DiscountController.assignTermsToCustomer
-);
-
-/**
- * @route   GET /api/discounts/early-payment/customer/:customerId
- * @desc    Get terms assigned to a customer
- * @access  Private
- */
-router.get(
-    '/early-payment/customer/:customerId',
-    validateAccountingRequest(null),
-    DiscountController.getCustomerPaymentTerms
-);
-
-/**
- * @route   POST /api/discounts/early-payment/calculate
- * @desc    Calculate early payment discount for invoice
- * @access  Private
- */
-router.post(
-    '/early-payment/calculate',
-    validateAccountingRequest(DiscountSchemas.calculateEarlyPaymentSchema),
-    DiscountController.calculateEarlyPaymentDiscount
-);
-
-/**
- * @route   POST /api/discounts/early-payment/bulk
- * @desc    Bulk import early payment terms
- * @access  Private
- */
-router.post(
-    '/early-payment/bulk',
-    validateAccountingRequest(null), // Manual validation in controller
-    DiscountController.bulkImportEarlyPaymentTerms
-);
-
-/**
- * @route   GET /api/discounts/early-payment/export
- * @desc    Export terms to CSV
- * @access  Private
- */
-router.get(
-    '/early-payment/export',
-    validateAccountingRequest(null),
-    DiscountController.exportEarlyPaymentTerms
-);
-
-/**
- * @route   GET /api/discounts/early-payment/stats
- * @desc    Get early payment usage statistics
- * @access  Private
- */
-router.get(
-    '/early-payment/stats',
-    validateAccountingRequest(null),
-    DiscountController.getEarlyPaymentStats
-);
-
-/**
  * =====================================================
  * VOLUME DISCOUNTS
  * =====================================================
  */
+
+/**
+ * @route   POST /api/discounts/volume/bulk
+ * @desc    Bulk import volume tiers
+ * @access  Private
+ */
+router.post(
+    '/volume/bulk',
+    validateAccountingRequest(null), // Manual validation in controller
+    DiscountController.bulkImportVolumeTiers
+);
+
+/**
+ * @route   GET /api/discounts/volume/export
+ * @desc    Export tiers to CSV
+ * @access  Private
+ */
+router.get(
+    '/volume/export',
+    validateAccountingRequest(null),
+    DiscountController.exportVolumeTiers
+);
+
+/**
+ * @route   GET /api/discounts/volume/stats
+ * @desc    Get volume discount usage statistics
+ * @access  Private
+ */
+router.get(
+    '/volume/stats',
+    validateAccountingRequest(null),
+    DiscountController.getVolumeDiscountStats
+);
+
+/**
+ * @route   GET /api/discounts/volume/top
+ * @desc    Get top volume discount tiers
+ * @access  Private
+ */
+router.get(
+    '/volume/top',
+    validateAccountingRequest(null),
+    DiscountController.getTopVolumeTiers
+);
+
+/**
+ * @route   POST /api/discounts/volume/calculate
+ * @desc    Calculate volume discount for transaction
+ * @access  Private
+ */
+router.post(
+    '/volume/calculate',
+    validateAccountingRequest(DiscountSchemas.calculateVolumeSchema),
+    DiscountController.calculateVolumeDiscount
+);
 
 /**
  * @route   POST /api/discounts/volume/tiers
@@ -369,65 +424,65 @@ router.delete(
 );
 
 /**
- * @route   POST /api/discounts/volume/calculate
- * @desc    Calculate volume discount for transaction
- * @access  Private
- */
-router.post(
-    '/volume/calculate',
-    validateAccountingRequest(DiscountSchemas.calculateVolumeSchema),
-    DiscountController.calculateVolumeDiscount
-);
-
-/**
- * @route   POST /api/discounts/volume/bulk
- * @desc    Bulk import volume tiers
- * @access  Private
- */
-router.post(
-    '/volume/bulk',
-    validateAccountingRequest(null), // Manual validation in controller
-    DiscountController.bulkImportVolumeTiers
-);
-
-/**
- * @route   GET /api/discounts/volume/export
- * @desc    Export tiers to CSV
- * @access  Private
- */
-router.get(
-    '/volume/export',
-    validateAccountingRequest(null),
-    DiscountController.exportVolumeTiers
-);
-
-/**
- * @route   GET /api/discounts/volume/stats
- * @desc    Get volume discount usage statistics
- * @access  Private
- */
-router.get(
-    '/volume/stats',
-    validateAccountingRequest(null),
-    DiscountController.getVolumeDiscountStats
-);
-
-/**
- * @route   GET /api/discounts/volume/top
- * @desc    Get top volume discount tiers
- * @access  Private
- */
-router.get(
-    '/volume/top',
-    validateAccountingRequest(null),
-    DiscountController.getTopVolumeTiers
-);
-
-/**
  * =====================================================
  * DISCOUNT ALLOCATIONS
  * =====================================================
  */
+
+/**
+ * @route   POST /api/discounts/allocations/bulk
+ * @desc    Bulk create allocations
+ * @access  Private
+ */
+router.post(
+    '/allocations/bulk',
+    validateAccountingRequest(null), // Manual validation in controller
+    DiscountController.bulkCreateAllocations
+);
+
+/**
+ * @route   GET /api/discounts/allocations/export
+ * @desc    Export allocations to CSV
+ * @access  Private
+ */
+router.get(
+    '/allocations/export',
+    validateAccountingRequest(DiscountSchemas.dateRangeSchema),
+    DiscountController.exportAllocations
+);
+
+/**
+ * @route   GET /api/discounts/allocations/unallocated
+ * @desc    Find discounts applied but not allocated
+ * @access  Private
+ */
+router.get(
+    '/allocations/unallocated',
+    validateAccountingRequest(null),
+    DiscountController.getUnallocatedDiscounts
+);
+
+/**
+ * @route   GET /api/discounts/allocations/report
+ * @desc    Generate allocation report for period
+ * @access  Private
+ */
+router.get(
+    '/allocations/report',
+    validateAccountingRequest(DiscountSchemas.dateRangeSchema),
+    DiscountController.getAllocationReport
+);
+
+/**
+ * @route   GET /api/discounts/allocations/transaction/:transactionId
+ * @desc    Get allocations for a specific transaction
+ * @access  Private
+ */
+router.get(
+    '/allocations/transaction/:transactionId',
+    validateAccountingRequest(null),
+    DiscountController.getTransactionAllocations
+);
 
 /**
  * @route   POST /api/discounts/allocations
@@ -452,22 +507,11 @@ router.get(
 );
 
 /**
- * @route   GET /api/discounts/allocations/:id
- * @desc    Get allocation details with line items
- * @access  Private
- */
-router.get(
-    '/allocations/:id',
-    validateAccountingRequest(null),
-    DiscountController.getAllocationById
-);
-
-/**
- * @route   POST /api/discounts/allocations/:id/apply
+ * @route   GET /api/discounts/allocations/:id/apply
  * @desc    Mark allocation as applied
  * @access  Private
  */
-router.post(
+router.get(
     '/allocations/:id/apply',
     validateAccountingRequest(null),
     DiscountController.applyAllocation
@@ -485,58 +529,14 @@ router.post(
 );
 
 /**
- * @route   GET /api/discounts/allocations/transaction/:transactionId
- * @desc    Get allocations for a specific transaction
+ * @route   GET /api/discounts/allocations/:id
+ * @desc    Get allocation details with line items
  * @access  Private
  */
 router.get(
-    '/allocations/transaction/:transactionId',
+    '/allocations/:id',
     validateAccountingRequest(null),
-    DiscountController.getTransactionAllocations
-);
-
-/**
- * @route   GET /api/discounts/allocations/report
- * @desc    Generate allocation report for period
- * @access  Private
- */
-router.get(
-    '/allocations/report',
-    validateAccountingRequest(DiscountSchemas.dateRangeSchema),
-    DiscountController.getAllocationReport
-);
-
-/**
- * @route   GET /api/discounts/allocations/unallocated
- * @desc    Find discounts applied but not allocated
- * @access  Private
- */
-router.get(
-    '/allocations/unallocated',
-    validateAccountingRequest(null),
-    DiscountController.getUnallocatedDiscounts
-);
-
-/**
- * @route   POST /api/discounts/allocations/bulk
- * @desc    Bulk create allocations
- * @access  Private
- */
-router.post(
-    '/allocations/bulk',
-    validateAccountingRequest(null), // Manual validation in controller
-    DiscountController.bulkCreateAllocations
-);
-
-/**
- * @route   GET /api/discounts/allocations/export
- * @desc    Export allocations to CSV
- * @access  Private
- */
-router.get(
-    '/allocations/export',
-    validateAccountingRequest(DiscountSchemas.dateRangeSchema),
-    DiscountController.exportAllocations
+    DiscountController.getAllocationById
 );
 
 /**
@@ -591,7 +591,7 @@ router.post(
 
 /**
  * =====================================================
- * TEST ENDPOINT
+ * TEST ENDPOINTS
  * =====================================================
  */
 

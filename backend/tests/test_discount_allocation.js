@@ -1,9 +1,9 @@
 // File: ~/Bizzy_Track_pro/backend/tests/test_discount_allocation.js
 // PURPOSE: Test discount allocation service with real database operations
-// PHASE 10.6: Complete test suite - Creates its own test data
+// FIXED: Properly passes allocation ID between tests and matches schema
+// UPDATED: Added void reason tracking tests
 
 import { DiscountAllocationService } from '../app/services/discountAllocationService.js';
-import { DiscountCore } from '../app/services/discountCore.js';
 import { getClient } from '../app/utils/database.js';
 
 async function getValidUserId() {
@@ -38,7 +38,6 @@ const DISCOUNT_RULES = {
 async function createTestPOSTransaction(businessId, userId, customerId) {
     const client = await getClient();
     try {
-        // Create a test POS transaction with discount
         const result = await client.query(
             `INSERT INTO pos_transactions (
                 business_id, transaction_number, transaction_date,
@@ -55,39 +54,37 @@ async function createTestPOSTransaction(businessId, userId, customerId) {
                 businessId,
                 `TEST-POS-${Date.now()}`,
                 customerId,
-                440000,  // total_amount (after discount)
-                60000,   // discount_amount
-                440000,  // final_amount (same as total_amount)
-                'cash',  // payment_method
-                'completed', // payment_status
-                'completed', // status
+                440000,
+                60000,
+                440000,
+                'cash',
+                'completed',
+                'completed',
                 userId
             ]
         );
-        
+
         const transaction = result.rows[0];
-        
-        // Create test line items - include ALL required fields
+
         await client.query(
             `INSERT INTO pos_transaction_items (
                 business_id, pos_transaction_id, item_type, item_name,
                 quantity, unit_price, total_price, discount_amount,
                 created_at
-            ) VALUES 
+            ) VALUES
             ($1, $2, 'service', 'Test Service 1', 1, 300000, 300000, 0, NOW()),
             ($1, $2, 'product', 'Test Product 1', 2, 200000, 400000, 0, NOW()),
             ($1, $2, 'service', 'Test Service 2', 1, 100000, 100000, 0, NOW())`,
             [businessId, transaction.id]
         );
-        
-        // Get the created line items
+
         const itemsResult = await client.query(
-            `SELECT id FROM pos_transaction_items 
-             WHERE pos_transaction_id = $1 
+            `SELECT id FROM pos_transaction_items
+             WHERE pos_transaction_id = $1
              ORDER BY created_at ASC`,
             [transaction.id]
         );
-        
+
         return {
             id: transaction.id,
             number: transaction.transaction_number,
@@ -104,7 +101,6 @@ async function createTestPOSTransaction(businessId, userId, customerId) {
 async function createTestInvoice(businessId, userId, customerId) {
     const client = await getClient();
     try {
-        // Create a test invoice with discount
         const result = await client.query(
             `INSERT INTO invoices (
                 business_id, invoice_number, invoice_date,
@@ -121,37 +117,35 @@ async function createTestInvoice(businessId, userId, customerId) {
                 businessId,
                 `TEST-INV-${Date.now()}`,
                 customerId,
-                750000,  // subtotal
-                90000,   // discount_amount
-                660000,  // total_amount
-                0,       // amount_paid
-                'draft', // status
+                750000,
+                90000,
+                660000,
+                0,
+                'draft',
                 userId
             ]
         );
-        
+
         const invoice = result.rows[0];
-        
-        // Create test line items - total_price is GENERATED, so don't insert it
+
         await client.query(
             `INSERT INTO invoice_line_items (
                 invoice_id, description, quantity, unit_price,
                 tax_category_code, discount_amount, created_at
-            ) VALUES 
+            ) VALUES
             ($1, 'Test Item 1', 2, 200000, 'STANDARD_GOODS', 0, NOW()),
             ($1, 'Test Item 2', 1, 150000, 'STANDARD_GOODS', 0, NOW()),
             ($1, 'Test Item 3', 1, 200000, 'STANDARD_GOODS', 0, NOW())`,
             [invoice.id]
         );
-        
-        // Get the created line items
+
         const itemsResult = await client.query(
-            `SELECT id FROM invoice_line_items 
-             WHERE invoice_id = $1 
+            `SELECT id FROM invoice_line_items
+             WHERE invoice_id = $1
              ORDER BY created_at ASC`,
             [invoice.id]
         );
-        
+
         return {
             id: invoice.id,
             number: invoice.invoice_number,
@@ -168,41 +162,41 @@ async function createTestInvoice(businessId, userId, customerId) {
 async function cleanupTestData(businessId) {
     const client = await getClient();
     try {
-        // Delete allocation lines first (due to foreign key)
+        // First delete allocation lines
         await client.query(
-            `DELETE FROM discount_allocation_lines 
+            `DELETE FROM discount_allocation_lines
              WHERE allocation_id IN (
-                 SELECT id FROM discount_allocations 
-                 WHERE business_id = $1 
-                 AND allocation_number LIKE 'TEST-%'
+                 SELECT id FROM discount_allocations
+                 WHERE business_id = $1
+                 AND (allocation_number LIKE 'DA-2026-03-%')
              )`,
             [businessId]
         );
-        
-        // Delete test allocations
+
+        // Then delete allocations
         await client.query(
-            `DELETE FROM discount_allocations 
-             WHERE business_id = $1 
-             AND allocation_number LIKE 'TEST-%'`,
+            `DELETE FROM discount_allocations
+             WHERE business_id = $1
+             AND (allocation_number LIKE 'DA-2026-03-%')`,
             [businessId]
         );
-        
-        // Delete test POS transactions and their items (cascade should handle items)
+
+        // Then delete POS transactions
         await client.query(
-            `DELETE FROM pos_transactions 
-             WHERE business_id = $1 
+            `DELETE FROM pos_transactions
+             WHERE business_id = $1
              AND transaction_number LIKE 'TEST-POS-%'`,
             [businessId]
         );
-        
-        // Delete test invoices and their items (cascade should handle items)
+
+        // Then delete invoices
         await client.query(
-            `DELETE FROM invoices 
-             WHERE business_id = $1 
+            `DELETE FROM invoices
+             WHERE business_id = $1
              AND invoice_number LIKE 'TEST-INV-%'`,
             [businessId]
         );
-        
+
         console.log('🧹 Test data cleaned up');
     } catch (error) {
         console.error('Cleanup error:', error.message);
@@ -230,7 +224,9 @@ async function testDiscountAllocation() {
     // Create test transactions
     console.log('\n📝 Creating test transactions...');
     let testPOS, testInvoice;
-    
+    let posAllocationId = null;
+    let invoiceAllocationId = null;
+
     try {
         testPOS = await createTestPOSTransaction(testBusinessId, testUserId, testCustomerId);
         console.log(`✅ Created POS transaction: ${testPOS.number} with ${testPOS.lineItemIds.length} items`);
@@ -239,7 +235,7 @@ async function testDiscountAllocation() {
         console.error('❌ Failed to create POS transaction:', error.message);
         testPOS = null;
     }
-    
+
     try {
         testInvoice = await createTestInvoice(testBusinessId, testUserId, testCustomerId);
         console.log(`✅ Created Invoice: ${testInvoice.number} with ${testInvoice.lineItemIds.length} items`);
@@ -263,15 +259,15 @@ async function testDiscountAllocation() {
         const allocations = DiscountAllocationService.allocateByLineAmount(lineItems, totalDiscount);
 
         tests.push({
-            name: 'Allocate by line amount (pro-rata)',
+            name: 'Allocate by line amount',
             expected: '3 allocations',
             actual: `${allocations.length} allocations`,
             passed: allocations.length === 3,
             details: allocations.map(a => ({
                 item: a.line_item_id,
-                original: a.original_amount,
-                discount: a.allocated_discount,
-                percentage: a.allocation_percentage.toFixed(2) + '%'
+                line_amount: a.line_amount,
+                discount_amount: a.discount_amount,
+                allocation_weight: a.allocation_weight
             }))
         });
     } catch (error) {
@@ -301,9 +297,8 @@ async function testDiscountAllocation() {
             passed: allocations.length === 3,
             details: allocations.map(a => ({
                 item: a.line_item_id,
-                original: a.original_amount,
-                discount: a.allocated_discount,
                 quantity: a.quantity,
+                discount_amount: a.discount_amount,
                 discount_per_unit: a.discount_per_unit
             }))
         });
@@ -339,8 +334,8 @@ async function testDiscountAllocation() {
             passed: allocations.length === 3,
             details: allocations.map((a, i) => ({
                 item: a.line_item_id,
-                weight: weights[i],
-                discount: a.allocated_discount
+                weight: a.allocation_weight,
+                discount_amount: a.discount_amount
             }))
         });
     } catch (error) {
@@ -373,9 +368,9 @@ async function testDiscountAllocation() {
             passed: allocations.length === 3,
             details: allocations.map(a => ({
                 item: a.line_item_id,
-                original: a.original_amount,
-                discount: a.allocated_discount,
-                percentage: a.allocation_percentage + '%'
+                line_amount: a.line_amount,
+                discount_amount: a.discount_amount,
+                allocation_weight: a.allocation_weight
             }))
         });
     } catch (error) {
@@ -390,9 +385,9 @@ async function testDiscountAllocation() {
     // Test 5: Validate allocation total - correct
     try {
         const allocations = [
-            { allocated_discount: 30000 },
-            { allocated_discount: 20000 },
-            { allocated_discount: 10000 }
+            { discount_amount: 30000 },
+            { discount_amount: 20000 },
+            { discount_amount: 10000 }
         ];
         const expectedTotal = 60000;
 
@@ -421,9 +416,9 @@ async function testDiscountAllocation() {
     // Test 6: Validate allocation total - incorrect
     try {
         const allocations = [
-            { allocated_discount: 30000 },
-            { allocated_discount: 20000 },
-            { allocated_discount: 15000 }
+            { discount_amount: 30000 },
+            { discount_amount: 20000 },
+            { discount_amount: 15000 }
         ];
         const expectedTotal = 60000;
 
@@ -451,22 +446,21 @@ async function testDiscountAllocation() {
 
     // Only run database tests if we successfully created test transactions
     if (testPOS) {
-        // Test 7: Create POS allocation record (using volume discount rule)
+        // Test 7: Create POS allocation record
         try {
-            // First, calculate allocations for the POS items using their real IDs
             const lineItems = [
                 { id: testPOS.lineItemIds[0], amount: 300000, quantity: 1 },
                 { id: testPOS.lineItemIds[1], amount: 200000, quantity: 2 },
                 { id: testPOS.lineItemIds[2], amount: 100000, quantity: 1 }
             ];
-            
+
             const allocations = DiscountAllocationService.allocateByLineAmount(lineItems, 60000);
             console.log('POS Allocations calculated:', JSON.stringify(allocations, null, 2));
 
             const allocationData = {
                 pos_transaction_id: testPOS.id,
                 invoice_id: null,
-                discount_rule_id: DISCOUNT_RULES.volume, // Using volume discount rule
+                discount_rule_id: DISCOUNT_RULES.volume,
                 promotional_discount_id: null,
                 total_discount_amount: 60000,
                 allocation_method: 'PRO_RATA_AMOUNT',
@@ -481,6 +475,8 @@ async function testDiscountAllocation() {
                 testBusinessId
             );
 
+            posAllocationId = result.id;
+
             tests.push({
                 name: 'Create POS allocation record',
                 expected: 'Allocation created',
@@ -495,10 +491,6 @@ async function testDiscountAllocation() {
                 }
             });
 
-            // Store the allocation ID for later tests
-            global.testAllocationId = result.id;
-            global.testAllocationNumber = result.allocation_number;
-
         } catch (error) {
             tests.push({
                 name: 'Create POS allocation record',
@@ -510,15 +502,14 @@ async function testDiscountAllocation() {
     }
 
     if (testInvoice) {
-        // Test 8: Create Invoice allocation record (using promotional discount rule)
+        // Test 8: Create Invoice allocation record
         try {
-            // Calculate allocations for the invoice items using their real IDs
             const lineItems = [
                 { id: testInvoice.lineItemIds[0], amount: 200000, quantity: 2 },
                 { id: testInvoice.lineItemIds[1], amount: 150000, quantity: 1 },
                 { id: testInvoice.lineItemIds[2], amount: 200000, quantity: 1 }
             ];
-            
+
             const allocations = DiscountAllocationService.allocateByQuantity(lineItems, 90000);
             console.log('Invoice Allocations calculated:', JSON.stringify(allocations, null, 2));
 
@@ -526,7 +517,7 @@ async function testDiscountAllocation() {
                 pos_transaction_id: null,
                 invoice_id: testInvoice.id,
                 discount_rule_id: null,
-                promotional_discount_id: DISCOUNT_RULES.promotional, // Using promotional discount rule
+                promotional_discount_id: DISCOUNT_RULES.promotional,
                 total_discount_amount: 90000,
                 allocation_method: 'PRO_RATA_QUANTITY',
                 status: 'APPLIED',
@@ -540,6 +531,8 @@ async function testDiscountAllocation() {
                 testBusinessId
             );
 
+            invoiceAllocationId = result.id;
+
             tests.push({
                 name: 'Create Invoice allocation record',
                 expected: 'Allocation created',
@@ -564,11 +557,11 @@ async function testDiscountAllocation() {
         }
     }
 
-    if (global.testAllocationId) {
-        // Test 9: Get allocation by ID with lines
+    // Test 9: Get allocation by ID with lines (using POS allocation)
+    if (posAllocationId) {
         try {
             const allocation = await DiscountAllocationService.getAllocationWithLines(
-                global.testAllocationId,
+                posAllocationId,
                 testBusinessId
             );
 
@@ -623,7 +616,7 @@ async function testDiscountAllocation() {
         // Test 11: Check if allocation can be voided
         try {
             const canVoid = await DiscountAllocationService.canVoidAllocation(
-                global.testAllocationId,
+                posAllocationId,
                 testBusinessId
             );
 
@@ -646,7 +639,7 @@ async function testDiscountAllocation() {
         // Test 12: Void allocation
         try {
             const result = await DiscountAllocationService.voidAllocation(
-                global.testAllocationId,
+                posAllocationId,
                 'Test void reason',
                 testUserId,
                 testBusinessId
@@ -659,8 +652,8 @@ async function testDiscountAllocation() {
                 passed: result.status === 'VOID',
                 details: {
                     id: result.id,
-                    status: result.status,
-                    reason: result.rejection_reason
+                    status: result.status
+                    // rejection_reason doesn't exist in schema
                 }
             });
         } catch (error) {
@@ -686,7 +679,7 @@ async function testDiscountAllocation() {
                 transaction: u.transaction_number,
                 type: u.transaction_type,
                 discount: u.total_discount
-            }))
+            })).slice(0, 3)
         });
     } catch (error) {
         tests.push({
@@ -745,10 +738,12 @@ async function testDiscountAllocation() {
             endDate.toISOString().split('T')[0]
         );
 
+        const rowCount = csv.split('\n').length - 1;
+
         tests.push({
             name: 'Export allocations to CSV',
             expected: 'CSV string',
-            actual: `${csv.split('\n').length - 1} rows exported`,
+            actual: `${rowCount} rows exported`,
             passed: csv.includes('Allocation Number'),
             details: { preview: csv.split('\n').slice(0, 3).join('\n') + '...' }
         });
@@ -759,6 +754,88 @@ async function testDiscountAllocation() {
             actual: `Error: ${error.message}`,
             passed: false
         });
+    }
+
+    // Test 16: Get voided allocations report
+    try {
+        const voidedAllocations = await DiscountAllocationService.getVoidedAllocations(
+            testBusinessId
+        );
+
+        tests.push({
+            name: 'Get voided allocations report',
+            expected: 'Array of voided allocations',
+            actual: `${voidedAllocations.length} voided allocations found`,
+            passed: Array.isArray(voidedAllocations),
+            details: voidedAllocations.map(v => ({
+                number: v.allocation_number,
+                reason: v.void_reason,
+                voided_at: v.voided_at,
+                voided_by: v.voided_by_email
+            }))
+        });
+    } catch (error) {
+        tests.push({
+            name: 'Get voided allocations report',
+            expected: 'Success',
+            actual: `Error: ${error.message}`,
+            passed: false
+        });
+    }
+
+    // Test 17: Get void reason statistics
+    try {
+        const stats = await DiscountAllocationService.getVoidReasonStats(testBusinessId);
+
+        tests.push({
+            name: 'Get void reason statistics',
+            expected: 'Array of statistics',
+            actual: `${stats.length} reasons found`,
+            passed: Array.isArray(stats),
+            details: stats.map(s => ({
+                reason: s.void_reason,
+                count: s.void_count,
+                total_amount: s.total_discount_voided
+            }))
+        });
+    } catch (error) {
+        tests.push({
+            name: 'Get void reason statistics',
+            expected: 'Success',
+            actual: `Error: ${error.message}`,
+            passed: false
+        });
+    }
+
+    // Test 18: Get allocation with details
+    if (posAllocationId) {
+        try {
+            const allocation = await DiscountAllocationService.getAllocationWithDetails(
+                posAllocationId,
+                testBusinessId
+            );
+
+            tests.push({
+                name: 'Get allocation with details',
+                expected: 'Allocation object with void info',
+                actual: allocation ? 'Details retrieved' : 'No allocation',
+                passed: allocation && allocation.void_reason !== undefined,
+                details: {
+                    id: allocation?.id,
+                    status: allocation?.status,
+                    void_reason: allocation?.void_reason,
+                    voided_by: allocation?.voided_by_email,
+                    line_count: allocation?.lines?.length
+                }
+            });
+        } catch (error) {
+            tests.push({
+                name: 'Get allocation with details',
+                expected: 'Success',
+                actual: `Error: ${error.message}`,
+                passed: false
+            });
+        }
     }
 
     // Print results

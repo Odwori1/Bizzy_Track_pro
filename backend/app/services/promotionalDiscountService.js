@@ -19,6 +19,7 @@ export class PromotionalDiscountService {
 
     /**
      * Create a new promotional campaign
+     * UPDATED: Maps camelCase to snake_case for database
      */
     static async createPromotion(data, userId, businessId) {
         const client = await getClient();
@@ -26,29 +27,43 @@ export class PromotionalDiscountService {
         try {
             await client.query('BEGIN');
 
+            // Map camelCase to snake_case for database
+            const dbData = {
+                promo_code: data.promoCode || data.promo_code,
+                description: data.description || '',
+                discount_type: data.discountType || data.discount_type || 'PERCENTAGE',
+                discount_value: data.discountValue || data.discount_value,
+                min_purchase: data.minPurchase || data.min_purchase || null,
+                max_uses: data.maxUses || data.max_uses || null,
+                per_customer_limit: data.perCustomerLimit || data.per_customer_limit || null,
+                valid_from: data.validFrom || data.valid_from || null,
+                valid_to: data.validTo || data.valid_to || null,
+                is_active: data.isActive !== undefined ? data.isActive : (data.is_active !== false)
+            };
+
             // Validate dates
-            if (data.valid_from && data.valid_to) {
-                const fromDate = new Date(data.valid_from);
-                const toDate = new Date(data.valid_to);
+            if (dbData.valid_from && dbData.valid_to) {
+                const fromDate = new Date(dbData.valid_from);
+                const toDate = new Date(dbData.valid_to);
                 if (fromDate > toDate) {
                     throw new Error('Valid from date must be before valid to date');
                 }
             }
 
             // Generate promo code if not provided
-            if (!data.promo_code) {
-                data.promo_code = await this._generateUniquePromoCode(businessId);
+            if (!dbData.promo_code) {
+                dbData.promo_code = await this._generateUniquePromoCode(businessId);
             }
 
             // Check if promo code already exists
             const existing = await client.query(
                 `SELECT id FROM promotional_discounts
                  WHERE business_id = $1 AND promo_code = $2`,
-                [businessId, data.promo_code]
+                [businessId, dbData.promo_code]
             );
 
             if (existing.rows.length > 0) {
-                throw new Error(`Promo code '${data.promo_code}' already exists`);
+                throw new Error(`Promo code '${dbData.promo_code}' already exists`);
             }
 
             const result = await client.query(
@@ -60,16 +75,16 @@ export class PromotionalDiscountService {
                 RETURNING *`,
                 [
                     businessId,
-                    data.promo_code,
-                    data.description || '',
-                    data.discount_type || 'PERCENTAGE',
-                    data.discount_value,
-                    data.min_purchase || null,
-                    data.max_uses || null,
-                    data.per_customer_limit || null,
-                    data.valid_from || null,
-                    data.valid_to || null,
-                    data.is_active !== false,
+                    dbData.promo_code,
+                    dbData.description,
+                    dbData.discount_type,
+                    dbData.discount_value,
+                    dbData.min_purchase,
+                    dbData.max_uses,
+                    dbData.per_customer_limit,
+                    dbData.valid_from,
+                    dbData.valid_to,
+                    dbData.is_active,
                     userId
                 ]
             );
@@ -81,9 +96,9 @@ export class PromotionalDiscountService {
                 resourceType: 'promotional_discount',
                 resourceId: result.rows[0].id,
                 newValues: {
-                    promo_code: data.promo_code,
-                    discount_type: data.discount_type,
-                    discount_value: data.discount_value
+                    promo_code: dbData.promo_code,
+                    discount_type: dbData.discount_type,
+                    discount_value: dbData.discount_value
                 }
             });
 
@@ -91,7 +106,7 @@ export class PromotionalDiscountService {
                 businessId,
                 userId,
                 promoId: result.rows[0].id,
-                promoCode: data.promo_code
+                promoCode: dbData.promo_code
             });
 
             await client.query('COMMIT');

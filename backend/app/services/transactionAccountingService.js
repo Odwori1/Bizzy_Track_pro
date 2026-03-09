@@ -1,6 +1,8 @@
 import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
+import { DiscountAccountingService } from './discountAccountingService.js';
+import { DiscountAllocationService } from './discountAllocationService.js';
 
 /**
  * TRANSACTION ACCOUNTING SERVICE
@@ -42,10 +44,11 @@ export class TransactionAccountingService {
       const results = {
         sales_revenue_entry: null,
         cogs_entry: null,
+        discount_entries: null,
         analysis: analysis
       };
 
-      // STEP 1: SALES REVENUE ENTRY
+      // STEP 1: SALES REVENUE ENTRY (includes discount handling)
       if (analysis.total_revenue > 0) {
         results.sales_revenue_entry = await this.createSalesRevenueEntry(
           transactionData,
@@ -78,7 +81,8 @@ export class TransactionAccountingService {
         transaction_id: transactionData.pos_transaction_id,
         revenue: analysis.total_revenue,
         cogs: analysis.total_cogs,
-        gross_profit: analysis.total_revenue - analysis.total_cogs,
+        discount: transactionData.total_discount || 0,
+        gross_profit: (analysis.total_revenue - analysis.total_cogs) - (transactionData.total_discount || 0),
         item_types: analysis.summary_by_type
       });
 
@@ -194,12 +198,14 @@ export class TransactionAccountingService {
 
   /**
    * Create sales revenue journal entry
+   * UPDATED: Includes discount handling
    */
   static async createSalesRevenueEntry(transactionData, analysis, userId) {
     const { AccountingService } = await import('./accountingService.js');
 
     const revenueLines = [];
 
+    // Original revenue calculations
     const productRevenue = analysis.summary_by_type.product?.revenue || 0;
     const inventoryRevenue = analysis.summary_by_type.inventory_item?.revenue || 0;
     const totalProductRevenue = productRevenue + inventoryRevenue;
@@ -226,6 +232,45 @@ export class TransactionAccountingService {
       });
     }
 
+    // ================ DISCOUNT HANDLING ================
+    // If transaction has discounts, create discount journal entries
+    if (transactionData.total_discount > 0 && transactionData.discount_allocation_id) {
+      try {
+        // Get the allocation to find applied discounts
+        const allocation = await DiscountAllocationService.getAllocationWithLines(
+          transactionData.discount_allocation_id,
+          transactionData.business_id
+        );
+
+        if (allocation && allocation.applied_discounts && allocation.applied_discounts.length > 0) {
+          // Create discount journal entries
+          const discountEntries = await DiscountAccountingService.createBulkDiscountJournalEntries(
+            {
+              business_id: transactionData.business_id,
+              id: transactionData.pos_transaction_id,
+              type: 'POS'
+            },
+            allocation.applied_discounts,
+            userId
+          );
+
+          log.info('Discount journal entries created for POS transaction', {
+            transactionId: transactionData.pos_transaction_id,
+            discountAmount: transactionData.total_discount,
+            allocationId: allocation.id,
+            entryCount: discountEntries?.length || 0
+          });
+        }
+      } catch (discountError) {
+        log.error('Failed to create discount journal entries', {
+          error: discountError.message,
+          transactionId: transactionData.pos_transaction_id
+        });
+        // Don't fail the transaction - continue without discount entries
+      }
+    }
+
+    // Original debit line
     const debitLine = {
       account_code: transactionData.payment_method === 'cash'
         ? this.ACCOUNT_CODES.CASH
@@ -237,8 +282,8 @@ export class TransactionAccountingService {
 
     const entryData = {
       business_id: transactionData.business_id,
-      description: `POS Sale #${transactionData.pos_transaction_id}`,
-      journal_date: new Date(),  // FIXED: transaction_date → journal_date
+      description: `POS Sale #${transactionData.pos_transaction_id}${transactionData.total_discount > 0 ? ' (with discount)' : ''}`,
+      journal_date: new Date(),
       reference_type: 'pos_transaction',
       reference_id: transactionData.pos_transaction_id,
       lines: [debitLine, ...revenueLines]
@@ -258,7 +303,7 @@ export class TransactionAccountingService {
     const entryData = {
       business_id: transactionData.business_id,
       description: `COGS for POS Sale #${transactionData.pos_transaction_id}`,
-      journal_date: new Date(),  // FIXED: transaction_date → journal_date
+      journal_date: new Date(),
       reference_type: 'pos_transaction',
       reference_id: transactionData.pos_transaction_id,
       lines: [
@@ -305,7 +350,7 @@ export class TransactionAccountingService {
           item.cogs,
           'pos_transaction',
           transactionData.pos_transaction_id,
-          `POS Sale: ${item.item_name} (${item.quantity} units)`,
+          `POS Sale: ${item.item_name || 'Item'} (${item.quantity} units)`,
           userId
         ]
       );
@@ -317,7 +362,7 @@ export class TransactionAccountingService {
   }
 
   /**
-   * Get summary (FIXED: added ::text casts)
+   * Get summary with discount information
    */
   static async getTransactionAccountingSummary(businessId, transactionId) {
     const client = await getClient();
@@ -348,6 +393,17 @@ export class TransactionAccountingService {
                  AND jel.account_code = '5100'
              )) as cogs_entries,
 
+          (SELECT json_agg(je.*)
+           FROM journal_entries je
+           WHERE je.business_id = $1
+             AND je.reference_type = 'pos_transaction'
+             AND je.reference_id = $2::text
+             AND EXISTS (
+               SELECT 1 FROM journal_entry_lines jel
+               WHERE jel.journal_entry_id = je.id
+                 AND jel.account_code IN ('4110','4111','4112')
+             )) as discount_entries,
+
           (SELECT json_agg(it.*)
            FROM inventory_transactions it
            WHERE it.business_id = $1
@@ -369,42 +425,51 @@ export class TransactionAccountingService {
            WHERE je.business_id=$1
              AND je.reference_type='pos_transaction'
              AND je.reference_id=$2::text
-             AND jel.account_code='5100') as total_cogs
+             AND jel.account_code='5100') as total_cogs,
+
+          (SELECT COALESCE(SUM(jel.amount),0)
+           FROM journal_entry_lines jel
+           JOIN journal_entries je ON jel.journal_entry_id = je.id
+           WHERE je.business_id=$1
+             AND je.reference_type='pos_transaction'
+             AND je.reference_id=$2::text
+             AND jel.account_code IN ('4110','4111','4112')) as total_discounts
         `,
         [businessId, transactionId]
       );
 
-      const summary = result.rows[0];
-      if (summary) {
-        summary.gross_profit = (summary.total_revenue || 0) - (summary.total_cogs || 0);
-        summary.gross_margin = summary.total_revenue > 0
-          ? (summary.gross_profit / summary.total_revenue) * 100
-          : 0;
-      } else {
-        summary = {
-          revenue_entries: null,
-          cogs_entries: null,
-          inventory_transactions: null,
-          total_revenue: 0,
-          total_cogs: 0,
-          gross_profit: 0,
-          gross_margin: 0
-        };
-      }
+      const summary = result.rows[0] || {};
+      
+      // Calculate derived metrics
+      summary.gross_profit = (summary.total_revenue || 0) - (summary.total_cogs || 0);
+      summary.net_revenue = (summary.total_revenue || 0) - (summary.total_discounts || 0);
+      summary.net_profit = summary.net_revenue - (summary.total_cogs || 0);
+      
+      summary.gross_margin = summary.total_revenue > 0
+        ? (summary.gross_profit / summary.total_revenue) * 100
+        : 0;
+      
+      summary.net_margin = summary.net_revenue > 0
+        ? (summary.net_profit / summary.net_revenue) * 100
+        : 0;
 
       return summary;
 
     } catch (error) {
       log.error('Error getting transaction accounting summary:', error);
-      // Return empty summary instead of throwing error
       return {
         revenue_entries: null,
         cogs_entries: null,
+        discount_entries: null,
         inventory_transactions: null,
         total_revenue: 0,
         total_cogs: 0,
+        total_discounts: 0,
         gross_profit: 0,
+        net_revenue: 0,
+        net_profit: 0,
         gross_margin: 0,
+        net_margin: 0,
         error: error.message
       };
     } finally {

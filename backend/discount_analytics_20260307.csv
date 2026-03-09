@@ -1,0 +1,4 @@
+rule_id,rule_name,rule_type,total_uses,total_discount,unique_customers,avg_discount_percent
+bf00e448-646d-41a1-a3dd-eb83baefb593,,,2,1702000.00,2,34.04000000000000000000
+86ed6b3e-fd3d-426b-afd8-94217f943d35,WELCOME10,PROMOTIONAL,1,90000.00,1,13.63636363636363636400
+e652faad-bab7-4a08-8c25-27d9b5cc951c,Bronze Tier,VOLUME,1,60000.00,1,13.63636363636363636400

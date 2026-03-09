@@ -1,6 +1,7 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountAnalyticsService.js
 // PURPOSE: Track discount effectiveness and generate insights
 // PHASE 10.8: FINAL VERSION - Fixed GROUP BY issues and added missing methods
+// UPDATED: Fixed BIGINT timestamp conversion in getCostEffectiveDiscounts
 
 import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
@@ -757,15 +758,25 @@ export class DiscountAnalyticsService {
 
     /**
      * Get most cost-effective discounts
-     * FIXED: Proper GROUP BY clause
+     * FIXED: Convert dates to timestamps for BIGINT comparison
      */
-    static async getCostEffectiveDiscounts(businessId, limit = 10) {
+    static async getCostEffectiveDiscounts(businessId, startDate, endDate, limit = 10) {
         const client = await getClient();
 
         try {
+            // Convert dates to timestamps for BIGINT comparison
+            const startTimestamp = startDate ? new Date(startDate).getTime() : null;
+            const endTimestamp = endDate ? new Date(endDate).getTime() : null;
+
+            // Use default date range if not provided (last 90 days)
+            const ninetyDaysAgo = new Date();
+            ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+            const defaultStartTimestamp = ninetyDaysAgo.getTime();
+            const defaultEndTimestamp = new Date().getTime();
+
             const result = await client.query(
                 `WITH discount_performance AS (
-                    SELECT 
+                    SELECT
                         COALESCE(da.discount_rule_id, da.promotional_discount_id) as discount_id,
                         MAX(CASE
                             WHEN da.promotional_discount_id IS NOT NULL THEN pd.promo_code
@@ -789,33 +800,44 @@ export class DiscountAnalyticsService {
                     LEFT JOIN early_payment_terms ept ON da.discount_rule_id = ept.id
                     LEFT JOIN category_discount_rules cdr ON da.discount_rule_id = cdr.id
                     WHERE da.business_id = $1
-                        AND da.analysis_date >= NOW() - INTERVAL '90 days'
+                        AND da.analysis_date >= TO_TIMESTAMP($2 / 1000.0)::date
+                        AND da.analysis_date <= TO_TIMESTAMP($3 / 1000.0)::date
                     GROUP BY COALESCE(da.discount_rule_id, da.promotional_discount_id)
                     HAVING SUM(da.times_used) > 5
                 )
-                SELECT 
+                SELECT
                     *,
-                    CASE 
-                        WHEN total_discount_given > 0 
-                        THEN total_revenue / total_discount_given 
-                        ELSE 0 
+                    CASE
+                        WHEN total_discount_given > 0
+                        THEN total_revenue / total_discount_given
+                        ELSE 0
                     END as revenue_per_dollar_discounted,
-                    CASE 
-                        WHEN unique_customers > 0 
-                        THEN total_revenue / unique_customers 
-                        ELSE 0 
+                    CASE
+                        WHEN unique_customers > 0
+                        THEN total_revenue / unique_customers
+                        ELSE 0
                     END as revenue_per_customer
                 FROM discount_performance
                 WHERE total_discount_given > 0
                 ORDER BY revenue_per_dollar_discounted DESC
-                LIMIT $2`,
-                [businessId, limit]
+                LIMIT $4`,
+                [
+                    businessId,
+                    startTimestamp || defaultStartTimestamp,
+                    endTimestamp || defaultEndTimestamp,
+                    limit
+                ]
             );
 
             return result.rows;
 
         } catch (error) {
-            log.error('Error getting cost-effective discounts', { error: error.message });
+            log.error('Error getting cost-effective discounts', { 
+                error: error.message,
+                businessId,
+                startDate,
+                endDate
+            });
             throw error;
         } finally {
             client.release();
@@ -980,7 +1002,7 @@ export class DiscountAnalyticsService {
             // 1. Find underutilized discounts
             const underutilized = await client.query(
                 `WITH underutilized_data AS (
-                    SELECT 
+                    SELECT
                         COALESCE(da.discount_rule_id, da.promotional_discount_id) as discount_id,
                         MAX(CASE
                             WHEN da.promotional_discount_id IS NOT NULL THEN pd.promo_code
@@ -1031,7 +1053,7 @@ export class DiscountAnalyticsService {
             // 2. Find discounts that might be too generous
             const tooGenerous = await client.query(
                 `WITH generous_data AS (
-                    SELECT 
+                    SELECT
                         COALESCE(da.discount_rule_id, da.promotional_discount_id) as discount_id,
                         MAX(CASE
                             WHEN da.promotional_discount_id IS NOT NULL THEN pd.promo_code

@@ -1,6 +1,7 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountRuleEngine.js
 // PURPOSE: Master orchestrator that combines all discount services
 // PHASE 10.9: FIXED VERSION - All tests passing
+// UPDATED: Dynamic approval threshold from business settings
 
 import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
@@ -13,6 +14,7 @@ import { EarlyPaymentService } from './earlyPaymentService.js';
 import { DiscountAllocationService } from './discountAllocationService.js';
 import { DiscountAccountingService } from './discountAccountingService.js';
 import { DiscountAnalyticsService } from './discountAnalyticsService.js';
+import { DiscountSettingsService } from './discountSettingsService.js';
 
 export class DiscountRuleEngine {
 
@@ -350,33 +352,45 @@ export class DiscountRuleEngine {
 
     /**
      * =====================================================
-     * SECTION 3: APPROVAL WORKFLOW - FIXED
+     * SECTION 3: APPROVAL WORKFLOW - NOW DYNAMIC
      * =====================================================
      */
 
     /**
      * Check if any discount requires approval
+     * UPDATED: Uses dynamic threshold from business settings
      */
     static async checkApprovalRequired(discounts, context) {
         if (!discounts || discounts.length === 0) return false;
 
-        const { amount } = context;
+        const { businessId, amount } = context;
 
-        // Use hardcoded threshold of 20% for now
-        const threshold = 20;
+        // Get dynamic threshold from business settings
+        const threshold = await DiscountSettingsService.getApprovalThreshold(businessId);
 
         for (const discount of discounts) {
-            const discountPercentage = parseFloat(discount.discount_value || 0);
+            const discountValue = parseFloat(discount.discount_value || 0);
 
             if (discount.discount_type === 'PERCENTAGE') {
-                if (DiscountCore.requiresApproval(discountPercentage, threshold)) {
+                if (DiscountCore.requiresApproval(discountValue, threshold)) {
+                    log.debug('Discount requires approval', {
+                        discountId: discount.id,
+                        percentage: discountValue,
+                        threshold
+                    });
                     return true;
                 }
             } else if (discount.discount_type === 'FIXED') {
                 const totalAmount = parseFloat(amount || context.subtotal || 0);
                 if (totalAmount > 0) {
-                    const percentage = (discountPercentage / totalAmount) * 100;
+                    const percentage = (discountValue / totalAmount) * 100;
                     if (DiscountCore.requiresApproval(percentage, threshold)) {
+                        log.debug('Fixed discount requires approval', {
+                            discountId: discount.id,
+                            amount: discountValue,
+                            percentage,
+                            threshold
+                        });
                         return true;
                     }
                 }
@@ -387,15 +401,16 @@ export class DiscountRuleEngine {
     }
 
     /**
-     * Get approval threshold
+     * Get approval threshold for a business
+     * UPDATED: Fetches from database instead of hardcoded
      */
     static async _getApprovalThreshold(businessId) {
-        return 20; // Default threshold of 20%
+        return await DiscountSettingsService.getApprovalThreshold(businessId);
     }
 
     /**
      * Submit discounts for approval
-     * FIXED: Uses correct column names from discount_approvals table
+     * UPDATED: Uses dynamic threshold in approval record
      */
     static async submitForApproval(context, userId) {
         const { businessId, amount, items, promoCode, transactionId, transactionType, customerId } = context;
@@ -409,6 +424,9 @@ export class DiscountRuleEngine {
             const totalDiscount = discounts.reduce((sum, d) => sum + parseFloat(d.discount_value || 0), 0);
             const discountPercentage = amount > 0 ? (totalDiscount / amount) * 100 : 0;
 
+            // Get dynamic threshold
+            const threshold = await DiscountSettingsService.getApprovalThreshold(businessId);
+
             // Build approval data matching discount_approvals table structure
             const approvalData = {
                 business_id: businessId,
@@ -418,8 +436,8 @@ export class DiscountRuleEngine {
                 discount_percentage: discountPercentage,
                 reason: promoCode ? `Promo code: ${promoCode}` : 'Discount approval requested',
                 status: 'pending',
-                requires_approval: true,
-                approval_threshold: 20
+                requires_approval: discountPercentage > threshold,
+                approval_threshold: threshold
             };
 
             // Add customer info to reason if available
@@ -472,7 +490,8 @@ export class DiscountRuleEngine {
                 newValues: {
                     amount,
                     discount: totalDiscount,
-                    percentage: discountPercentage
+                    percentage: discountPercentage,
+                    threshold
                 }
             });
 
@@ -482,7 +501,9 @@ export class DiscountRuleEngine {
                 success: true,
                 approvalId,
                 status: 'pending',
-                message: 'Discount approval request submitted'
+                message: 'Discount approval request submitted',
+                requiresApproval: discountPercentage > threshold,
+                threshold
             };
 
         } catch (error) {
