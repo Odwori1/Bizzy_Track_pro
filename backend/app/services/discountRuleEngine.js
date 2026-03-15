@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountRuleEngine.js
 // PURPOSE: Master orchestrator that combines all discount services
-// PHASE 10.9: FIXED VERSION - All tests passing
+// PHASE 10.9: FIXED VERSION - With client propagation for transaction safety
 // UPDATED: Dynamic approval threshold from business settings
 
 import { getClient } from '../utils/database.js';
@@ -15,6 +15,7 @@ import { DiscountAllocationService } from './discountAllocationService.js';
 import { DiscountAccountingService } from './discountAccountingService.js';
 import { DiscountAnalyticsService } from './discountAnalyticsService.js';
 import { DiscountSettingsService } from './discountSettingsService.js';
+import { UUIDService } from './uuidService.js';
 
 export class DiscountRuleEngine {
 
@@ -26,12 +27,25 @@ export class DiscountRuleEngine {
 
     /**
      * MAIN ENTRY POINT - Calculate final price with all discounts
+     * UPDATED: Accepts client parameter for transaction consistency
      */
     static async calculateFinalPrice(context) {
+        const { 
+            businessId, 
+            userId, 
+            transactionDate = new Date(),
+            client: externalClient // Add this parameter
+        } = context;
+        
         const startTime = Date.now();
-        const { businessId, userId, transactionDate = new Date() } = context;
+        const shouldUseExternalClient = !!externalClient;
+        const dbClient = externalClient || await getClient();
 
         try {
+            if (!shouldUseExternalClient) {
+                await dbClient.query('BEGIN');
+            }
+
             log.info('Starting discount calculation', {
                 businessId,
                 customerId: context.customerId,
@@ -42,12 +56,14 @@ export class DiscountRuleEngine {
             // Step 1: Validate input
             this.validateContext(context);
 
-            // Step 2: Check cache for identical calculations
-            const cacheKey = this._generateCacheKey(context);
-            const cached = await this.getCachedResult(cacheKey);
-            if (cached) {
-                log.debug('Returning cached result', { cacheKey });
-                return cached;
+            // Step 2: Check cache for identical calculations (only if no external client)
+            if (!shouldUseExternalClient) {
+                const cacheKey = this._generateCacheKey(context);
+                const cached = await this.getCachedResult(cacheKey);
+                if (cached) {
+                    log.debug('Returning cached result', { cacheKey });
+                    return cached;
+                }
             }
 
             // Step 3: Discover all applicable discounts
@@ -58,12 +74,24 @@ export class DiscountRuleEngine {
 
             // Step 5: If approval required and not pre-approved, return approval request
             if (approvalRequired && !context.preApproved) {
+                const approvalThreshold = await this._getApprovalThreshold(businessId);
+                
+                // Create approval request
+                const approvalRequest = await this._createApprovalRequest(
+                    context, 
+                    applicableDiscounts, 
+                    userId, 
+                    businessId, 
+                    dbClient
+                );
+                
                 return {
                     success: false,
                     requiresApproval: true,
+                    approval_id: approvalRequest.approvalId,
                     message: 'This discount requires approval',
                     discounts: applicableDiscounts,
-                    approvalThreshold: await this._getApprovalThreshold(businessId)
+                    approvalThreshold
                 };
             }
 
@@ -83,7 +111,8 @@ export class DiscountRuleEngine {
                     stackedResult,
                     context,
                     userId,
-                    businessId
+                    businessId,
+                    dbClient // Pass the client
                 );
             }
 
@@ -95,7 +124,8 @@ export class DiscountRuleEngine {
                     stackedResult,
                     context,
                     userId,
-                    businessId
+                    businessId,
+                    dbClient // Pass the client
                 );
             }
 
@@ -141,9 +171,14 @@ export class DiscountRuleEngine {
                 };
             }
 
-            // Cache the result (only for preview mode or no allocation)
-            if (context.previewMode || !allocation) {
+            // Cache the result (only for preview mode or no allocation, and no external client)
+            if (!shouldUseExternalClient && (context.previewMode || !allocation)) {
+                const cacheKey = this._generateCacheKey(context);
                 await this.cacheResult(cacheKey, result, 300);
+            }
+
+            if (!shouldUseExternalClient) {
+                await dbClient.query('COMMIT');
             }
 
             log.info('Discount calculation complete', {
@@ -158,13 +193,85 @@ export class DiscountRuleEngine {
             return result;
 
         } catch (error) {
+            if (!shouldUseExternalClient) {
+                await dbClient.query('ROLLBACK');
+            }
             log.error('Error in calculateFinalPrice', {
                 error: error.message,
                 stack: error.stack,
                 context
             });
             throw error;
+        } finally {
+            if (!shouldUseExternalClient) {
+                dbClient.release();
+            }
         }
+    }
+
+    /**
+     * Create approval request
+     */
+    static async _createApprovalRequest(context, discounts, userId, businessId, client) {
+        const { amount, customerId, promoCode, transactionId, transactionType } = context;
+        
+        const totalDiscount = discounts.reduce((sum, d) => sum + parseFloat(d.discount_value || 0), 0);
+        const discountPercentage = amount > 0 ? (totalDiscount / amount) * 100 : 0;
+        const threshold = await this._getApprovalThreshold(businessId);
+
+        // Build approval data
+        const approvalData = {
+            business_id: businessId,
+            requested_by: userId,
+            original_amount: amount,
+            requested_discount: totalDiscount,
+            discount_percentage: discountPercentage,
+            reason: promoCode ? `Promo code: ${promoCode}` : 'Discount approval requested',
+            status: 'pending',
+            requires_approval: discountPercentage > threshold,
+            approval_threshold: threshold
+        };
+
+        // Add customer info
+        if (customerId) {
+            approvalData.reason = `${approvalData.reason} - Customer: ${customerId}`;
+        }
+
+        // Add transaction reference
+        if (transactionType === 'POS' && transactionId) {
+            approvalData.pos_transaction_id = transactionId;
+        } else if (transactionType === 'INVOICE' && transactionId) {
+            approvalData.invoice_id = transactionId;
+        }
+
+        // Insert approval
+        const columns = Object.keys(approvalData).join(', ');
+        const values = Object.values(approvalData);
+        const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+
+        const approvalResult = await client.query(
+            `INSERT INTO discount_approvals (${columns}, created_at, updated_at)
+             VALUES (${placeholders}, NOW(), NOW())
+             RETURNING id`,
+            values
+        );
+
+        const approvalId = approvalResult.rows[0].id;
+
+        // Store discount details
+        await client.query(
+            `UPDATE discount_approvals
+             SET approval_notes = $1
+             WHERE id = $2`,
+            [JSON.stringify(discounts.map(d => ({
+                type: d.rule_type,
+                id: d.id,
+                name: d.name || d.promo_code || d.tier_name || d.term_name,
+                value: d.discount_value
+            }))), approvalId]
+        );
+
+        return { approvalId };
     }
 
     /**
@@ -427,7 +534,7 @@ export class DiscountRuleEngine {
             // Get dynamic threshold
             const threshold = await DiscountSettingsService.getApprovalThreshold(businessId);
 
-            // Build approval data matching discount_approvals table structure
+            // Build approval data
             const approvalData = {
                 business_id: businessId,
                 requested_by: userId,
@@ -440,12 +547,10 @@ export class DiscountRuleEngine {
                 approval_threshold: threshold
             };
 
-            // Add customer info to reason if available
             if (customerId) {
                 approvalData.reason = `${approvalData.reason} - Customer: ${customerId}`;
             }
 
-            // Add transaction reference based on type
             if (transactionType === 'POS' && transactionId) {
                 approvalData.pos_transaction_id = transactionId;
             } else if (transactionType === 'INVOICE' && transactionId) {
@@ -466,7 +571,7 @@ export class DiscountRuleEngine {
 
             const approvalId = approvalResult.rows[0].id;
 
-            // Store discount details in approval_notes
+            // Store discount details
             if (discounts.length > 0) {
                 await client.query(
                     `UPDATE discount_approvals
@@ -601,17 +706,35 @@ export class DiscountRuleEngine {
 
     /**
      * Create allocation from calculation result
-     * FIXED: Passes correct field names to allocation service
+     * UPDATED: Accepts client parameter and validates line items
      */
-    static async _createAllocationFromResult(stackedResult, context, userId, businessId) {
+    static async _createAllocationFromResult(stackedResult, context, userId, businessId, client = null) {
         const { items, transactionId, transactionType } = context;
 
         if (!items || items.length === 0) {
+            log.warn('Cannot create allocation: No items provided', { transactionId });
             return null;
         }
 
+        // Ensure all line items have valid UUIDs
+        const validItems = items.filter(item => item.id && UUIDService.isValidUUID(item.id));
+        
+        if (validItems.length === 0) {
+            log.error('Cannot create allocation: No valid line item IDs', {
+                transactionId,
+                items: items.map(i => ({ id: i.id, type: i.type }))
+            });
+            return null;
+        }
+
+        log.debug('Creating allocation with valid items', {
+            transactionId,
+            validItemCount: validItems.length,
+            validItemIds: validItems.map(i => i.id)
+        });
+
         // Prepare line items for allocation
-        const lineItems = items.map(item => ({
+        const lineItems = validItems.map(item => ({
             id: item.id,
             type: item.type || 'service',
             amount: item.amount,
@@ -637,17 +760,18 @@ export class DiscountRuleEngine {
             allocation_method: 'PRO_RATA_AMOUNT',
             status: 'APPLIED',
             applied_at: new Date(),
-            lines: allocations  // allocations now have correct fields
+            lines: allocations.map(alloc => ({
+                ...alloc,
+                line_item_id: alloc.line_item_id // This must match the actual database ID
+            }))
         };
 
         // Add discount rule ID (required by constraint)
-        // Use volume/early/category for discount_rule_id
         const ruleDiscount = volumeDiscount || earlyDiscount || categoryDiscount;
         if (ruleDiscount) {
             allocationData.discount_rule_id = ruleDiscount.id;
         }
 
-        // Use promotional for promotional_discount_id
         if (promoDiscount) {
             allocationData.promotional_discount_id = promoDiscount.id;
         }
@@ -657,33 +781,61 @@ export class DiscountRuleEngine {
             throw new Error('Cannot create allocation: No discount rule or promotional discount ID provided');
         }
 
-        return await DiscountAllocationService.createAllocation(
-            allocationData,
-            userId,
-            businessId
-        );
+        // Use the provided client if available
+        if (client) {
+            return await DiscountAllocationService.createAllocationWithClient(
+                allocationData,
+                userId,
+                businessId,
+                client
+            );
+        } else {
+            return await DiscountAllocationService.createAllocation(
+                allocationData,
+                userId,
+                businessId
+            );
+        }
     }
 
     /**
      * Create journal entries from allocation
+     * UPDATED: Accepts client parameter
      */
-    static async _createJournalEntriesFromAllocation(allocation, stackedResult, context, userId, businessId) {
+    static async _createJournalEntriesFromAllocation(allocation, stackedResult, context, userId, businessId, client = null) {
         const transaction = {
             business_id: businessId,
             id: context.transactionId,
             type: context.transactionType || 'POS'
         };
 
-        return await DiscountAccountingService.createBulkDiscountJournalEntries(
-            transaction,
-            stackedResult.appliedDiscounts.map(d => ({
-                rule_type: d.rule_type,
-                discount_amount: d.calculatedDiscount,
-                allocation_id: allocation.id,
-                name: d.name || d.promo_code || d.tier_name || d.term_name
-            })),
-            userId
-        );
+        if (client) {
+            // Use client if provided
+            const { DiscountAccountingService } = await import('./discountAccountingService.js');
+            return await DiscountAccountingService.createBulkDiscountJournalEntriesWithClient(
+                transaction,
+                stackedResult.appliedDiscounts.map(d => ({
+                    rule_type: d.rule_type,
+                    discount_amount: d.calculatedDiscount,
+                    allocation_id: allocation.id,
+                    name: d.name || d.promo_code || d.tier_name || d.term_name
+                })),
+                userId,
+                client
+            );
+        } else {
+            const { DiscountAccountingService } = await import('./discountAccountingService.js');
+            return await DiscountAccountingService.createBulkDiscountJournalEntries(
+                transaction,
+                stackedResult.appliedDiscounts.map(d => ({
+                    rule_type: d.rule_type,
+                    discount_amount: d.calculatedDiscount,
+                    allocation_id: allocation.id,
+                    name: d.name || d.promo_code || d.tier_name || d.term_name
+                })),
+                userId
+            );
+        }
     }
 
     /**

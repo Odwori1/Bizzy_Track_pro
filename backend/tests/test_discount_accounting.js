@@ -1,10 +1,19 @@
 // File: ~/Bizzy_Track_pro/backend/tests/test_discount_accounting.js
 // PURPOSE: Test discount accounting service
-// PHASE 10.7: Complete test suite - FINAL VERSION with proper UUIDs
+// PHASE 10.7: Complete test suite - FIXED with proper UUIDs
 
 import { DiscountAccountingService } from '../app/services/discountAccountingService.js';
 import { DiscountCore } from '../app/services/discountCore.js';
 import { getClient } from '../app/utils/database.js';
+
+// Proper UUID generation function (RFC4122 compliant)
+function generateProperUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
 
 async function getValidUserId() {
     const client = await getClient();
@@ -50,14 +59,14 @@ async function ensureChartOfAccounts(businessId) {
             `SELECT COUNT(*) as count FROM chart_of_accounts WHERE business_id = $1`,
             [businessId]
         );
-        
+
         if (parseInt(result.rows[0].count) === 0) {
             console.log('📝 No chart of accounts found, inserting standard accounts...');
-            
+
             // Insert standard discount accounts
             await client.query(
                 `INSERT INTO chart_of_accounts (business_id, account_code, account_name, account_type)
-                 VALUES 
+                 VALUES
                     ($1, '4110', 'Sales Discounts - General', 'expense'),
                     ($1, '4111', 'Sales Discounts - Volume', 'expense'),
                     ($1, '4112', 'Sales Discounts - Early Payment', 'expense'),
@@ -76,14 +85,6 @@ async function ensureChartOfAccounts(businessId) {
     }
 }
 
-// Helper function to generate UUID-like strings for testing
-function generateTestUuid(prefix) {
-    // Generate a deterministic UUID-like string for testing
-    // Format: 00000000-0000-0000-0000-XXXXXXXXXXXX where X is the prefix padded
-    const padded = prefix.padStart(12, '0').slice(0, 12);
-    return `00000000-0000-0000-0000-${padded}`;
-}
-
 async function testDiscountAccounting() {
     console.log('\n🧪 TESTING DISCOUNT ACCOUNTING SERVICE');
     console.log('========================================\n');
@@ -92,13 +93,16 @@ async function testDiscountAccounting() {
     const testUserId = await getValidUserId();
     console.log(`Using user ID: ${testUserId}`);
 
-    // Generate test UUIDs
-    const testAllocationId1 = generateTestUuid('001');
-    const testAllocationId2 = generateTestUuid('002');
-    const testAllocationId3 = generateTestUuid('003');
-    const testAllocationId4 = generateTestUuid('004');
+    // Generate proper UUIDs for all test IDs
+    const testAllocationId1 = generateProperUUID();
+    const testAllocationId2 = generateProperUUID();
+    const testAllocationId3 = generateProperUUID();
+    const testAllocationId4 = generateProperUUID();
+    const transactionId1 = generateProperUUID();
+    const transactionId2 = generateProperUUID();
 
     console.log(`Using test allocation IDs: ${testAllocationId1}, ${testAllocationId2}, ${testAllocationId3}, ${testAllocationId4}`);
+    console.log(`Using transaction IDs: ${transactionId1}, ${transactionId2}`);
 
     // Ensure chart of accounts exists
     await ensureChartOfAccounts(testBusinessId);
@@ -186,7 +190,7 @@ async function testDiscountAccounting() {
     try {
         const transaction = {
             business_id: testBusinessId,
-            id: generateTestUuid('trans001'),
+            id: transactionId1,  // Use proper UUID
             type: 'POS'
         };
 
@@ -195,7 +199,7 @@ async function testDiscountAccounting() {
             name: 'WELCOME10',
             code: 'WELCOME10',
             discount_amount: 50000,
-            allocation_id: testAllocationId1
+            allocation_id: testAllocationId1  // Use proper UUID
         };
 
         const result = await DiscountAccountingService.createDiscountJournalEntry(
@@ -229,7 +233,7 @@ async function testDiscountAccounting() {
     try {
         const transaction = {
             business_id: testBusinessId,
-            id: generateTestUuid('trans002'),
+            id: transactionId2,  // Use proper UUID
             type: 'INVOICE'
         };
 
@@ -237,17 +241,17 @@ async function testDiscountAccounting() {
             {
                 rule_type: 'PROMOTIONAL',
                 discount_amount: 30000,
-                allocation_id: testAllocationId2
+                allocation_id: testAllocationId2  // Use proper UUID
             },
             {
                 rule_type: 'VOLUME',
                 discount_amount: 20000,
-                allocation_id: testAllocationId3
+                allocation_id: testAllocationId3  // Use proper UUID
             },
             {
                 rule_type: 'EARLY_PAYMENT',
                 discount_amount: 15000,
-                allocation_id: testAllocationId4
+                allocation_id: testAllocationId4  // Use proper UUID
             }
         ];
 
@@ -444,5 +448,14 @@ async function testDiscountAccounting() {
     console.log(`\n📈 SUMMARY: ${passed}/${tests.length} tests passed`);
 }
 
-// Run the tests
-testDiscountAccounting().catch(console.error);
+// Run with timeout protection
+const TEST_TIMEOUT = 60000; // 60 seconds
+const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Test suite timed out')), TEST_TIMEOUT);
+});
+
+Promise.race([testDiscountAccounting(), timeoutPromise])
+    .catch(error => {
+        console.error('❌ Test failed:', error.message);
+        process.exit(1);
+    });

@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountAllocationService.js
 // PURPOSE: Allocate discounts across line items for accounting
-// PHASE 10.6: COMPLETE VERSION - With correct customer and user column references
+// PHASE 10.6: COMPLETE VERSION - With transaction-safe allocation methods
 // DEPENDS ON: discountCore.js, discount_allocations table, discount_allocation_lines table
 
 import { getClient } from '../utils/database.js';
@@ -318,13 +318,14 @@ export class DiscountAllocationService {
 
     /**
      * Create discount allocation record with existing client connection
+     * UPDATED: Verifies line items exist before creating lines
      */
     static async createAllocationWithClient(data, userId, businessId, client) {
         try {
             // Generate allocation number using the existing client
             const allocationNumber = await this.generateAllocationNumber(businessId, client);
 
-            // Insert main allocation record using the existing client
+            // Insert main allocation record
             const allocationResult = await client.query(
                 `INSERT INTO discount_allocations (
                     business_id, discount_rule_id, promotional_discount_id,
@@ -350,8 +351,31 @@ export class DiscountAllocationService {
 
             const allocation = allocationResult.rows[0];
 
-            // Create allocation lines if provided (using the same client)
+            // Create allocation lines if provided
             if (data.lines && data.lines.length > 0) {
+                // Determine transaction type to validate correct line item table
+                const isPos = !!data.pos_transaction_id;
+                
+                // Verify all line_item_ids exist in the database
+                for (const line of data.lines) {
+                    let exists;
+                    if (isPos) {
+                        exists = await client.query(
+                            `SELECT id FROM pos_transaction_items WHERE id = $1`,
+                            [line.line_item_id]
+                        );
+                    } else {
+                        exists = await client.query(
+                            `SELECT id FROM invoice_line_items WHERE id = $1`,
+                            [line.line_item_id]
+                        );
+                    }
+                    
+                    if (exists.rows.length === 0) {
+                        throw new Error(`Line item ${line.line_item_id} does not exist in ${isPos ? 'pos_transaction_items' : 'invoice_line_items'}`);
+                    }
+                }
+                
                 await this.createAllocationLinesWithClient(allocation.id, data.lines, client);
             }
 
@@ -369,15 +393,14 @@ export class DiscountAllocationService {
                 }
             });
 
-            log.info('Discount allocation created with client', {
+            log.info('Discount allocation created within transaction', {
                 businessId,
                 userId,
                 allocationId: allocation.id,
                 allocationNumber
             });
 
-            // Return the allocation with lines
-            return await this.getAllocationWithLines(allocation.id, businessId, client);
+            return allocation;
 
         } catch (error) {
             log.error('Error creating allocation with client', {
@@ -774,11 +797,11 @@ export class DiscountAllocationService {
      */
     static async getAllocationWithDetails(allocationId, businessId) {
         const client = await getClient();
-        
+
         try {
             // Get allocation with void info - using full_name from users table
             const allocationResult = await client.query(
-                `SELECT 
+                `SELECT
                     da.*,
                     u.email as voided_by_email,
                     u.full_name as voided_by_name,
@@ -808,7 +831,7 @@ export class DiscountAllocationService {
             // Get transaction details
             let transactionDetails = null;
             let customerId = null;
-            
+
             if (allocation.pos_transaction_id) {
                 const transResult = await client.query(
                     `SELECT transaction_number, transaction_date, customer_id
@@ -830,21 +853,21 @@ export class DiscountAllocationService {
             // Get customer name if available
             if (customerId) {
                 const customerResult = await client.query(
-                    `SELECT 
-                        first_name, 
-                        last_name, 
+                    `SELECT
+                        first_name,
+                        last_name,
                         company_name,
                         customer_type
                      FROM customers WHERE id = $1`,
                     [customerId]
                 );
-                
+
                 if (customerResult.rows.length > 0) {
                     const cust = customerResult.rows[0];
                     if (cust.customer_type === 'company' && cust.company_name) {
                         transactionDetails.customer_name = cust.company_name;
                     } else {
-                        transactionDetails.customer_name = `${cust.first_name} ${cust.last_name}`;
+                        transactionDetails.customer_name = `${cust.first_name} ${cust.last_name}`.trim();
                     }
                 }
             }
@@ -854,7 +877,7 @@ export class DiscountAllocationService {
                 lines: linesResult.rows,
                 transaction: transactionDetails
             };
-            
+
         } catch (error) {
             log.error('Error getting allocation with details', { error: error.message, allocationId });
             throw error;
@@ -869,10 +892,10 @@ export class DiscountAllocationService {
      */
     static async getVoidedAllocations(businessId, startDate = null, endDate = null) {
         const client = await getClient();
-        
+
         try {
             let query = `
-                SELECT 
+                SELECT
                     da.id,
                     da.allocation_number,
                     da.total_discount_amount,
@@ -882,13 +905,13 @@ export class DiscountAllocationService {
                     u.email as voided_by_email,
                     u.full_name as voided_by_name,
                     COALESCE(pt.transaction_number, i.invoice_number) as transaction_number,
-                    CASE 
+                    CASE
                         WHEN da.pos_transaction_id IS NOT NULL THEN 'POS'
                         WHEN da.invoice_id IS NOT NULL THEN 'INVOICE'
                     END as transaction_type,
-                    CASE 
+                    CASE
                         WHEN c.customer_type = 'company' AND c.company_name IS NOT NULL THEN c.company_name
-                        ELSE c.first_name || ' ' || c.last_name
+                        ELSE CONCAT(c.first_name, ' ', c.last_name)
                     END as customer_name
                 FROM discount_allocations da
                 LEFT JOIN users u ON da.voided_by = u.id
@@ -898,27 +921,27 @@ export class DiscountAllocationService {
                 WHERE da.business_id = $1
                   AND da.status = 'VOID'
             `;
-            
+
             const params = [businessId];
             let paramIndex = 2;
-            
+
             if (startDate) {
                 query += ` AND da.voided_at >= $${paramIndex}`;
                 params.push(startDate);
                 paramIndex++;
             }
-            
+
             if (endDate) {
                 query += ` AND da.voided_at <= $${paramIndex}`;
                 params.push(endDate);
                 paramIndex++;
             }
-            
+
             query += ` ORDER BY da.voided_at DESC`;
-            
+
             const result = await client.query(query, params);
             return result.rows;
-            
+
         } catch (error) {
             log.error('Error getting voided allocations', { error: error.message });
             throw error;
@@ -932,10 +955,10 @@ export class DiscountAllocationService {
      */
     static async getVoidReasonStats(businessId, startDate = null, endDate = null) {
         const client = await getClient();
-        
+
         try {
             let query = `
-                SELECT 
+                SELECT
                     void_reason,
                     COUNT(*) as void_count,
                     SUM(total_discount_amount) as total_discount_voided,
@@ -946,27 +969,27 @@ export class DiscountAllocationService {
                   AND status = 'VOID'
                   AND void_reason IS NOT NULL
             `;
-            
+
             const params = [businessId];
             let paramIndex = 2;
-            
+
             if (startDate) {
                 query += ` AND voided_at >= $${paramIndex}`;
                 params.push(startDate);
                 paramIndex++;
             }
-            
+
             if (endDate) {
                 query += ` AND voided_at <= $${paramIndex}`;
                 params.push(endDate);
                 paramIndex++;
             }
-            
+
             query += ` GROUP BY void_reason ORDER BY void_count DESC`;
-            
+
             const result = await client.query(query, params);
             return result.rows;
-            
+
         } catch (error) {
             log.error('Error getting void reason stats', { error: error.message });
             throw error;
@@ -1118,9 +1141,9 @@ export class DiscountAllocationService {
                     pt.transaction_number,
                     pt.transaction_date,
                     pt.customer_id,
-                    CASE 
+                    CASE
                         WHEN c.customer_type = 'company' AND c.company_name IS NOT NULL THEN c.company_name
-                        ELSE c.first_name || ' ' || c.last_name
+                        ELSE CONCAT(c.first_name, ' ', c.last_name)
                     END as customer_name,
                     pt.total_amount as transaction_total,
                     pt.total_discount,
@@ -1144,9 +1167,9 @@ export class DiscountAllocationService {
                     i.invoice_number,
                     i.invoice_date,
                     i.customer_id,
-                    CASE 
+                    CASE
                         WHEN c.customer_type = 'company' AND c.company_name IS NOT NULL THEN c.company_name
-                        ELSE c.first_name || ' ' || c.last_name
+                        ELSE CONCAT(c.first_name, ' ', c.last_name)
                     END as customer_name,
                     i.total_amount as transaction_total,
                     i.total_discount,
@@ -1263,9 +1286,9 @@ export class DiscountAllocationService {
                     END as transaction_type,
                     COALESCE(pt.transaction_number, i.invoice_number) as transaction_number,
                     COALESCE(pt.customer_id, i.customer_id) as customer_id,
-                    CASE 
+                    CASE
                         WHEN c.customer_type = 'company' AND c.company_name IS NOT NULL THEN c.company_name
-                        ELSE c.first_name || ' ' || c.last_name
+                        ELSE CONCAT(c.first_name, ' ', c.last_name)
                     END as customer_name,
                     COUNT(dal.id) as line_count
                  FROM discount_allocations da
@@ -1279,7 +1302,7 @@ export class DiscountAllocationService {
                           da.total_discount_amount, da.allocation_method, da.status,
                           da.void_reason, da.voided_at,
                           pt.transaction_number, i.invoice_number,
-                          pt.customer_id, i.customer_id, 
+                          pt.customer_id, i.customer_id,
                           c.customer_type, c.company_name, c.first_name, c.last_name
                  ORDER BY da.created_at DESC`,
                 [businessId, startDate, endDate]

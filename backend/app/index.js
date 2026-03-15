@@ -137,6 +137,10 @@ import { timezoneMiddleware } from './middleware/timezone.js';
 import docsRoutes from './routes/docs.js';
 import timezoneTestRoutes from './routes/timezoneTestRoutes.js';
 
+// ================ IMPORT UUID SERVICE ================
+import { UUIDService } from './services/uuidService.js';
+import { log } from './utils/logger.js';
+
 // Load environment variables
 dotenv.config();
 
@@ -421,4 +425,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// =============================================================================
+// 🚀 EXPORT APP FOR SERVER.JS TO USE
+// =============================================================================
 export default app;

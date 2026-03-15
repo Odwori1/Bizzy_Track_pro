@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/tests/test_volume_discounts.js
 // PURPOSE: Test volume discount service
-// PHASE 10.5: Complete test suite - FIXED
+// PHASE 10.5: Complete test suite - FINAL FIX with proper cleanup and exit
 
 import { VolumeDiscountService } from '../app/services/volumeDiscountService.js';
 import { DiscountCore } from '../app/services/discountCore.js';
@@ -19,12 +19,31 @@ async function getValidUserId() {
 async function cleanupTestTiers(businessId) {
     const client = await getClient();
     try {
+        // Delete all test tiers
         await client.query(
             `DELETE FROM volume_discount_tiers
              WHERE business_id = $1
                 AND tier_name LIKE 'TEST%'`,
             [businessId]
         );
+
+        // Add specific cleanup for min_quantity: 2 tiers
+        await client.query(
+            `DELETE FROM volume_discount_tiers
+             WHERE business_id = $1
+                AND min_quantity = 2
+                AND tier_name LIKE 'TEST%'`,
+            [businessId]
+        );
+
+        // Clean up bulk import tiers with timestamp pattern
+        await client.query(
+            `DELETE FROM volume_discount_tiers
+             WHERE business_id = $1
+                AND tier_name LIKE 'TEST_BULK_%'`,
+            [businessId]
+        );
+
         console.log('🧹 Cleaned up test tiers');
     } finally {
         client.release();
@@ -38,7 +57,7 @@ async function testVolumeDiscounts() {
     const testBusinessId = 'ac7de9dd-7cc8-41c9-94f7-611a4ade5256';
     const testUserId = await getValidUserId();
     console.log(`Using user ID: ${testUserId}`);
-    
+
     // Get a valid category ID from the database
     let validCategoryId = null;
     try {
@@ -123,7 +142,7 @@ async function testVolumeDiscounts() {
         });
     }
 
-    // Test 3: Create volume discount tier (category-specific) - FIXED
+    // Test 3: Create volume discount tier (category-specific)
     try {
         if (!validCategoryId) {
             tests.push({
@@ -333,7 +352,7 @@ async function testVolumeDiscounts() {
         });
     }
 
-    // Test 10: Update tier - FIXED: Use parseFloat for string comparison
+    // Test 10: Update tier
     try {
         const tiers = await VolumeDiscountService.getTiers(testBusinessId, { tier_name: 'TEST_QUANTITY_5' });
 
@@ -537,7 +556,19 @@ async function testVolumeDiscounts() {
     });
 
     console.log(`\n📈 SUMMARY: ${passed}/${tests.length} tests passed`);
+    
+    // Force exit after tests complete to prevent timeout
+    console.log('\n✅ All tests completed. Exiting...');
+    
+    // Small delay to ensure all logs are written
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Forcefully exit the process
+    process.exit(0);
 }
 
-// Run the tests
-testVolumeDiscounts().catch(console.error);
+// Run the tests - no timeout wrapper needed since we handle exit ourselves
+testVolumeDiscounts().catch(error => {
+    console.error('❌ Test failed:', error);
+    process.exit(1);
+});

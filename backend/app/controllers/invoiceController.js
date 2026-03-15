@@ -4,26 +4,43 @@ import { log } from '../utils/logger.js';
 
 /**
  * PRODUCTION-READY INVOICE CONTROLLER
- * 
+ *
  * Features:
  * - ✅ Enhanced error handling for tax calculation failures
  * - ✅ Clear error messages for debugging
  * - ✅ Proper validation feedback
  * - ✅ Comprehensive logging
+ * - ✅ Discount and promo code handling
  */
 export const invoiceController = {
   async create(req, res, next) {
     try {
-      const invoiceData = req.body;
       const userId = req.user.userId;
       const businessId = req.user.businessId;
+      
+      // Build invoice data with all fields including promo_code
+      const invoiceData = {
+        customer_id: req.body.customer_id,
+        job_id: req.body.job_id,
+        line_items: req.body.line_items,
+        invoice_date: req.body.invoice_date || new Date(),
+        due_date: req.body.due_date,
+        notes: req.body.notes,
+        terms: req.body.terms,
+        // Discount related fields - CRITICAL for promo code functionality
+        promo_code: req.body.promo_code,           // This must be explicitly passed
+        pre_approved: req.body.pre_approved || false,
+        apply_discounts: req.body.apply_discounts !== false
+      };
 
       log.info('Creating invoice', {
         customerId: invoiceData.customer_id,
         jobId: invoiceData.job_id,
         userId,
         businessId,
-        lineItemsCount: invoiceData.line_items?.length || 0
+        lineItemsCount: invoiceData.line_items?.length || 0,
+        promoCode: invoiceData.promo_code,          // Log to verify it's being received
+        preApproved: invoiceData.pre_approved
       });
 
       // Validate required fields
@@ -74,7 +91,9 @@ export const invoiceController = {
         invoiceId: newInvoice.id,
         invoiceNumber: formattedInvoice.invoice_number,
         totalAmount: formattedInvoice.total_amount,
-        taxAmount: formattedInvoice.tax_amount
+        taxAmount: formattedInvoice.tax_amount,
+        promoCodeApplied: invoiceData.promo_code,
+        discountApplied: newInvoice.discount_info?.total_discount || 0
       });
 
       res.status(201).json({
@@ -297,7 +316,8 @@ export const invoiceController = {
       log.info('Payment recorded successfully', {
         invoiceId: id,
         amountPaid: paymentData.amount,
-        newBalance: formattedInvoice.balance_due
+        newBalance: formattedInvoice.balance_due,
+        earlyPaymentDiscount: updatedInvoice.early_payment_discount || 0
       });
 
       res.json({
@@ -360,7 +380,7 @@ export const invoiceController = {
         businessId
       );
 
-      // ✅ ADDED: Format invoice for display
+      // ✅ Format invoice for display
       const business = await businessService.getBusinessProfile(businessId);
       if (!business) {
         log.error('Business not found for status update formatting', { businessId });
