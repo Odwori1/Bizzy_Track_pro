@@ -1,5 +1,6 @@
 import express from 'express';
 import { posController } from '../controllers/posController.js';
+import { POSDiscountController } from '../controllers/posDiscountController.js';
 import {
   createPOSTransactionSchema,
   updatePOSTransactionSchema,
@@ -17,10 +18,23 @@ router.use(authenticate, setRLSContext);
 
 // POS Transaction Routes
 router.post(
-  '/transactions',
+  '/transactions-with-discount',
   requirePermission('pos:create'),
   validateRequest(createPOSTransactionSchema),
-  posController.createTransaction
+  POSDiscountController.createTransactionWithDiscount
+);
+
+router.post(
+  '/transactions/:id/apply-discount',
+  requirePermission('pos:update'),
+  validateRequest(updatePOSTransactionSchema),
+  POSDiscountController.applyDiscountToTransaction
+);
+
+router.get(
+  '/transactions/:id/discount-status',
+  requirePermission('pos:read'),
+  POSDiscountController.getDiscountStatus
 );
 
 router.get(

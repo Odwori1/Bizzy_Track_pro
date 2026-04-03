@@ -520,10 +520,12 @@ export class DiscountController {
                 customerId
             });
 
+            // FIXED: Pass amount and customerId as separate parameters instead of an object
             const result = await PromotionalDiscountService.validateAndApplyPromo(
                 businessId,
                 promoCode,
-                { amount, customerId }
+                amount,
+                customerId
             );
 
             return res.json({
@@ -1591,15 +1593,33 @@ export class DiscountController {
                 });
             }
 
+            // Map camelCase to snake_case for database
+            const dbData = {
+                discount_rule_id: allocationData.discountRuleId,
+                promotional_discount_id: allocationData.promotionalDiscountId,
+                invoice_id: allocationData.invoiceId,
+                pos_transaction_id: allocationData.posTransactionId,
+                total_discount_amount: allocationData.totalDiscountAmount,
+                allocation_method: allocationData.allocationMethod,
+                status: allocationData.status,
+                applied_at: allocationData.appliedAt,
+                lines: allocationData.lines?.map(line => ({
+                    line_item_id: line.lineItemId,
+                    line_amount: line.originalAmount,  // Note: mapping originalAmount to line_amount
+                    discount_amount: line.discountAmount,
+                    allocation_weight: line.allocationWeight
+                }))
+            };
+
             log.info('Creating discount allocation', {
                 businessId,
                 userId,
-                method: allocationData.allocationMethod,
-                amount: allocationData.totalDiscountAmount
+                method: dbData.allocation_method,
+                amount: dbData.total_discount_amount
             });
 
             const result = await DiscountAllocationService.createAllocation(
-                allocationData,
+                dbData,
                 userId,
                 businessId
             );

@@ -91,6 +91,9 @@ import discountRoutes from './routes/discountRoutes.js';
 import discountAnalyticsRoutes from './routes/discountAnalyticsRoutes.js';
 import discountSettingsRoutes from './routes/discountSettingsRoutes.js';
 
+//refund routes
+import refundRoutes from './routes/refundRoutes.js';
+
 // Discount integration routes
 import posDiscountRoutes from './routes/posDiscountRoutes.js';
 import invoiceDiscountRoutes from './routes/invoiceDiscountRoutes.js';
@@ -270,6 +273,8 @@ app.use('/api/discounts', discountRoutes);
 app.use('/api/discounts/analytics', discountAnalyticsRoutes);
 app.use('/api/discounts/settings', discountSettingsRoutes);
 
+//refund routes
+app.use('/api/refunds', refundRoutes);
 
 // Discount integration routes
 app.use('/api/pos', posDiscountRoutes);

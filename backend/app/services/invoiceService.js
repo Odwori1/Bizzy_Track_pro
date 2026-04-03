@@ -606,18 +606,38 @@ export const invoiceService = {
           await discountClient.query('BEGIN');
 
           // Prepare items for discount calculation using actual database IDs
-          const discountItems = processedLineItems.map(item => ({
-            id: item.id, // This is now the actual database UUID
-            amount: item.amount,
-            quantity: item.quantity,
-            type: item.type
-          }));
+          const discountItems = [];
+          for (const item of invoiceData.line_items) {
+            const itemId = item.service_id || item.product_id;
+            
+            if (!itemId) {
+              // ✅ FIX: Use UUIDService to get a real UUID instead of manual- prefix
+              const generatedId = await UUIDService.getUUID({
+                context: 'invoice_discount_item',
+                useCache: true
+              });
+              
+              discountItems.push({
+                id: generatedId,  // Now a real UUID
+                amount: item.unit_price,
+                quantity: item.quantity,
+                type: item.item_type || (item.service_id ? 'service' : 'product')
+              });
+            } else {
+              discountItems.push({
+                id: itemId,
+                amount: item.unit_price,
+                quantity: item.quantity,
+                type: item.item_type || (item.service_id ? 'service' : 'product')
+              });
+            }
+          }
 
           log.info('Calculating discounts for invoice after line items created', {
             promoCode: invoiceData.promo_code,  // This should now show the actual promo code
             itemCount: discountItems.length,
             subtotal,
-            lineItemIds: discountItems.map(i => i.id)
+            itemIds: discountItems.map(i => i.id) // All are now proper UUIDs
           });
 
           // Calculate and apply discounts with the actual database IDs

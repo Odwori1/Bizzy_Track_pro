@@ -588,6 +588,7 @@ export class POSService {
           product_id: productId || null,
           inventory_item_id: inventoryItemId || null,
           tax_rate: taxCalculation.taxRate,
+          tax_category_code: taxCalculation.taxCategoryCode,
           total_price: itemTotal // Store total_price for later use
         });
 
@@ -626,12 +627,14 @@ export class POSService {
                 const itemId = item.service_id || item.product_id;
 
                 if (!itemId) {
+                  // ✅ FIX: Use UUIDService to get a real UUID instead of manual- prefix
                   const generatedId = await UUIDService.getUUID({
                     context: 'pos_discount_item',
                     useCache: true
                   });
+                  
                   discountItems.push({
-                    id: generatedId,
+                    id: generatedId,  // Now a real UUID
                     amount: item.unit_price,
                     quantity: item.quantity,
                     type: item.item_type || (item.service_id ? 'service' : 'product')
@@ -649,7 +652,8 @@ export class POSService {
               log.info('Calculating discounts for POS transaction', {
                   promoCode: transactionData.promo_code,
                   itemCount: discountItems.length,
-                  subtotal: totalSubtotal
+                  subtotal: totalSubtotal,
+                  itemIds: discountItems.map(i => i.id) // All are now proper UUIDs
               });
 
               const discountCheck = await DiscountRuleEngine.calculateFinalPrice({
@@ -838,91 +842,103 @@ export class POSService {
           const itemTotalPrice = item.quantity * item.unit_price;
 
           // CORRECTED INSERT: Now matches schema exactly with all required columns
-          const itemResult = await client.query(
-              `INSERT INTO pos_transaction_items (
-                  id, 
-                  business_id, 
-                  pos_transaction_id, 
-                  product_id, 
-                  inventory_item_id, 
-                  service_id,
-                  equipment_id, 
-                  booking_id,
-                  item_type, 
-                  item_name, 
-                  quantity, 
-                  unit_price, 
-                  total_price,
-                  discount_amount,
-                  tax_rate, 
-                  tax_category_code, 
-                  created_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
-              RETURNING id, product_id, inventory_item_id, service_id, equipment_id, booking_id,
-                        item_type, item_name, quantity, unit_price, discount_amount, total_price,
-                        tax_rate, tax_category_code, created_at`,
-              [
-                  transactionItemId,                    // $1 - id
-                  businessId,                            // $2 - business_id
-                  transaction.id,                        // $3 - pos_transaction_id
-                  item.product_id || null,               // $4
-                  item.inventory_item_id || null,        // $5
-                  item.service_id || null,               // $6
-                  item.equipment_id || null,             // $7
-                  item.booking_id || null,               // $8
-                  item.item_type,                         // $9
-                  item.item_name,                         // $10
-                  item.quantity,                          // $11
-                  item.unit_price,                        // $12
-                  itemTotalPrice,                         // $13 - total_price (calculated)
-                  item.discount_amount || 0,              // $14
-                  item.tax_rate,                          // $15
-                  item.tax_category_code                  // $16
-              ]
-          );
+          try {
+            const itemResult = await client.query(
+                `INSERT INTO pos_transaction_items (
+                    id,
+                    business_id,
+                    pos_transaction_id,
+                    product_id,
+                    inventory_item_id,
+                    service_id,
+                    equipment_id,
+                    booking_id,
+                    item_type,
+                    item_name,
+                    quantity,
+                    unit_price,
+                    total_price,
+                    discount_amount,
+                    tax_rate,
+                    tax_category_code,
+                    created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+                RETURNING id, product_id, inventory_item_id, service_id, equipment_id, booking_id,
+                          item_type, item_name, quantity, unit_price, discount_amount, total_price,
+                          tax_rate, tax_category_code, created_at`,
+                [
+                    transactionItemId,                    // $1 - id
+                    businessId,                            // $2 - business_id
+                    transaction.id,                        // $3 - pos_transaction_id
+                    item.product_id || null,               // $4
+                    item.inventory_item_id || null,        // $5
+                    item.service_id || null,               // $6
+                    item.equipment_id || null,             // $7
+                    item.booking_id || null,               // $8
+                    item.item_type,                         // $9
+                    item.item_name,                          // $10
+                    item.quantity,                           // $11
+                    item.unit_price,                         // $12
+                    itemTotalPrice,                          // $13 - total_price (calculated)
+                    item.discount_amount || 0,               // $14
+                    item.tax_rate,                           // $15
+                    // 🔥 FIX: Ensure tax_category_code is never null
+                    item.tax_category_code || 'STANDARD_GOODS' // $16
+                ]
+            );
 
-          const insertedItem = itemResult.rows[0];
+            const insertedItem = itemResult.rows[0];
 
-          // Calculate tax amount for audit trail (since tax_amount is nullable)
-          const calculatedTaxAmount = item.quantity * item.unit_price * (item.tax_rate || 0) / 100;
+            // Calculate tax amount for audit trail (since tax_amount is nullable)
+            const calculatedTaxAmount = item.quantity * item.unit_price * (item.tax_rate || 0) / 100;
 
-          // ✅ STEP 6: CREATE TAX AUDIT TRAIL
-          await POSTaxCalculator.createTaxTransaction(
-              client,
-              businessId,
-              transaction.id,
-              item,
-              {
-                  taxRate: item.tax_rate,
-                  taxAmount: calculatedTaxAmount,
-                  taxCategoryCode: item.tax_category_code,
-                  itemTotal: itemTotalPrice
-              },
-              transactionData.transaction_date || new Date(),
-              customerType,
-              transactionData.customer_id || null
-          );
+            // ✅ STEP 6: CREATE TAX AUDIT TRAIL
+            await POSTaxCalculator.createTaxTransaction(
+                client,
+                businessId,
+                transaction.id,
+                item,
+                {
+                    taxRate: item.tax_rate,
+                    taxAmount: calculatedTaxAmount,
+                    taxCategoryCode: item.tax_category_code,
+                    itemTotal: itemTotalPrice
+                },
+                transactionData.transaction_date || new Date(),
+                customerType,
+                transactionData.customer_id || null
+            );
 
-          processedTransactionItems.push({
-              id: insertedItem.id,
-              product_id: insertedItem.product_id,
-              service_id: insertedItem.service_id,
-              type: insertedItem.item_type,
-              amount: insertedItem.unit_price,
-              quantity: insertedItem.quantity,
-              total_price: insertedItem.total_price,
-              tax_amount: calculatedTaxAmount
-          });
+            processedTransactionItems.push({
+                id: insertedItem.id,
+                product_id: insertedItem.product_id,
+                service_id: insertedItem.service_id,
+                type: insertedItem.item_type,
+                amount: insertedItem.unit_price,
+                quantity: insertedItem.quantity,
+                total_price: insertedItem.total_price,
+                tax_amount: calculatedTaxAmount
+            });
 
-          log.debug('POS item inserted successfully', {
-              itemId: insertedItem.id,
-              transactionId: transaction.id,
-              itemName: insertedItem.item_name,
-              quantity: insertedItem.quantity,
-              unitPrice: insertedItem.unit_price,
-              totalPrice: insertedItem.total_price,
-              taxRate: insertedItem.tax_rate
-          });
+            log.debug('POS item inserted successfully', {
+                itemId: insertedItem.id,
+                transactionId: transaction.id,
+                itemName: insertedItem.item_name,
+                quantity: insertedItem.quantity,
+                unitPrice: insertedItem.unit_price,
+                totalPrice: insertedItem.total_price,
+                taxRate: insertedItem.tax_rate
+            });
+          } catch (itemError) {
+            log.error('Failed to insert POS item', {
+                error: itemError.message,
+                item: item.item_name,
+                missingFields: {
+                    tax_category_code: !item.tax_category_code
+                }
+            });
+            throw itemError;
+          }
       }
 
       // ================ CREATE DISCOUNT ALLOCATION AFTER ITEMS EXIST ================

@@ -333,11 +333,12 @@ export class EarlyPaymentService {
         const client = await getClient();
 
         try {
-            // Get invoice details
+            // Get invoice details with customer payment terms
             const invoiceResult = await client.query(
-                `SELECT i.*, c.id as customer_id, c.terms_id as customer_terms_id
+                `SELECT i.*, c.id as customer_id, cpt.term_id as customer_terms_id
                  FROM invoices i
                  JOIN customers c ON i.customer_id = c.id
+                 LEFT JOIN customer_payment_terms cpt ON c.id = cpt.customer_id
                  WHERE i.id = $1`,
                 [invoiceId]
             );
@@ -377,7 +378,7 @@ export class EarlyPaymentService {
                     eligible: false,
                     reason: 'No payment terms found',
                     discountAmount: 0,
-                    finalAmount: invoice.total_amount
+                    finalAmount: parseFloat(invoice.total_amount)
                 };
             }
 
@@ -393,7 +394,7 @@ export class EarlyPaymentService {
                     eligible: false,
                     reason: `Payment after ${terms.discount_days} days (${daysDiff} days)`,
                     discountAmount: 0,
-                    finalAmount: invoice.total_amount,
+                    finalAmount: parseFloat(invoice.total_amount),
                     daysLate: daysDiff - terms.discount_days,
                     netDueDate: this.calculateNetDueDate(invoice.invoice_date, terms.net_days)
                 };
@@ -401,7 +402,7 @@ export class EarlyPaymentService {
 
             // Calculate discount
             const discountAmount = DiscountCore.calculateDiscount(
-                invoice.total_amount,
+                parseFloat(invoice.total_amount),
                 'PERCENTAGE',
                 parseFloat(terms.discount_percentage)
             );
@@ -410,7 +411,7 @@ export class EarlyPaymentService {
                 eligible: true,
                 terms: terms,
                 discountAmount: discountAmount,
-                finalAmount: invoice.total_amount - discountAmount,
+                finalAmount: parseFloat(invoice.total_amount) - discountAmount,
                 daysEarly: terms.discount_days - daysDiff,
                 paymentDate: paymentDate,
                 invoiceDate: invoice.invoice_date,

@@ -54,9 +54,9 @@ export class POSDiscountController {
             // Check if approval required
             if (discountCheck.requiresApproval && !transactionData.pre_approved) {
                 // Calculate total amount directly from items (SAFE approach)
-                const totalAmount = transactionData.items.reduce((sum, item) => 
+                const totalAmount = transactionData.items.reduce((sum, item) =>
                     sum + (item.unit_price * item.quantity), 0);
-                
+
                 // Create approval request with explicit amount from transaction data
                 const approvalRequest = await DiscountRuleEngine.submitForApproval({
                     businessId,
@@ -87,14 +87,14 @@ export class POSDiscountController {
             if (discountCheck.totalDiscount > 0) {
                 transactionData.discount_amount = discountCheck.totalDiscount;
                 transactionData.total_discount = discountCheck.totalDiscount;
-                
+
                 // Make sure discount_breakdown is a JSON string, not double-stringified
                 if (typeof discountCheck.appliedDiscounts === 'string') {
                     transactionData.discount_breakdown = discountCheck.appliedDiscounts;
                 } else {
                     transactionData.discount_breakdown = JSON.stringify(discountCheck.appliedDiscounts);
                 }
-                
+
                 transactionData.final_amount = discountCheck.finalAmount;
             }
 
@@ -110,7 +110,10 @@ export class POSDiscountController {
                     item_name: item.item_name,
                     quantity: item.quantity,
                     unit_price: item.unit_price,
-                    discount_amount: item.discount_amount || 0
+                    discount_amount: item.discount_amount || 0,
+                    // 🔥 FIX: Add tax_category_code (critical for POSService line 590)
+                    tax_category_code: item.tax_category_code || 
+                                      (item.item_type === 'product' ? 'STANDARD_GOODS' : 'SERVICES')
                 })),
                 payment_method: transactionData.payment_method,
                 payment_status: transactionData.payment_status || 'completed',
