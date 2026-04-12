@@ -10,6 +10,7 @@ import { TaxService } from './taxService.js';
 import { DiscountRuleEngine } from './discountRuleEngine.js';
 import { DiscountAllocationService } from './discountAllocationService.js';
 import { DiscountAccountingService } from './discountAccountingService.js';
+import { RefundApprovalService } from './refundApprovalService.js';
 
 export class RefundService {
 
@@ -34,6 +35,23 @@ export class RefundService {
         refundData.original_transaction_type
       );
 
+      // Calculate the effective unit price based on final amount and original quantity
+      // This accounts for discounts and taxes applied to the original transaction
+      const originalQuantity = await this.getOriginalTransactionQuantity(
+        client,
+        refundData.original_transaction_id,
+        refundData.original_transaction_type
+      );
+
+      const effectiveUnitPrice = parseFloat(transaction.final_amount) / originalQuantity;
+
+      log.info('Effective unit price calculated for refund', {
+        originalTransactionId: refundData.original_transaction_id,
+        finalAmount: transaction.final_amount,
+        originalQuantity: originalQuantity,
+        effectiveUnitPrice: effectiveUnitPrice
+      });
+
       // Validate refund amount doesn't exceed original
       const availableRefund = parseFloat(transaction.final_amount) -
                               parseFloat(transaction.refunded_amount || 0);
@@ -51,10 +69,23 @@ export class RefundService {
       );
       const refundNumber = refundNumberResult.rows[0].refund_number;
 
-      // Refunds do not require approval - original transaction was already approved
-      // Approval is for discounts, not refunds
-      let requiresApproval = false;
+      // Check if refund requires approval based on business settings
+      const approvalCheck = await RefundApprovalService.requiresApproval(
+          businessId,
+          refundData.total_refunded
+      );
+      
+      let requiresApproval = approvalCheck.requires_approval;
       let approvalId = null;
+      
+      log.info('Refund approval check', {
+          businessId,
+          refundAmount: refundData.total_refunded,
+          requiresApproval,
+          thresholdAmount: approvalCheck.threshold_amount,
+          thresholdPercentage: approvalCheck.threshold_percentage,
+          reason: approvalCheck.reason
+      });
 
       // Create refund record
       const refundResult = await client.query(
@@ -87,7 +118,7 @@ export class RefundService {
 
       const refund = refundResult.rows[0];
 
-      // Insert refund items with proper quantity rounding
+      // Insert refund items with proper quantity rounding based on effective price
       if (refundData.items && refundData.items.length > 0) {
         for (const item of refundData.items) {
           // Validate original line item exists
@@ -101,26 +132,34 @@ export class RefundService {
             throw new Error(`Original line item not found: ${item.original_line_item_id}`);
           }
 
-          // Validate quantity doesn't exceed available
           const originalItem = lineItemCheck.rows[0];
-          const availableQty = parseFloat(originalItem.quantity) - 
-                               parseFloat(originalItem.already_refunded_qty || 0);
-          
+
+          // Calculate the correct quantity based on effective price (not list price)
+          // This ensures inventory accuracy when discounts and taxes were applied
+          const correctQuantity = parseFloat(item.subtotal_refunded) / effectiveUnitPrice;
+
           // Round quantity to 4 decimal places for precision
-          const roundedQuantity = Math.round(item.quantity_refunded * 10000) / 10000;
+          const roundedQuantity = Math.round(correctQuantity * 10000) / 10000;
 
           // Validate minimum quantity (must be > 0.0000)
           if (roundedQuantity <= 0.0000) {
             throw new Error(
-              `Refund quantity ${item.quantity_refunded} rounds to ${roundedQuantity}, which is too small. Minimum refund quantity is 0.0001 units.`
+              `Refund quantity ${correctQuantity} rounds to ${roundedQuantity}, which is too small. Minimum refund quantity is 0.0001 units.`
             );
           }
-          
+
+          // Validate quantity doesn't exceed available using original item quantity
+          const availableQty = parseFloat(originalItem.quantity) -
+                               parseFloat(originalItem.already_refunded_qty || 0);
+
           if (roundedQuantity > availableQty + 0.0001) {
             throw new Error(
               `Refund quantity ${roundedQuantity} exceeds available quantity ${availableQty}`
             );
           }
+
+          // Store the calculated quantity in the item for later use
+          item.quantity_refunded = roundedQuantity;
 
           await client.query(
             `INSERT INTO refund_items (
@@ -128,7 +167,7 @@ export class RefundService {
               product_id, service_id, item_name,
               quantity_refunded, unit_price, subtotal_refunded,
               discount_refunded, tax_refunded, total_refunded, reason
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, 
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7,
                       ROUND($8::numeric, 4),  -- Round quantity to 4 decimals
                       $9, $10, $11, $12, $13, $14)`,
             [
@@ -139,7 +178,7 @@ export class RefundService {
               item.product_id || null,
               item.service_id || null,
               item.item_name,
-              roundedQuantity,  // Use rounded quantity
+              roundedQuantity,  // Use calculated quantity based on effective price
               item.unit_price,
               item.subtotal_refunded,
               item.discount_refunded || 0,
@@ -166,10 +205,38 @@ export class RefundService {
         }
       });
 
-      await client.query('COMMIT');
-
-      // Process refund immediately (no approval required)
-      return await this.processRefund(refund.id, userId, businessId);
+      if (requiresApproval) {
+          // Create approval request
+          const approvalRequest = await RefundApprovalService.createApprovalRequest(
+              businessId,
+              refund.id,
+              userId,
+              { metadata: { approval_reason: approvalCheck.reason } }
+          );
+          approvalId = approvalRequest.id;
+          
+          log.info('Refund requires approval', {
+              refundId: refund.id,
+              refundAmount: refundData.total_refunded,
+              thresholdAmount: approvalCheck.threshold_amount,
+              reason: approvalCheck.reason
+          });
+          
+          await client.query('COMMIT');
+          
+          return {
+              success: true,
+              refund: this.formatRefund(refund),
+              requires_approval: true,
+              approval_id: approvalId,
+              approval_reason: approvalCheck.reason,
+              message: 'Refund created and pending approval'
+          };
+      } else {
+          await client.query('COMMIT');
+          // Process refund immediately (no approval required)
+          return await this.processRefund(refund.id, userId, businessId);
+      }
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -178,6 +245,37 @@ export class RefundService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Get the total quantity from the original transaction
+   * @param {Object} client - Database client
+   * @param {string} transactionId - Original transaction ID
+   * @param {string} transactionType - Transaction type (POS/INVOICE)
+   * @returns {Promise<number>} Total quantity
+   */
+  static async getOriginalTransactionQuantity(client, transactionId, transactionType) {
+    let result;
+
+    if (transactionType === 'POS') {
+      result = await client.query(
+        `SELECT COALESCE(SUM(quantity), 0) as total_quantity
+         FROM pos_transaction_items
+         WHERE pos_transaction_id = $1`,
+        [transactionId]
+      );
+    } else if (transactionType === 'INVOICE') {
+      result = await client.query(
+        `SELECT COALESCE(SUM(quantity), 0) as total_quantity
+         FROM invoice_items
+         WHERE invoice_id = $1`,
+        [transactionId]
+      );
+    } else {
+      throw new Error(`Invalid transaction type: ${transactionType}`);
+    }
+
+    return parseFloat(result.rows[0].total_quantity);
   }
 
   /**
@@ -218,11 +316,11 @@ export class RefundService {
           `SELECT * FROM check_refund_wallet_sufficiency($1, $2, $3)`,
           [businessId, refund.refund_method, refund.total_refunded]
         );
-        
+
         if (!walletCheck.rows[0].sufficient) {
           throw new Error(walletCheck.rows[0].message);
         }
-        
+
         log.info('Wallet balance verified', {
           refundId,
           method: refund.refund_method,
@@ -785,7 +883,7 @@ export class RefundService {
 
     if (transactionType === 'POS') {
       const result = await client.query(
-        `SELECT id, transaction_number, final_amount, refunded_amount, refund_status, status
+        `SELECT id, transaction_number, final_amount, refunded_amount, refund_status, status, total_amount
          FROM pos_transactions
          WHERE id = $1 AND business_id = $2`,
         [transactionId, businessId]

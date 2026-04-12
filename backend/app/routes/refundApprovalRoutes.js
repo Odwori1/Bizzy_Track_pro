@@ -13,15 +13,11 @@ const router = express.Router();
 // All routes require authentication
 router.use(authenticate);
 
-// ============================================================================
-// SETTINGS ROUTES - Requires configure permission
-// ============================================================================
+// Settings routes - requires configure permission
 router.get('/settings', requirePermission('refund_approval:configure'), RefundApprovalController.getSettings);
 router.put('/settings', requirePermission('refund_approval:configure'), RefundApprovalController.updateSettings);
 
-// ============================================================================
-// CHECK ROUTE - Anyone can check (no permission required for preview)
-// ============================================================================
+// Check route - anyone can check (no permission required for preview)
 router.post('/check', 
     validateRequest(Joi.object({
         amount: Joi.number().positive().required(),
@@ -30,25 +26,17 @@ router.post('/check',
     RefundApprovalController.checkApprovalRequired
 );
 
-// ============================================================================
-// PENDING APPROVALS - Requires view permission
-// ============================================================================
+// Pending approvals - requires view permission
 router.get('/pending', requirePermission('refund_approval:view_pending'), RefundApprovalController.getPendingApprovals);
 router.get('/my-pending', RefundApprovalController.getUserPendingApprovals);
 
-// ============================================================================
-// APPROVAL BY ID - Users can view their own, admins can view any
-// ============================================================================
+// Approval by ID
 router.get('/:approvalId', RefundApprovalController.getApprovalById);
 
-// ============================================================================
-// STATISTICS - Requires stats permission
-// ============================================================================
+// Statistics - requires stats permission
 router.get('/stats', requirePermission('refund_approval:view_stats'), RefundApprovalController.getApprovalStats);
 
-// ============================================================================
-// APPROVAL ACTIONS - Requires specific permissions
-// ============================================================================
+// Approval actions - requires approve/reject permissions
 router.post('/:approvalId/approve', requirePermission('refund_approval:approve'), RefundApprovalController.approveRefund);
 router.post('/:approvalId/reject', requirePermission('refund_approval:reject'), RefundApprovalController.rejectRefund);
 

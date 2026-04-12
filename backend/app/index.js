@@ -93,6 +93,7 @@ import discountSettingsRoutes from './routes/discountSettingsRoutes.js';
 
 //refund routes
 import refundRoutes from './routes/refundRoutes.js';
+import refundApprovalRoutes from './routes/refundApprovalRoutes.js';
 
 // Discount integration routes
 import posDiscountRoutes from './routes/posDiscountRoutes.js';
@@ -109,6 +110,9 @@ import purchaseTaxRoutes from './routes/purchaseTaxRoutes.js';
 import vendorPaymentRoutes from './routes/vendorPaymentRoutes.js';
 // tax dashboard
 import taxDashboardRoutes from './routes/taxDashboardRoutes.js';
+
+// Add with other accounting routes
+import openingBalanceRoutes from './routes/openingBalanceRoutes.js';
 
 
 //additional invoice routes
@@ -275,6 +279,7 @@ app.use('/api/discounts/settings', discountSettingsRoutes);
 
 //refund routes
 app.use('/api/refunds', refundRoutes);
+app.use('/api/refund-approval', refundApprovalRoutes);
 
 // Discount integration routes
 app.use('/api/pos', posDiscountRoutes);
@@ -293,6 +298,9 @@ app.use('/api/tax/reports', taxDashboardRoutes);
 app.use('/api/supplier-compliance', supplierComplianceRoutes);
 app.use('/api/purchase-tax', purchaseTaxRoutes);
 app.use('/api/vendor-payments', vendorPaymentRoutes);
+
+//opening balance routes
+app.use('/api/accounting/opening-balances', openingBalanceRoutes);
 
 //department routes
 app.use('/api/departments', departmentRoutes);
