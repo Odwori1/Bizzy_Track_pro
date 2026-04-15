@@ -111,8 +111,14 @@ import vendorPaymentRoutes from './routes/vendorPaymentRoutes.js';
 // tax dashboard
 import taxDashboardRoutes from './routes/taxDashboardRoutes.js';
 
+// Add import with other route imports
+import taxGLRoutes from './routes/taxGLRoutes.js';
+
 // Add with other accounting routes
 import openingBalanceRoutes from './routes/openingBalanceRoutes.js';
+
+// Add import with other route imports (around line 20-30)
+import financialStatementRoutes from './routes/financialStatementRoutes.js';
 
 
 //additional invoice routes
@@ -272,6 +278,9 @@ app.use('/api/analytics/sales', salesAnalyticsRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/tax', taxRoutes);
 
+// Add after other accounting routes (around line where other routes are registered)
+app.use('/api/accounting/tax', taxGLRoutes);
+
 //discount accounting routes
 app.use('/api/discounts', discountRoutes);
 app.use('/api/discounts/analytics', discountAnalyticsRoutes);
@@ -301,6 +310,9 @@ app.use('/api/vendor-payments', vendorPaymentRoutes);
 
 //opening balance routes
 app.use('/api/accounting/opening-balances', openingBalanceRoutes);
+
+// Add after other accounting routes (around line where other routes are registered)
+app.use('/api/accounting/statements', financialStatementRoutes);
 
 //department routes
 app.use('/api/departments', departmentRoutes);
