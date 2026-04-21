@@ -84,14 +84,15 @@ export class ProductService {
         throw new Error('SKU already exists in products or inventory items');
       }
 
-      // Insert product
+      // Insert product with inventory_item_id field
       const result = await client.query(
         `INSERT INTO products (
           business_id, name, description, sku, barcode, category_id,
           cost_price, selling_price, current_stock, min_stock_level,
           max_stock_level, unit_of_measure, is_active, has_variants,
-          variant_data, image_urls, tags, tax_category_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          variant_data, image_urls, tags, tax_category_code,
+          inventory_item_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         RETURNING *`,
         [
           businessId,
@@ -111,7 +112,8 @@ export class ProductService {
           productData.variant_data || null,
           productData.image_urls || [],
           productData.tags || [],
-          productData.tax_category_code || 'STANDARD_GOODS'
+          productData.tax_category_code || 'STANDARD_GOODS',
+          productData.inventory_item_id || null
         ]
       );
 
@@ -152,6 +154,7 @@ export class ProductService {
           cost_price: product.cost_price,
           selling_price: product.selling_price,
           tax_category_code: product.tax_category_code,
+          inventory_item_id: product.inventory_item_id,
           auto_inventory_created: productData.auto_create_inventory || false
         }
       });
@@ -177,8 +180,8 @@ export class ProductService {
         SELECT
           p.*,
           ic.name as category_name,
-          ptc.category_name as tax_category_name,  -- NEW
-          ptc.global_treatment as tax_treatment,   -- NEW
+          ptc.category_name as tax_category_name,
+          ptc.global_treatment as tax_treatment,
           CASE
             WHEN p.current_stock <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
             WHEN p.current_stock = 0 THEN 'out_of_stock'
@@ -200,7 +203,7 @@ export class ProductService {
              AND it.created_at >= CURRENT_DATE - INTERVAL '30 days') as recent_sales_count
         FROM products p
         LEFT JOIN inventory_categories ic ON p.category_id = ic.id
-        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code  -- NEW JOIN
+        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code
         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
         LEFT JOIN product_variants pv ON p.id = pv.product_id AND pv.is_active = true
         WHERE p.business_id = $1
@@ -293,8 +296,8 @@ export class ProductService {
         SELECT
           p.*,
           ic.name as category_name,
-          ptc.category_name as tax_category_name,  -- NEW
-          ptc.global_treatment as tax_treatment,   -- NEW
+          ptc.category_name as tax_category_name,
+          ptc.global_treatment as tax_treatment,
           CASE
             WHEN p.current_stock <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
             WHEN p.current_stock = 0 THEN 'out_of_stock'
@@ -314,7 +317,7 @@ export class ProductService {
            WHERE pti.product_id = p.id) as total_sold
         FROM products p
         LEFT JOIN inventory_categories ic ON p.category_id = ic.id
-        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code  -- NEW JOIN
+        LEFT JOIN product_tax_categories ptc ON p.tax_category_code = ptc.category_code
         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
         WHERE p.business_id = $1 AND p.id = $2
       `;

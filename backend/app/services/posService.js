@@ -632,7 +632,7 @@ export class POSService {
                     context: 'pos_discount_item',
                     useCache: true
                   });
-                  
+
                   discountItems.push({
                     id: generatedId,  // Now a real UUID
                     amount: item.unit_price,
@@ -1031,29 +1031,58 @@ export class POSService {
       }
 
       // ========================================================================
-      // STEP 8: PROCESS ACCOUNTING FOR DIRECT INVENTORY SALES
+      // STEP 8: PROCESS ACCOUNTING FOR INVENTORY SALES (Direct and Products)
       // ========================================================================
+
+      // 8a: Handle direct inventory sales (item_type = 'inventory')
       const inventorySaleItems = processedItems.filter(item => item.item_type === 'inventory');
       if (inventorySaleItems.length > 0) {
-        try {
-          await InventoryAccountingService.recordPosSaleWithCogs({
-            business_id: businessId,
-            pos_transaction_id: transaction.id,
-            items: inventorySaleItems.map(item => ({
-              inventory_item_id: item.inventory_item_id,
-              product_id: null,
-              quantity: item.quantity,
-              unit_price: item.unit_price
-            }))
-          }, userId);
+          try {
+              await InventoryAccountingService.recordPosSaleWithCogs({
+                  business_id: businessId,
+                  pos_transaction_id: transaction.id,
+                  items: inventorySaleItems.map(item => ({
+                      inventory_item_id: item.inventory_item_id,
+                      product_id: null,
+                      quantity: item.quantity,
+                      unit_price: item.unit_price
+                  }))
+              }, userId);
 
-          log.info('Direct inventory sales accounting completed', {
-            transactionId: transaction.id,
-            itemCount: inventorySaleItems.length
-          });
-        } catch (cogsError) {
-          log.error('Failed to record COGS for direct inventory sales:', cogsError);
-        }
+              log.info('Direct inventory sales accounting completed', {
+                  transactionId: transaction.id,
+                  itemCount: inventorySaleItems.length
+              });
+          } catch (cogsError) {
+              log.error('Failed to record COGS for direct inventory sales:', cogsError);
+          }
+      }
+
+      // 8b: Handle product sales linked to inventory (item_type = 'product' with inventory_item_id)
+      const productSaleItems = processedItems.filter(item => 
+          item.item_type === 'product' && item.inventory_item_id
+      );
+
+      if (productSaleItems.length > 0) {
+          try {
+              await InventoryAccountingService.recordPosSaleWithCogs({
+                  business_id: businessId,
+                  pos_transaction_id: transaction.id,
+                  items: productSaleItems.map(item => ({
+                      inventory_item_id: item.inventory_item_id,
+                      product_id: item.product_id,
+                      quantity: item.quantity,
+                      unit_price: item.unit_price
+                  }))
+              }, userId);
+
+              log.info('Product inventory COGS recorded', {
+                  transactionId: transaction.id,
+                  itemCount: productSaleItems.length
+              });
+          } catch (cogsError) {
+              log.error('Failed to record COGS for product items:', cogsError);
+          }
       }
 
       // ========================================================================

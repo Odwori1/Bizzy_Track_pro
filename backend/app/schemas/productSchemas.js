@@ -30,8 +30,8 @@ export const createProductSchema = Joi.object({
   variant_data: Joi.object().optional(),
   image_urls: Joi.array().items(Joi.string()).optional(),
   tags: Joi.array().items(Joi.string()).optional(),
-  
-  // ================ NEW: TAX INTEGRATION ================
+
+  // ================ TAX INTEGRATION ================
   tax_category_code: Joi.string()
     .valid(...VALID_TAX_CATEGORIES)
     .default('STANDARD_GOODS')
@@ -39,6 +39,12 @@ export const createProductSchema = Joi.object({
       'any.only': `Tax category must be one of: ${VALID_TAX_CATEGORIES.join(', ')}`
     })
     .optional(),
+
+  // ================ INVENTORY INTEGRATION ================
+  inventory_item_id: Joi.string().uuid().optional().allow(null)
+    .messages({
+      'string.guid': 'Inventory item ID must be a valid UUID'
+    }),
   
   auto_create_inventory: Joi.boolean().default(false)
 });
@@ -51,6 +57,7 @@ export const updateProductSchema = Joi.object({
   category_id: Joi.string().uuid().optional(),
   cost_price: Joi.number().precision(2).min(0).optional(),
   selling_price: Joi.number().precision(2).min(0).optional(),
+  current_stock: Joi.number().integer().min(0).optional(),
   min_stock_level: Joi.number().integer().min(0).optional(),
   max_stock_level: Joi.number().integer().min(0).optional(),
   unit_of_measure: Joi.string().max(50).optional(),
@@ -59,14 +66,20 @@ export const updateProductSchema = Joi.object({
   variant_data: Joi.object().optional(),
   image_urls: Joi.array().items(Joi.string()).optional(),
   tags: Joi.array().items(Joi.string()).optional(),
-  
-  // ================ NEW: TAX INTEGRATION ================
+
+  // ================ TAX INTEGRATION ================
   tax_category_code: Joi.string()
     .valid(...VALID_TAX_CATEGORIES)
     .messages({
       'any.only': `Tax category must be one of: ${VALID_TAX_CATEGORIES.join(', ')}`
     })
     .optional(),
+
+  // ================ INVENTORY INTEGRATION ================
+  inventory_item_id: Joi.string().uuid().optional().allow(null)
+    .messages({
+      'string.guid': 'Inventory item ID must be a valid UUID'
+    }),
   
   auto_sync_inventory: Joi.boolean().optional()
 });
@@ -89,5 +102,6 @@ export const productQuerySchema = Joi.object({
   has_variants: Joi.boolean().optional(),
   search: Joi.string().optional(),
   page: Joi.number().integer().min(1).default(1),
-  limit: Joi.number().integer().min(1).max(100).default(20)
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  synced_only: Joi.boolean().optional()
 });

@@ -1,5 +1,5 @@
 import { ProductService } from '../services/productService.js';
-import { TaxService } from '../services/taxService.js';  // NEW IMPORT
+import { TaxService } from '../services/taxService.js';
 import { log } from '../utils/logger.js';
 
 export const productController = {
@@ -9,15 +9,15 @@ export const productController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Creating product', { 
-        businessId, 
-        userId, 
+      log.info('Creating product', {
+        businessId,
+        userId,
         productName: productData.name,
-        taxCategory: productData.tax_category_code || 'STANDARD_GOODS (default)'
+        taxCategory: productData.tax_category_code || 'STANDARD_GOODS (default)',
+        inventoryItemId: productData.inventory_item_id || 'not provided'
       });
 
       // ================ NEW: TAX CATEGORY VALIDATION ================
-      // Note: Joi schema already validates, but we add extra logging
       if (productData.tax_category_code) {
         log.debug('Product tax category provided:', {
           category: productData.tax_category_code,
@@ -25,6 +25,14 @@ export const productController = {
         });
       } else {
         log.debug('Using default tax category: STANDARD_GOODS', { businessId });
+      }
+
+      // Log if inventory_item_id is being linked
+      if (productData.inventory_item_id) {
+        log.debug('Linking product to existing inventory item:', {
+          inventoryItemId: productData.inventory_item_id,
+          businessId
+        });
       }
 
       const newProduct = await ProductService.createProduct(businessId, productData, userId);
@@ -44,14 +52,15 @@ export const productController = {
   async getProducts(req, res, next) {
     try {
       const businessId = req.user.businessId;
-      const { 
-        category_id, 
-        is_active, 
-        low_stock, 
-        has_variants, 
-        search, 
-        page, 
-        limit 
+      const {
+        category_id,
+        is_active,
+        low_stock,
+        has_variants,
+        search,
+        page,
+        limit,
+        synced_only
       } = req.query;
 
       const filters = {};
@@ -62,6 +71,7 @@ export const productController = {
       if (search) filters.search = search;
       if (page) filters.page = parseInt(page);
       if (limit) filters.limit = parseInt(limit);
+      if (synced_only !== undefined) filters.synced_only = synced_only === 'true';
 
       const products = await ProductService.getProducts(businessId, filters);
 
@@ -89,10 +99,10 @@ export const productController = {
       if (product && product.tax_category_code) {
         try {
           const taxRateInfo = await TaxService.getTaxRate(
-            product.tax_category_code, 
+            product.tax_category_code,
             'UG' // Default to Uganda for now
           );
-          
+
           // Add tax info to product response
           product.tax_info = {
             category_code: product.tax_category_code,
@@ -133,11 +143,12 @@ export const productController = {
       const userId = req.user.userId;
       const businessId = req.user.businessId;
 
-      log.info('Updating product', { 
-        businessId, 
-        userId, 
+      log.info('Updating product', {
+        businessId,
+        userId,
         productId: id,
-        taxCategory: updateData.tax_category_code || 'not updated'
+        taxCategory: updateData.tax_category_code || 'not updated',
+        inventoryItemId: updateData.inventory_item_id || 'not updated'
       });
 
       // ================ NEW: LOG TAX CATEGORY CHANGE ================
@@ -145,6 +156,15 @@ export const productController = {
         log.debug('Updating product tax category:', {
           productId: id,
           newTaxCategory: updateData.tax_category_code,
+          businessId
+        });
+      }
+
+      // Log inventory item link changes
+      if (updateData.inventory_item_id !== undefined) {
+        log.debug('Updating product inventory link:', {
+          productId: id,
+          newInventoryItemId: updateData.inventory_item_id,
           businessId
         });
       }
@@ -219,6 +239,59 @@ export const productController = {
 
     } catch (error) {
       log.error('Product statistics fetch controller error', error);
+      next(error);
+    }
+  },
+
+  /**
+   * NEW: Sync product to inventory manually
+   */
+  async syncProductToInventory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const businessId = req.user.businessId;
+
+      log.info('Manually syncing product to inventory', {
+        businessId,
+        userId,
+        productId: id
+      });
+
+      const result = await ProductService.syncToInventory(businessId, id, userId);
+
+      res.json({
+        success: true,
+        message: 'Product synced to inventory successfully',
+        data: result
+      });
+
+    } catch (error) {
+      log.error('Product sync to inventory controller error', error);
+      next(error);
+    }
+  },
+
+  /**
+   * NEW: Get products needing inventory sync
+   */
+  async getProductsNeedingSync(req, res, next) {
+    try {
+      const businessId = req.user.businessId;
+
+      log.info('Fetching products needing inventory sync', { businessId });
+
+      const products = await ProductService.getProductsNeedingSync(businessId);
+
+      res.json({
+        success: true,
+        data: products,
+        count: products.length,
+        message: 'Products needing sync fetched successfully'
+      });
+
+    } catch (error) {
+      log.error('Products needing sync fetch controller error', error);
       next(error);
     }
   }

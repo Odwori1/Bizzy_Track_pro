@@ -11,7 +11,9 @@ export const posController = {
       log.info('Creating POS transaction', {
         businessId,
         userId,
-        itemCount: transactionData.items?.length || 0
+        itemCount: transactionData.items?.length || 0,
+        hasPromoCode: !!transactionData.promo_code,
+        requiresPreApproval: transactionData.pre_approved || false
       });
 
       const newTransaction = await POSService.createTransaction(
@@ -20,14 +22,25 @@ export const posController = {
         userId
       );
 
+      // ✅ Enhanced response for approval flow
+      const responseMessage = newTransaction.requires_approval
+        ? 'POS transaction created and pending discount approval'
+        : 'POS transaction created successfully';
+
       res.status(201).json({
         success: true,
-        message: 'POS transaction created successfully',
-        data: newTransaction
+        message: responseMessage,
+        data: newTransaction,
+        requires_approval: newTransaction.requires_approval || false,
+        approval_id: newTransaction.approval_id || null
       });
 
     } catch (error) {
-      log.error('POS transaction creation controller error', error);
+      log.error('POS transaction creation controller error', {
+        error: error.message,
+        stack: error.stack,
+        body: req.body
+      });
       next(error);
     }
   },
@@ -56,12 +69,29 @@ export const posController = {
       if (page) filters.page = parseInt(page);
       if (limit) filters.limit = parseInt(limit);
 
+      log.info('Fetching POS transactions with filters', {
+        businessId,
+        filters
+      });
+
       const transactions = await POSService.getTransactions(businessId, filters);
+
+      // ✅ Calculate summary statistics
+      const summary = {
+        total_transactions: transactions.length,
+        total_sales: transactions.reduce((sum, t) => sum + (parseFloat(t.final_amount) || 0), 0),
+        total_tax: transactions.reduce((sum, t) => sum + (parseFloat(t.tax_amount) || 0), 0),
+        total_discount: transactions.reduce((sum, t) => sum + (parseFloat(t.discount_amount) || 0), 0),
+        average_transaction_value: transactions.length > 0 
+          ? transactions.reduce((sum, t) => sum + (parseFloat(t.final_amount) || 0), 0) / transactions.length 
+          : 0
+      };
 
       res.json({
         success: true,
         data: transactions,
         count: transactions.length,
+        summary,
         message: 'POS transactions fetched successfully'
       });
 
@@ -75,6 +105,11 @@ export const posController = {
     try {
       const businessId = req.user.businessId;
       const { id } = req.params;
+
+      log.info('Fetching POS transaction by ID', {
+        businessId,
+        transactionId: id
+      });
 
       const transaction = await POSService.getTransactionById(businessId, id);
 
@@ -100,7 +135,8 @@ export const posController = {
       log.info('Updating POS transaction', {
         businessId,
         userId,
-        transactionId: id
+        transactionId: id,
+        updates: Object.keys(updateData)
       });
 
       const updatedTransaction = await POSService.updateTransaction(
@@ -153,6 +189,12 @@ export const posController = {
       const businessId = req.user.businessId;
       const { start_date, end_date } = req.query;
 
+      log.info('Fetching sales analytics', {
+        businessId,
+        start_date,
+        end_date
+      });
+
       const analytics = await POSService.getSalesAnalytics(
         businessId,
         start_date,
@@ -175,6 +217,8 @@ export const posController = {
     try {
       const businessId = req.user.businessId;
 
+      log.info('Fetching today sales', { businessId });
+
       const todaySales = await POSService.getTodaySales(businessId);
 
       res.json({
@@ -189,4 +233,3 @@ export const posController = {
     }
   }
 };
-
