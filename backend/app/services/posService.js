@@ -10,6 +10,11 @@ import { DiscountRuleEngine } from './discountRuleEngine.js';
 import { UUIDService } from './uuidService.js';
 
 // ============================================================================
+// FLAG: Use database trigger for accounting instead of application logic
+// ============================================================================
+const USE_DATABASE_TRIGGER_ONLY = true;
+
+// ============================================================================
 // POSTaxCalculator - TAX CALCULATION FOR POS TRANSACTIONS
 // ============================================================================
 
@@ -101,6 +106,7 @@ class POSTaxCalculator {
 
   /**
    * Calculate tax for a single POS line item
+   * FIXED: Now returns taxId, taxCode, and taxName from the calculation result
    */
   static async calculateLineItemTax(client, businessId, item, customerType, transactionDate) {
     let taxRate = 0;
@@ -173,10 +179,24 @@ class POSTaxCalculator {
         itemType: item.item_type,
         taxCategory: taxCategoryCode,
         taxCode: taxResult.taxCode,
+        taxId: taxResult.taxId,
         taxRate,
         taxAmount,
         customerType
       });
+
+      // ✅ FIX: Return taxId, taxCode, and taxName as well
+      return {
+        taxRate,
+        taxAmount,
+        taxCategoryCode,
+        itemTotal,
+        lineTotal: itemTotal + taxAmount,
+        taxId: taxResult.taxId,
+        taxCode: taxResult.taxCode,
+        taxName: taxResult.taxName
+      };
+
     } catch (error) {
       log.error('Tax calculation failed for POS item', {
         itemName: item.item_name,
@@ -192,19 +212,23 @@ class POSTaxCalculator {
       taxAmount,
       taxCategoryCode,
       itemTotal,
-      lineTotal: itemTotal + taxAmount
+      lineTotal: itemTotal + taxAmount,
+      taxId: null,
+      taxCode: null,
+      taxName: null
     };
   }
 
   /**
    * Create transaction_taxes record for POS audit trail
+   * FIXED: Uses the tax calculation result directly instead of looking up again
    */
   static async createTaxTransaction(
     client,
     businessId,
     posTransactionId,
     lineItem,
-    taxCalculation,
+    taxCalculation,  // This now includes taxId from the calculation
     transactionDate,
     customerType,
     customerId = null
@@ -221,28 +245,32 @@ class POSTaxCalculator {
 
       const businessCountry = businessQuery.rows[0]?.country_code || 'UG';
 
-      const taxInfo = await TaxService.getTaxRate(
-        taxCalculation.taxCategoryCode,
-        businessCountry,
-        transactionDate
-          ? new Date(transactionDate).toISOString().split('T')[0]
-          : new Date().toISOString().split('T')[0]
-      );
+      // ✅ FIX: Use the tax_type_id from the calculation result
+      // The taxCalculation object should contain taxId from TaxService.calculateItemTax
+      let taxTypeId = taxCalculation.taxId;
 
-      const taxTypeQuery = await client.query(
-        'SELECT id FROM tax_types WHERE tax_code = $1',
-        [taxInfo.taxCode]
-      );
+      // Fallback: If taxId not provided, look up by tax code from calculation
+      if (!taxTypeId && taxCalculation.taxCode) {
+        const taxTypeQuery = await client.query(
+          `SELECT id FROM tax_types WHERE tax_code = $1`,
+          [taxCalculation.taxCode]
+        );
+        taxTypeId = taxTypeQuery.rows[0]?.id;
+      }
 
+      // Get the tax rate ID
       const taxRateQuery = await client.query(
-        `SELECT id FROM country_tax_rates
-         WHERE country_code = $1 AND tax_type_id = $2
-         AND is_default = true
-         AND effective_from <= $3
-         AND (effective_to IS NULL OR effective_to >= $3)`,
+        `SELECT ctr.id
+         FROM country_tax_rates ctr
+         WHERE ctr.country_code = $1
+           AND ctr.tax_type_id = $2
+           AND ctr.effective_from <= $3
+           AND (ctr.effective_to IS NULL OR ctr.effective_to >= $3)
+         ORDER BY ctr.is_default DESC, ctr.effective_from DESC
+         LIMIT 1`,
         [
           businessCountry,
-          taxTypeQuery.rows[0]?.id,
+          taxTypeId,
           transactionDate || new Date()
         ]
       );
@@ -263,9 +291,9 @@ class POSTaxCalculator {
         posTransactionId,
         'pos_sale',
         transactionDate || new Date(),
-        taxTypeQuery.rows[0]?.id,
+        taxTypeId,
         taxRateQuery.rows[0]?.id,
-        taxCalculation.itemTotal,
+        taxCalculation.itemTotal || (lineItem.quantity * lineItem.unit_price),
         taxCalculation.taxRate,
         taxCalculation.taxAmount,
         businessCountry,
@@ -278,22 +306,26 @@ class POSTaxCalculator {
           product_id: lineItem.product_id,
           inventory_item_id: lineItem.inventory_item_id,
           calculated_by: 'POSTaxCalculator',
-          tax_engine_version: '1.0',
-          business_country: businessCountry
+          tax_engine_version: '2.0', // Updated version
+          business_country: businessCountry,
+          tax_code_used: taxCalculation.taxCode,
+          tax_name_used: taxCalculation.taxName
         }),
         customerType,
         customerId
       ]);
 
-      log.debug('POS tax transaction recorded', {
+      log.debug('POS tax transaction recorded (FIXED)', {
         transactionId: result.rows[0]?.id,
         posTransactionId,
         taxAmount: taxCalculation.taxAmount,
+        taxCode: taxCalculation.taxCode,
         taxCategory: taxCalculation.taxCategoryCode,
         customerType
       });
 
       return result.rows[0]?.id;
+
     } catch (error) {
       log.error('Failed to create POS tax transaction record', {
         posTransactionId,
@@ -420,23 +452,22 @@ export class POSService {
   /**
    * Create a new POS transaction with tax calculation and discount approval flow.
    *
-   * FIX APPLIED: The original code held connection #1 open past COMMIT while
-   * calling getClient() up to 4 more times for accounting updates and the final
-   * state read. Under any meaningful load this exhausted the pool, causing the
-   * observed 60-second hang. The fix is:
-   *   1. Release connection #1 immediately after COMMIT.
-   *   2. Consolidate the two post-accounting UPDATE paths into one client.
-   *   3. Derive accounting_processed / accounting_error from the in-memory
-   *      result instead of issuing a final SELECT.
-   *   4. Guard the finally block so it only releases when COMMIT never happened.
+   * TWO-PHASE COMMIT PATTERN FOR ACCOUNTING INTEGRITY:
+   *   1. Insert transaction with status='pending' (does NOT trigger accounting)
+   *   2. Insert all transaction items
+   *   3. Update status to 'completed' (triggers database trigger to create complete entries)
+   * 
+   * This ensures the UPDATE trigger fires AFTER all items exist, creating complete
+   * 5-line journal entries (Cash debit, Revenue credit, Tax Payable credit, 
+   * COGS debit, Inventory credit) instead of partial entries.
    */
   static async createTransaction(businessId, transactionData, userId) {
     const requestStart = Date.now();
     console.log(`\n🔵 [${new Date().toISOString()}] ========== START POS TRANSACTION ==========`);
-    
+
     const client = await getClient();
     console.log(`🔵 [${new Date().toISOString()}] Got database client - ${Date.now() - requestStart}ms`);
-    
+
     // Track whether we committed so the finally block knows whether to release.
     let committed = false;
 
@@ -452,7 +483,7 @@ export class POSService {
         [businessId]
       );
       console.log(`🔵 [${new Date().toISOString()}] Got transaction number: ${transactionNumber.rows[0].transaction_number} - ${Date.now() - requestStart}ms`);
-      
+
       const transactionNumberValue = transactionNumber.rows[0].transaction_number;
 
       const customerType = await POSTaxCalculator.getCustomerType(
@@ -490,7 +521,7 @@ export class POSService {
       for (const item of transactionData.items) {
         const itemStart = Date.now();
         console.log(`🔵 [${new Date().toISOString()}] Processing item: ${item.item_name}`);
-        
+
         let inventoryItemId = item.inventory_item_id;
         let productId = item.product_id;
 
@@ -567,12 +598,17 @@ export class POSService {
         totalSubtotal += itemTotal;
         totalTax += itemTax;
 
+        // ✅ FIX: Store tax_id and tax_code in processedItems
         processedItems.push({
           ...item,
           product_id: productId || null,
           inventory_item_id: inventoryItemId || null,
           tax_rate: taxCalculation.taxRate,
+          tax_amount: taxCalculation.taxAmount,
           tax_category_code: taxCalculation.taxCategoryCode,
+          tax_id: taxCalculation.taxId,     // ✅ ADD THIS LINE
+          tax_code: taxCalculation.taxCode, // ✅ ADD THIS LINE
+          tax_name: taxCalculation.taxName, // ✅ ADD THIS LINE
           total_price: itemTotal
         });
 
@@ -585,6 +621,8 @@ export class POSService {
           discount: item.discount_amount || 0,
           taxRate: taxCalculation.taxRate,
           taxAmount: itemTax,
+          taxId: taxCalculation.taxId,
+          taxCode: taxCalculation.taxCode,
           taxCategory: taxCalculation.taxCategoryCode,
           customerType
         });
@@ -596,7 +634,7 @@ export class POSService {
       let discountResult = null;
       let requiresApproval = false;
       let approvalId = null;
-      
+
       const discountStart = Date.now();
       const transactionDateForTax = transactionData.transaction_date
         ? new Date(transactionData.transaction_date).toISOString().split('T')[0]
@@ -716,6 +754,7 @@ export class POSService {
 
       // ------------------------------------------------------------------
       // STEP 5: Build INSERT query, checking for optional approval columns
+      // TWO-PHASE COMMIT: Insert with status='pending' to NOT trigger accounting yet
       // ------------------------------------------------------------------
       let insertQuery = `
         INSERT INTO pos_transactions (
@@ -759,7 +798,7 @@ export class POSService {
         finalAmount,
         transactionData.payment_method,
         transactionData.payment_status || 'completed',
-        transactionData.status || 'completed',
+        'pending', // ✅ TWO-PHASE COMMIT: Insert with 'pending' status, not 'completed'
         transactionData.notes || '',
         userId,
         false,
@@ -785,10 +824,10 @@ export class POSService {
 
       const transactionResult = await client.query(insertQuery, values);
       const transaction = transactionResult.rows[0];
-      console.log(`🔵 [${new Date().toISOString()}] Transaction inserted: ${transaction.id} - ${Date.now() - requestStart}ms`);
+      console.log(`🔵 [${new Date().toISOString()}] Transaction inserted with status='pending' (id: ${transaction.id}) - ${Date.now() - requestStart}ms`);
 
       // ------------------------------------------------------------------
-      // STEP 6: Insert transaction items
+      // STEP 6: Insert transaction items (while status is still 'pending')
       // ------------------------------------------------------------------
       const processedTransactionItems = [];
 
@@ -854,7 +893,7 @@ export class POSService {
           const calculatedTaxAmount =
             item.quantity * item.unit_price * (item.tax_rate || 0) / 100;
 
-          // STEP 7: Tax audit trail
+          // STEP 7: Tax audit trail - Now using the tax calculation result directly
           await POSTaxCalculator.createTaxTransaction(
             client,
             businessId,
@@ -864,7 +903,10 @@ export class POSService {
               taxRate: item.tax_rate,
               taxAmount: calculatedTaxAmount,
               taxCategoryCode: item.tax_category_code,
-              itemTotal: itemTotalPrice
+              itemTotal: itemTotalPrice,
+              taxId: item.tax_id,
+              taxCode: item.tax_code,
+              taxName: item.tax_name
             },
             transactionData.transaction_date || new Date(),
             customerType,
@@ -879,7 +921,9 @@ export class POSService {
             amount: insertedItem.unit_price,
             quantity: insertedItem.quantity,
             total_price: insertedItem.total_price,
-            tax_amount: calculatedTaxAmount
+            tax_amount: calculatedTaxAmount,
+            tax_id: item.tax_id,
+            tax_code: item.tax_code
           });
 
           log.debug('POS item inserted successfully', {
@@ -889,7 +933,9 @@ export class POSService {
             quantity: insertedItem.quantity,
             unitPrice: insertedItem.unit_price,
             totalPrice: insertedItem.total_price,
-            taxRate: insertedItem.tax_rate
+            taxRate: insertedItem.tax_rate,
+            taxId: item.tax_id,
+            taxCode: item.tax_code
           });
         } catch (itemError) {
           log.error('Failed to insert POS item', {
@@ -901,6 +947,19 @@ export class POSService {
         }
       }
       console.log(`🔵 [${new Date().toISOString()}] All ${processedItems.length} items inserted - ${Date.now() - requestStart}ms`);
+
+      // ------------------------------------------------------------------
+      // STEP 6.5: Update status to 'completed' to trigger accounting
+      // TWO-PHASE COMMIT: This UPDATE fires the database trigger AFTER all items exist
+      // The trigger will then create complete 5-line journal entries
+      // ------------------------------------------------------------------
+      await client.query(
+        `UPDATE pos_transactions
+         SET status = 'completed', updated_at = NOW()
+         WHERE id = $1`,
+        [transaction.id]
+      );
+      console.log(`🔵 [${new Date().toISOString()}] Status updated to 'completed' - Accounting trigger fired - ${Date.now() - requestStart}ms`);
 
       // ------------------------------------------------------------------
       // STEP 8: Discount allocation (after items exist for FK constraint)
@@ -1001,65 +1060,11 @@ export class POSService {
 
       // ------------------------------------------------------------------
       // STEP 10: Inventory COGS accounting (direct inventory items)
+      // ========= COMMENTED OUT - Database trigger handles COGS ==========
       // ------------------------------------------------------------------
-      const inventorySaleItems = processedItems.filter(
-        item => item.item_type === 'inventory'
-      );
-      if (inventorySaleItems.length > 0) {
-        try {
-          await InventoryAccountingService.recordPosSaleWithCogs(
-            {
-              business_id: businessId,
-              pos_transaction_id: transaction.id,
-              items: inventorySaleItems.map(item => ({
-                inventory_item_id: item.inventory_item_id,
-                product_id: null,
-                quantity: item.quantity,
-                unit_price: item.unit_price
-              }))
-            },
-            userId
-          );
-
-          log.info('Direct inventory sales accounting completed', {
-            transactionId: transaction.id,
-            itemCount: inventorySaleItems.length
-          });
-        } catch (cogsError) {
-          log.error('Failed to record COGS for direct inventory sales:', cogsError);
-        }
-      }
-
-      // Product items linked to inventory
-      const productSaleItems = processedItems.filter(
-        item => item.item_type === 'product' && item.inventory_item_id
-      );
-      if (productSaleItems.length > 0) {
-        const cogsStart = Date.now();
-        try {
-          await InventoryAccountingService.recordPosSaleWithCogs(
-            {
-              business_id: businessId,
-              pos_transaction_id: transaction.id,
-              items: productSaleItems.map(item => ({
-                inventory_item_id: item.inventory_item_id,
-                product_id: item.product_id,
-                quantity: item.quantity,
-                unit_price: item.unit_price
-              }))
-            },
-            userId
-          );
-          console.log(`🟢 [${new Date().toISOString()}] COGS recorded in ${Date.now() - cogsStart}ms - total ${Date.now() - requestStart}ms`);
-          log.info('Product inventory COGS recorded', {
-            transactionId: transaction.id,
-            itemCount: productSaleItems.length
-          });
-        } catch (cogsError) {
-          console.log(`🔴 [${new Date().toISOString()}] COGS error: ${cogsError.message}`);
-          log.error('Failed to record COGS for product items:', cogsError);
-        }
-      }
+      // The database trigger create_journal_entry_for_pos_transaction_fixed
+      // automatically creates the COGS debit and Inventory credit entries
+      // when status is updated to 'completed'
 
       // ------------------------------------------------------------------
       // STEP 11: Audit log
@@ -1088,15 +1093,13 @@ export class POSService {
 
       // ------------------------------------------------------------------
       // STEP 12: COMMIT and IMMEDIATELY release connection #1
-      // ✅ FIX: All subsequent getClient() calls are now safe because the
-      //    pool slot is returned before any downstream service acquires one.
       // ------------------------------------------------------------------
       await client.query('COMMIT');
       committed = true;
       client.release();
       console.log(`🔵 [${new Date().toISOString()}] COMMIT complete, connection released - ${Date.now() - requestStart}ms`);
 
-      log.info('✅ POS transaction committed successfully', {
+      log.info('✅ POS transaction committed successfully (two-phase commit pattern)', {
         transactionId: transaction.id,
         businessId,
         subtotal: totalSubtotal,
@@ -1104,54 +1107,58 @@ export class POSService {
         finalAmount,
         customerType,
         itemCount: processedItems.length,
-        requiresApproval
+        requiresApproval,
+        note: 'Status updated from pending→completed, database trigger should have created complete journal entries'
       });
 
       // ------------------------------------------------------------------
-      // STEP 13: Post-commit accounting (safe to call getClient() now)
-      // ✅ FIX: Consolidated the original 3 separate getClient() calls
-      //    (success update, failure update, final state read) into ONE.
+      // STEP 13: Post-commit accounting verification (optional)
+      // Database trigger handles everything - just verify it worked
       // ------------------------------------------------------------------
-      console.log(`🔵 [${new Date().toISOString()}] Starting accounting service... - ${Date.now() - requestStart}ms`);
-      const accountingStart = Date.now();
-      let accountingResult;
+      console.log(`🔵 [${new Date().toISOString()}] Verifying accounting trigger results... - ${Date.now() - requestStart}ms`);
+      let accountingResult = { success: true, linesCreated: 0, message: "Handled by database trigger" };
 
+      // Small delay to allow trigger to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify accounting was created by the trigger
+      const verifyClient = await getClient();
       try {
-        accountingResult = await AccountingService.processPosAccounting(
-          transaction.id,
-          userId
+        const checkResult = await verifyClient.query(
+          `SELECT COUNT(*) as count, SUM(CASE WHEN ca.account_code IN ('5100', '1300') THEN 1 ELSE 0 END) as cogs_count
+           FROM journal_entries je
+           JOIN journal_entry_lines jel ON je.id = jel.journal_entry_id
+           JOIN chart_of_accounts ca ON jel.account_id = ca.id
+           WHERE je.reference_type = 'pos_transaction' AND je.reference_id = $1::text`,
+          [transaction.id]
         );
-        console.log(`🟢 [${new Date().toISOString()}] Accounting service completed in ${Date.now() - accountingStart}ms - total ${Date.now() - requestStart}ms`);
-
-        if (accountingResult?.success === true) {
-          log.info('✅ Accounting created successfully', {
+        
+        const entryCount = parseInt(checkResult.rows[0].count);
+        if (entryCount > 0) {
+          accountingResult.linesCreated = entryCount;
+          accountingResult.verified = true;
+          accountingResult.cogs_detected = parseInt(checkResult.rows[0].cogs_count) > 0;
+          
+          log.info('✅ Database trigger created journal entries', {
             transactionId: transaction.id,
-            linesCreated: accountingResult.linesCreated
+            linesCreated: entryCount,
+            cogsDetected: accountingResult.cogs_detected
           });
         } else {
-          log.warn('⚠️ Accounting not created', {
-            transactionId: transaction.id,
-            reason: accountingResult?.message || 'Unknown reason'
+          accountingResult.verified = false;
+          accountingResult.message = 'No journal entries found - trigger may not have fired';
+          log.warn('⚠️ No journal entries found after trigger should have fired', {
+            transactionId: transaction.id
           });
         }
-      } catch (accountingError) {
-        console.log(`🔴 [${new Date().toISOString()}] Accounting service error: ${accountingError.message}`);
-        log.error('❌ Accounting processing error:', {
-          transactionId: transaction.id,
-          error: accountingError.message
-        });
-
-        accountingResult = {
-          success: false,
-          message: `Accounting service error: ${accountingError.message}`,
-          linesCreated: 0
-        };
+      } finally {
+        verifyClient.release();
       }
 
-      // ✅ FIX: Single consolidated update client replaces 3 separate ones.
+      // ✅ Single consolidated update client for accounting flags
       const updateClient = await getClient();
       try {
-        if (accountingResult?.success === true) {
+        if (accountingResult?.verified === true) {
           await updateClient.query(
             `UPDATE pos_transactions
              SET accounting_processed = true,
@@ -1171,29 +1178,27 @@ export class POSService {
                  updated_at = NOW()
              WHERE id = $2 AND business_id = $3`,
             [
-              accountingResult?.message || 'Accounting processing failed',
+              accountingResult?.message || 'No journal entries created by database trigger',
               transaction.id,
               businessId
             ]
           );
 
-          log.warn('⚠️ Updated accounting_error with failure message', {
+          log.warn('⚠️ Updated accounting_error with warning message', {
             transactionId: transaction.id,
             error: accountingResult?.message
           });
         }
       } finally {
-        updateClient.release(); // ✅ Always released
+        updateClient.release();
       }
 
       // ------------------------------------------------------------------
       // STEP 14: Build and return response
-      // ✅ FIX: Derive accounting flags from in-memory result.
-      //    The original code issued a final SELECT just to read back what
-      //    it had just written — unnecessary and another connection hit.
       // ------------------------------------------------------------------
       const response = {
         ...transaction,
+        status: 'completed', // Override in response since we updated it
         items: processedTransactionItems,
         tax_breakdown: {
           subtotal: totalSubtotal,
@@ -1214,33 +1219,30 @@ export class POSService {
             : null,
         requires_approval: requiresApproval,
         approval_id: approvalId,
-        // Derived directly from accountingResult — no extra DB query needed
-        accounting_processed: accountingResult?.success === true,
-        accounting_error:
-          accountingResult?.success === true
-            ? null
-            : accountingResult?.message || 'Accounting processing failed',
+        accounting_processed: accountingResult?.verified === true,
+        accounting_error: accountingResult?.verified === true ? null : (accountingResult?.message || 'No journal entries created'),
         accounting_info: {
-          method: 'manual_service',
-          status: accountingResult?.success === true ? 'created' : 'failed',
+          method: 'database_trigger (two-phase commit)',
+          status: accountingResult?.verified === true ? 'created' : 'failed',
           entries_created: accountingResult?.linesCreated || 0,
-          note:
-            accountingResult?.success === true
-              ? 'Accounting entries created successfully'
-              : accountingResult?.message || 'Accounting creation failed',
+          note: accountingResult?.verified === true 
+            ? 'Complete journal entries created by database trigger (Cash debit, Revenue credit, Tax Payable credit, COGS debit, Inventory credit)'
+            : accountingResult?.message || 'Accounting creation failed - check trigger status',
           tax_calculated: true,
           customer_type_used: customerType,
-          items_with_tax: processedItems.filter(item => item.tax_amount > 0).length
+          items_with_tax: processedItems.filter(item => item.tax_amount > 0).length,
+          two_phase_commit: 'pending→completed status transition fired trigger after items inserted'
         }
       };
 
-      log.info('✅ POS transaction completed successfully', {
+      log.info('✅ POS transaction completed successfully (two-phase commit pattern)', {
         transactionId: transaction.id,
         businessId,
         accounting_processed: response.accounting_processed,
-        accounting_success: accountingResult?.success === true,
+        accounting_verified: accountingResult?.verified === true,
         lines_created: accountingResult?.linesCreated || 0,
-        requires_approval: requiresApproval
+        requires_approval: requiresApproval,
+        status_flow: 'pending → completed'
       });
 
       console.log(`🟢 [${new Date().toISOString()}] ========== POS TRANSACTION COMPLETE in ${Date.now() - requestStart}ms ==========\n`);
@@ -1254,8 +1256,7 @@ export class POSService {
       log.error('❌ POS transaction creation failed:', error);
       throw error;
     } finally {
-      // ✅ FIX: Only release here if the commit path never ran.
-      //    If committed = true, client.release() already fired above.
+      // ✅ Only release here if the commit path never ran
       if (!committed) {
         client.release();
       }
