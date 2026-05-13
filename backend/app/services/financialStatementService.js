@@ -21,7 +21,7 @@ export class FinancialStatementService {
 
         try {
             let result;
-            
+
             if (compareWithPrevious) {
                 result = await client.query(
                     `SELECT * FROM get_profit_loss_with_comparison($1, $2, $3)`,
@@ -429,6 +429,306 @@ export class FinancialStatementService {
 
         } catch (error) {
             log.error('Error getting financial summary:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    // ============================================================================
+    // PERIOD CLOSING METHODS
+    // ============================================================================
+
+    /**
+     * List all accounting periods for a business
+     * @param {string} businessId - Business UUID
+     * @param {Object} filters - Optional filters (period_type, status, from_date, to_date)
+     * @returns {Promise<Object>} List of accounting periods
+     */
+    static async listAccountingPeriods(businessId, filters = {}) {
+        const client = await getClient();
+
+        try {
+            let query = `
+                SELECT id, period_name, period_type, start_date, end_date, status, 
+                       closed_at, closed_by, reopened_at, reopening_reason,
+                       created_at, updated_at
+                FROM accounting_periods
+                WHERE business_id = $1
+            `;
+            const params = [businessId];
+            let paramIndex = 2;
+
+            if (filters.period_type) {
+                query += ` AND period_type = $${paramIndex++}`;
+                params.push(filters.period_type);
+            }
+
+            if (filters.status) {
+                query += ` AND status = $${paramIndex++}`;
+                params.push(filters.status);
+            }
+
+            if (filters.from_date) {
+                query += ` AND end_date >= $${paramIndex++}`;
+                params.push(filters.from_date);
+            }
+
+            if (filters.to_date) {
+                query += ` AND start_date <= $${paramIndex++}`;
+                params.push(filters.to_date);
+            }
+
+            query += ` ORDER BY start_date DESC`;
+
+            const result = await client.query(query, params);
+
+            await auditLogger.logAction({
+                businessId,
+                action: 'period.list.viewed',
+                resourceType: 'accounting_period',
+                newValues: { filters, count: result.rows.length }
+            });
+
+            log.info('Accounting periods listed', {
+                businessId,
+                count: result.rows.length,
+                filters
+            });
+
+            return {
+                success: true,
+                periods: result.rows,
+                count: result.rows.length,
+                filters
+            };
+
+        } catch (error) {
+            log.error('Error listing accounting periods:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get current period status for a given date
+     * @param {string} businessId - Business UUID
+     * @param {Date|string} date - Date to check (defaults to current date)
+     * @returns {Promise<Object>} Current period status
+     */
+    static async getCurrentPeriodStatus(businessId, date = null) {
+        const client = await getClient();
+
+        try {
+            const checkDate = date || new Date().toISOString().split('T')[0];
+            
+            const result = await client.query(
+                `SELECT id, period_name, period_type, start_date, end_date, status
+                 FROM accounting_periods
+                 WHERE business_id = $1 AND $2 BETWEEN start_date AND end_date
+                 LIMIT 1`,
+                [businessId, checkDate]
+            );
+
+            const currentPeriod = result.rows[0] || null;
+            
+            let latestPeriod = null;
+            if (!currentPeriod) {
+                const latestResult = await client.query(
+                    `SELECT id, period_name, period_type, start_date, end_date, status
+                     FROM accounting_periods
+                     WHERE business_id = $1
+                     ORDER BY end_date DESC
+                     LIMIT 1`,
+                    [businessId]
+                );
+                latestPeriod = latestResult.rows[0] || null;
+            }
+
+            await auditLogger.logAction({
+                businessId,
+                action: 'period.status.viewed',
+                resourceType: 'accounting_period',
+                newValues: { check_date: checkDate, has_open_period: !!currentPeriod }
+            });
+
+            log.info('Current period status retrieved', {
+                businessId,
+                checkDate,
+                currentPeriod: currentPeriod?.period_name,
+                status: currentPeriod?.status
+            });
+
+            return {
+                success: true,
+                data: {
+                    current_period: currentPeriod,
+                    latest_period: latestPeriod,
+                    has_open_period: currentPeriod?.status === 'OPEN',
+                    check_date: checkDate
+                }
+            };
+
+        } catch (error) {
+            log.error('Error getting current period status:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Close an accounting period
+     * @param {string} businessId - Business UUID
+     * @param {string} periodId - Period UUID
+     * @param {string} periodName - Period name (alternative to periodId)
+     * @param {string} userId - User UUID who is closing the period
+     * @returns {Promise<Object>} Closing result
+     */
+    static async closeAccountingPeriod(businessId, periodId, periodName, userId) {
+        const client = await getClient();
+
+        try {
+            let targetPeriodId = periodId;
+            
+            if (!targetPeriodId && periodName) {
+                const result = await client.query(
+                    `SELECT id FROM accounting_periods 
+                     WHERE business_id = $1 AND period_name = $2 AND status = 'OPEN'`,
+                    [businessId, periodName]
+                );
+                if (result.rows.length === 0) {
+                    throw new Error(`No open period found with name: ${periodName}`);
+                }
+                targetPeriodId = result.rows[0].id;
+            }
+            
+            if (!targetPeriodId) {
+                throw new Error('Either period_id or period_name is required');
+            }
+
+            const result = await client.query(
+                `SELECT * FROM close_accounting_period($1, $2, $3)`,
+                [businessId, targetPeriodId, userId]
+            );
+
+            const closeResult = result.rows[0];
+
+            if (!closeResult.success) {
+                throw new Error(closeResult.message);
+            }
+
+            await auditLogger.logAction({
+                businessId,
+                userId,
+                action: 'period.closed',
+                resourceType: 'accounting_period',
+                resourceId: targetPeriodId,
+                newValues: {
+                    period_id: targetPeriodId,
+                    journal_entry_id: closeResult.journal_entry_id,
+                    closed_at: new Date().toISOString()
+                }
+            });
+
+            log.info('Accounting period closed', {
+                businessId,
+                periodId: targetPeriodId,
+                userId,
+                journalEntryId: closeResult.journal_entry_id
+            });
+
+            return {
+                success: true,
+                data: {
+                    period_id: targetPeriodId,
+                    journal_entry_id: closeResult.journal_entry_id,
+                    message: closeResult.message,
+                    warning: closeResult.warning
+                }
+            };
+
+        } catch (error) {
+            log.error('Error closing accounting period:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Reopen a closed accounting period
+     * @param {string} businessId - Business UUID
+     * @param {string} periodId - Period UUID
+     * @param {string} periodName - Period name (alternative to periodId)
+     * @param {string} userId - User UUID who is reopening the period
+     * @param {string} reason - Reason for reopening
+     * @returns {Promise<Object>} Reopening result
+     */
+    static async reopenAccountingPeriod(businessId, periodId, periodName, userId, reason = null) {
+        const client = await getClient();
+
+        try {
+            let targetPeriodId = periodId;
+            
+            if (!targetPeriodId && periodName) {
+                const result = await client.query(
+                    `SELECT id FROM accounting_periods 
+                     WHERE business_id = $1 AND period_name = $2 AND status = 'CLOSED'`,
+                    [businessId, periodName]
+                );
+                if (result.rows.length === 0) {
+                    throw new Error(`No closed period found with name: ${periodName}`);
+                }
+                targetPeriodId = result.rows[0].id;
+            }
+            
+            if (!targetPeriodId) {
+                throw new Error('Either period_id or period_name is required');
+            }
+
+            const result = await client.query(
+                `SELECT * FROM reopen_accounting_period($1, $2, $3, $4)`,
+                [businessId, targetPeriodId, userId, reason]
+            );
+
+            const reopenResult = result.rows[0];
+
+            if (!reopenResult.success) {
+                throw new Error(reopenResult.message);
+            }
+
+            await auditLogger.logAction({
+                businessId,
+                userId,
+                action: 'period.reopened',
+                resourceType: 'accounting_period',
+                resourceId: targetPeriodId,
+                newValues: {
+                    period_id: targetPeriodId,
+                    reopened_at: new Date().toISOString(),
+                    reason: reason
+                }
+            });
+
+            log.info('Accounting period reopened', {
+                businessId,
+                periodId: targetPeriodId,
+                userId,
+                reason
+            });
+
+            return {
+                success: true,
+                data: {
+                    period_id: targetPeriodId,
+                    message: reopenResult.message
+                }
+            };
+
+        } catch (error) {
+            log.error('Error reopening accounting period:', error);
             throw error;
         } finally {
             client.release();

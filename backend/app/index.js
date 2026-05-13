@@ -120,6 +120,9 @@ import openingBalanceRoutes from './routes/openingBalanceRoutes.js';
 // Add import with other route imports (around line 20-30)
 import financialStatementRoutes from './routes/financialStatementRoutes.js';
 
+// 
+import periodClosingRoutes from './routes/periodClosingRoutes.js';
+
 
 //additional invoice routes
 import invoiceTemplateRoutes from './routes/invoiceTemplateRoutes.js';
@@ -264,6 +267,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/wallets', walletRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/financial-reports', financialReportRoutes);
+app.use('/api/accounting', periodClosingRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/pos', posRoutes);
