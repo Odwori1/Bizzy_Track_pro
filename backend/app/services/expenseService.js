@@ -204,46 +204,74 @@ export class ExpenseService {
   }
 
   /**
-   * Create expense category
+   * Create expense category with UPSERT logic (update or insert)
    */
   static async createCategory(businessId, categoryData, userId) {
     const client = await getClient();
-
+    
     try {
-      await client.query('BEGIN');
-
-      const result = await client.query(
-        `INSERT INTO expense_categories (business_id, name, description, color, is_active, account_code)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [
+        await client.query('BEGIN');
+        
+        // Check if category already exists
+        const existing = await client.query(
+            'SELECT id, account_code FROM expense_categories WHERE business_id = $1 AND name = $2',
+            [businessId, categoryData.name]
+        );
+        
+        let result;
+        if (existing.rows.length > 0) {
+            // UPDATE existing category
+            result = await client.query(
+                `UPDATE expense_categories
+                 SET description = COALESCE($1, description),
+                     color = COALESCE($2, color),
+                     is_active = COALESCE($3, is_active),
+                     account_code = COALESCE($4, account_code),
+                     updated_at = NOW()
+                 WHERE id = $5 AND business_id = $6
+                 RETURNING *`,
+                [
+                    categoryData.description,
+                    categoryData.color,
+                    categoryData.is_active,
+                    categoryData.account_code,
+                    existing.rows[0].id,
+                    businessId
+                ]
+            );
+        } else {
+            // INSERT new category
+            result = await client.query(
+                `INSERT INTO expense_categories (business_id, name, description, color, is_active, account_code)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING *`,
+                [
+                    businessId,
+                    categoryData.name,
+                    categoryData.description || '',
+                    categoryData.color || '#3B82F6',
+                    categoryData.is_active !== undefined ? categoryData.is_active : true,
+                    categoryData.account_code || null
+                ]
+            );
+        }
+        
+        await auditLogger.logAction({
           businessId,
-          categoryData.name,
-          categoryData.description || '',
-          categoryData.color || '#3B82F6',
-          categoryData.is_active !== undefined ? categoryData.is_active : true,
-          categoryData.account_code || null
-        ]
-      );
-
-      const category = result.rows[0];
-
-      await auditLogger.logAction({
-        businessId,
-        userId,
-        action: 'expense.category.created',
-        resourceType: 'expense_category',
-        resourceId: category.id,
-        newValues: { name: category.name }
-      });
-
-      await client.query('COMMIT');
-      return category;
+          userId,
+          action: existing.rows.length > 0 ? 'expense.category.updated' : 'expense.category.created',
+          resourceType: 'expense_category',
+          resourceId: result.rows[0].id,
+          newValues: { name: categoryData.name }
+        });
+        
+        await client.query('COMMIT');
+        return result.rows[0];
     } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
+        await client.query('ROLLBACK');
+        throw error;
     } finally {
-      client.release();
+        client.release();
     }
   }
 
@@ -445,7 +473,7 @@ export class ExpenseService {
       const result = await client.query(
         `INSERT INTO expenses (
           business_id, category_id, wallet_id, amount, description,
-          expense_date, receipt_url, status, created_by, 
+          expense_date, receipt_url, status, created_by,
           vendor_name, payment_method, total_amount, tax_amount, expense_number
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING *`,
@@ -476,7 +504,7 @@ export class ExpenseService {
             `SELECT create_accounting_for_expense($1, $2) as journal_entry_id`,
             [expense.id, userId]
           );
-          
+
           if (journalEntryId.rows[0].journal_entry_id) {
             await client.query(
               'UPDATE expenses SET journal_entry_id = $1 WHERE id = $2',
@@ -484,7 +512,7 @@ export class ExpenseService {
             );
             expense.journal_entry_id = journalEntryId.rows[0].journal_entry_id;
           }
-          
+
           log.info('Accounting created for paid expense', {
             expenseId: expense.id,
             journalEntryId: expense.journal_entry_id
@@ -659,14 +687,14 @@ export class ExpenseService {
             `SELECT create_accounting_for_expense($1, $2) as journal_entry_id`,
             [expenseId, userId]
           );
-          
+
           if (journalEntryId.rows[0].journal_entry_id) {
             // Update expense with journal entry ID
             await client.query(
               `UPDATE expenses SET journal_entry_id = $1 WHERE id = $2`,
               [journalEntryId.rows[0].journal_entry_id, expenseId]
             );
-            
+
             updatedExpense.journal_entry_id = journalEntryId.rows[0].journal_entry_id;
             log.info('Accounting created for approved expense', {
               expenseId: expenseId,
@@ -740,8 +768,8 @@ export class ExpenseService {
 
       // Update expense
       const updateResult = await client.query(
-        `UPDATE expenses 
-         SET status = 'paid', 
+        `UPDATE expenses
+         SET status = 'paid',
              payment_method = $1,
              paid_by = $2,
              paid_at = NOW(),
@@ -880,7 +908,7 @@ export class ExpenseService {
 
     try {
       const result = await client.query(
-        `SELECT account_code FROM expense_categories 
+        `SELECT account_code FROM expense_categories
          WHERE id = $1 AND business_id = $2`,
         [categoryId, businessId]
       );

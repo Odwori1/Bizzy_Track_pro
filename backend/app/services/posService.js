@@ -107,12 +107,19 @@ class POSTaxCalculator {
   /**
    * Calculate tax for a single POS line item
    * FIXED: Now returns taxId, taxCode, and taxName from the calculation result
+   * PATCH 5: Added _override_amount support for net (post-discount) amounts
    */
   static async calculateLineItemTax(client, businessId, item, customerType, transactionDate) {
     let taxRate = 0;
     let taxAmount = 0;
     let taxCategoryCode = 'STANDARD_GOODS';
-    const itemTotal = item.quantity * item.unit_price;
+    
+    // When posService.js has pre-computed the net (post-discount) amount,
+    // it passes it via _override_amount so the tax base is always correct.
+    // Fallback to quantity * unit_price for non-discounted transactions.
+    const itemTotal = item._override_amount !== undefined
+      ? item._override_amount
+      : item.quantity * item.unit_price;
 
     if (item.item_type === 'product' && item.product_id) {
       taxCategoryCode = await this.getProductTaxCategory(client, item.product_id, businessId);
@@ -182,10 +189,10 @@ class POSTaxCalculator {
         taxId: taxResult.taxId,
         taxRate,
         taxAmount,
-        customerType
+        customerType,
+        itemTotal
       });
 
-      // ✅ FIX: Return taxId, taxCode, and taxName as well
       return {
         taxRate,
         taxAmount,
@@ -228,7 +235,7 @@ class POSTaxCalculator {
     businessId,
     posTransactionId,
     lineItem,
-    taxCalculation,  // This now includes taxId from the calculation
+    taxCalculation,
     transactionDate,
     customerType,
     customerId = null
@@ -245,11 +252,8 @@ class POSTaxCalculator {
 
       const businessCountry = businessQuery.rows[0]?.country_code || 'UG';
 
-      // ✅ FIX: Use the tax_type_id from the calculation result
-      // The taxCalculation object should contain taxId from TaxService.calculateItemTax
       let taxTypeId = taxCalculation.taxId;
 
-      // Fallback: If taxId not provided, look up by tax code from calculation
       if (!taxTypeId && taxCalculation.taxCode) {
         const taxTypeQuery = await client.query(
           `SELECT id FROM tax_types WHERE tax_code = $1`,
@@ -258,7 +262,6 @@ class POSTaxCalculator {
         taxTypeId = taxTypeQuery.rows[0]?.id;
       }
 
-      // Get the tax rate ID
       const taxRateQuery = await client.query(
         `SELECT ctr.id
          FROM country_tax_rates ctr
@@ -306,7 +309,7 @@ class POSTaxCalculator {
           product_id: lineItem.product_id,
           inventory_item_id: lineItem.inventory_item_id,
           calculated_by: 'POSTaxCalculator',
-          tax_engine_version: '2.0', // Updated version
+          tax_engine_version: '2.0',
           business_country: businessCountry,
           tax_code_used: taxCalculation.taxCode,
           tax_name_used: taxCalculation.taxName
@@ -339,6 +342,7 @@ class POSTaxCalculator {
 
 // ============================================================================
 // HELPER: Create discount allocation after transaction items exist
+// PATCH 4: Removed DiscountAccountingService call (handled by trigger now)
 // ============================================================================
 
 async function createAllocationAfterTransaction(params, client) {
@@ -406,31 +410,11 @@ async function createAllocationAfterTransaction(params, client) {
       client
     );
 
-    let accounting = null;
-    if (allocation) {
-      try {
-        const { DiscountAccountingService } = await import('./discountAccountingService.js');
-        accounting = await DiscountAccountingService.createBulkDiscountJournalEntries(
-          {
-            business_id: businessId,
-            id: transactionId,
-            type: transactionType
-          },
-          discountResult.appliedDiscounts.map(d => ({
-            rule_type: d.type,
-            discount_amount: d.amount,
-            allocation_id: allocation.id,
-            name: d.name
-          })),
-          userId
-        );
-      } catch (accountingError) {
-        log.warn('Accounting entries not created for allocation', {
-          error: accountingError.message,
-          allocationId: allocation.id
-        });
-      }
-    }
+    // PATCH 4: Discount journal entry is created by the database trigger as part of
+    // the main POS journal entry. Do NOT call DiscountAccountingService here
+    // for POS transactions — it would create a duplicate entry.
+    // The allocation record above is for management reporting only.
+    const accounting = null; // handled by trigger
 
     return { allocation, accounting };
   } catch (error) {
@@ -456,10 +440,8 @@ export class POSService {
    *   1. Insert transaction with status='pending' (does NOT trigger accounting)
    *   2. Insert all transaction items
    *   3. Update status to 'completed' (triggers database trigger to create complete entries)
-   * 
-   * This ensures the UPDATE trigger fires AFTER all items exist, creating complete
-   * 5-line journal entries (Cash debit, Revenue credit, Tax Payable credit, 
-   * COGS debit, Inventory credit) instead of partial entries.
+   *
+   * FIXED: Tax now calculated on NET amount (post-discount) rather than gross.
    */
   static async createTransaction(businessId, transactionData, userId) {
     const requestStart = Date.now();
@@ -468,7 +450,6 @@ export class POSService {
     const client = await getClient();
     console.log(`🔵 [${new Date().toISOString()}] Got database client - ${Date.now() - requestStart}ms`);
 
-    // Track whether we committed so the finally block knows whether to release.
     let committed = false;
 
     try {
@@ -512,11 +493,12 @@ export class POSService {
       }
 
       // ------------------------------------------------------------------
-      // STEP 2: Validate and prepare items with tax calculation
+      // PASS 1: Validate items and collect GROSS subtotals (NO TAX YET)
+      // Tax must not be calculated until we know the discount, because tax
+      // is on the NET amount (post-discount). Running tax first was Bug A.
       // ------------------------------------------------------------------
-      const processedItems = [];
+      const grossItems = [];
       let totalSubtotal = 0;
-      let totalTax = 0;
 
       for (const item of transactionData.items) {
         const itemStart = Date.now();
@@ -582,75 +564,39 @@ export class POSService {
           }
         }
 
-        // STEP 3: Calculate tax for this item
-        const taxCalculation = await POSTaxCalculator.calculateLineItemTax(
-          client,
-          businessId,
-          item,
-          customerType,
-          transactionData.transaction_date || new Date()
-        );
-        console.log(`🟢 [${new Date().toISOString()}] Item tax calculated in ${Date.now() - itemStart}ms - total ${Date.now() - requestStart}ms`);
+        const grossItemTotal = item.quantity * item.unit_price;
+        totalSubtotal += grossItemTotal;
 
-        const itemTotal = item.quantity * item.unit_price;
-        const itemTax = taxCalculation.taxAmount || 0;
-
-        totalSubtotal += itemTotal;
-        totalTax += itemTax;
-
-        // ✅ FIX: Store tax_id and tax_code in processedItems
-        processedItems.push({
+        grossItems.push({
           ...item,
           product_id: productId || null,
           inventory_item_id: inventoryItemId || null,
-          tax_rate: taxCalculation.taxRate,
-          tax_amount: taxCalculation.taxAmount,
-          tax_category_code: taxCalculation.taxCategoryCode,
-          tax_id: taxCalculation.taxId,     // ✅ ADD THIS LINE
-          tax_code: taxCalculation.taxCode, // ✅ ADD THIS LINE
-          tax_name: taxCalculation.taxName, // ✅ ADD THIS LINE
-          total_price: itemTotal
+          grossItemTotal,
         });
 
-        log.debug('POS item processed with tax', {
-          itemName: item.item_name,
-          itemType: item.item_type,
-          quantity: item.quantity,
-          unitPrice: item.unit_price,
-          itemTotal,
-          discount: item.discount_amount || 0,
-          taxRate: taxCalculation.taxRate,
-          taxAmount: itemTax,
-          taxId: taxCalculation.taxId,
-          taxCode: taxCalculation.taxCode,
-          taxCategory: taxCalculation.taxCategoryCode,
-          customerType
-        });
+        console.log(`🟢 [${new Date().toISOString()}] Item validated in ${Date.now() - itemStart}ms`);
       }
 
       // ------------------------------------------------------------------
-      // STEP 4: Discount calculation with approval handling
+      // STEP 2: Calculate discount on the FULL gross subtotal
+      // Discount must be known before we calculate any tax.
       // ------------------------------------------------------------------
       let discountResult = null;
       let requiresApproval = false;
       let approvalId = null;
+      let totalDiscount = parseFloat(transactionData.discount_amount) || 0;
 
-      const discountStart = Date.now();
       const transactionDateForTax = transactionData.transaction_date
         ? new Date(transactionData.transaction_date).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0];
 
-      let totalDiscount = 0;
-      if (transactionData.discount_amount) {
-        totalDiscount = parseFloat(transactionData.discount_amount) || 0;
-      }
+      const discountStart = Date.now();
 
       if (transactionData.promo_code || transactionData.apply_discounts !== false) {
         try {
           const discountItems = [];
-          for (const item of transactionData.items) {
+          for (const item of grossItems) {
             const itemId = item.service_id || item.product_id;
-
             if (!itemId) {
               const generatedId = await UUIDService.getUUID({
                 context: 'pos_discount_item',
@@ -722,7 +668,7 @@ export class POSService {
             discountResult = discountCheck;
             totalDiscount = discountCheck.totalDiscount;
 
-            log.info('Discounts will be applied to POS transaction', {
+            log.info('Discounts will be applied', {
               originalSubtotal: totalSubtotal,
               totalDiscount: discountCheck.totalDiscount,
               discountCount: discountCheck.appliedDiscounts.length
@@ -735,26 +681,114 @@ export class POSService {
           });
         }
       }
-      console.log(`🔵 [${new Date().toISOString()}] Discount check complete in ${Date.now() - discountStart}ms - total ${Date.now() - requestStart}ms`);
 
-      const finalAmount = totalSubtotal - totalDiscount + totalTax;
-      const averageTaxRate = totalSubtotal > 0 ? (totalTax / totalSubtotal) * 100 : 0;
+      console.log(`🔵 [${new Date().toISOString()}] Discount check complete in ${Date.now() - discountStart}ms`);
+
+      // ------------------------------------------------------------------
+      // STEP 3: Allocate discount proportionally, then tax on NET
+      // Now that we know totalDiscount, we distribute it across items
+      // pro-rata by gross amount, then calculate tax on each item's net price.
+      // This is the fix for Bug A: tax on net, not gross.
+      // ------------------------------------------------------------------
+      const discountRatio = totalSubtotal > 0 ? totalDiscount / totalSubtotal : 0;
+      const processedItems = [];
+      let totalTax = 0;
+
+      for (const item of grossItems) {
+        const itemDiscount = Math.round(item.grossItemTotal * discountRatio * 100) / 100;
+        const netItemTotal = item.grossItemTotal - itemDiscount;
+        const netUnitPrice = item.quantity > 0 ? netItemTotal / item.quantity : 0;
+
+        const taxCalculation = await POSTaxCalculator.calculateLineItemTax(
+          client,
+          businessId,
+          {
+            ...item,
+            unit_price: netUnitPrice,
+            _override_amount: netItemTotal,
+          },
+          customerType,
+          transactionData.transaction_date || new Date()
+        );
+
+        const itemTax = taxCalculation.taxAmount || 0;
+        totalTax += itemTax;
+
+        processedItems.push({
+          ...item,
+          net_unit_price: netUnitPrice,
+          item_discount_amount: itemDiscount,
+          tax_rate: taxCalculation.taxRate,
+          tax_amount: itemTax,
+          line_tax_amount: itemTax,
+          tax_category_code: taxCalculation.taxCategoryCode,
+          tax_id: taxCalculation.taxId,
+          tax_code: taxCalculation.taxCode,
+          tax_name: taxCalculation.taxName,
+          total_price: item.grossItemTotal,
+        });
+
+        log.debug('POS item processed (net tax)', {
+          itemName: item.item_name,
+          grossTotal: item.grossItemTotal,
+          itemDiscount,
+          netItemTotal,
+          netUnitPrice,
+          taxRate: taxCalculation.taxRate,
+          taxAmount: itemTax,
+          customerType,
+        });
+      }
+
+      const allocatedDiscount = processedItems.reduce((s, i) => s + i.item_discount_amount, 0);
+      const roundingDiff = totalDiscount - allocatedDiscount;
+      if (Math.abs(roundingDiff) > 0.005 && processedItems.length > 0) {
+        processedItems[processedItems.length - 1].item_discount_amount += roundingDiff;
+      }
+
+      // ------------------------------------------------------------------
+      // Build accounting metadata for the trigger
+      // The trigger reads these columns to create the correct journal entry.
+      // ------------------------------------------------------------------
+      let discountAccountCode = null;
+      let discountBreakdownByAccount = null;
+
+      if (totalDiscount > 0 && discountResult?.appliedDiscounts?.length > 0) {
+        const { DiscountAccountingService } = await import('./discountAccountingService.js');
+        
+        discountBreakdownByAccount = discountResult.appliedDiscounts.reduce((acc, d) => {
+          const code = DiscountAccountingService.getDiscountAccountByType(d.type);
+          acc[code] = (acc[code] || 0) + d.amount;
+          return acc;
+        }, {});
+
+        discountAccountCode = Object.entries(discountBreakdownByAccount)
+          .sort(([, a], [, b]) => b - a)[0]?.[0] || '4110';
+      }
+
+      const subtotalAfterDiscount = totalSubtotal - totalDiscount;
+      const finalAmount = subtotalAfterDiscount + totalTax;
+      const averageTaxRate = subtotalAfterDiscount > 0
+        ? (totalTax / subtotalAfterDiscount) * 100
+        : 0;
 
       log.info('POS transaction totals calculated', {
         businessId,
-        subtotal: totalSubtotal,
+        grossSubtotal: totalSubtotal,
         discount: totalDiscount,
-        tax: totalTax,
+        subtotalAfterDiscount,
+        netTax: totalTax,
         averageTaxRate: averageTaxRate.toFixed(2),
         finalAmount,
-        itemCount: processedItems.length,
+        discountAccountCode,
         customerType,
         requiresApproval
       });
 
       // ------------------------------------------------------------------
-      // STEP 5: Build INSERT query, checking for optional approval columns
-      // TWO-PHASE COMMIT: Insert with status='pending' to NOT trigger accounting yet
+      // STEP 4: Build INSERT query with new columns
+      // PATCH 2: Added net_tax_amount, discount_account_code,
+      //          discount_breakdown_by_account, customer_type_at_sale
       // ------------------------------------------------------------------
       let insertQuery = `
         INSERT INTO pos_transactions (
@@ -762,7 +796,11 @@ export class POSService {
           total_amount, tax_amount, discount_amount, final_amount,
           payment_method, payment_status, status, notes, created_by,
           accounting_processed, accounting_error, tax_rate,
-          total_discount, discount_breakdown`;
+          total_discount, discount_breakdown,
+          net_tax_amount,
+          discount_account_code,
+          discount_breakdown_by_account,
+          customer_type_at_sale`;
 
       let approvalColumnsToInsert = [];
       try {
@@ -784,9 +822,9 @@ export class POSService {
         log.warn('Could not check for approval columns', { error: checkError.message });
       }
 
-      insertQuery += `) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18`;
+      insertQuery += `) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22`;
 
-      let paramCount = 19;
+      let paramCount = 23;
       const values = [
         businessId,
         transactionNumberValue,
@@ -798,7 +836,7 @@ export class POSService {
         finalAmount,
         transactionData.payment_method,
         transactionData.payment_status || 'completed',
-        'pending', // ✅ TWO-PHASE COMMIT: Insert with 'pending' status, not 'completed'
+        'pending',
         transactionData.notes || '',
         userId,
         false,
@@ -806,7 +844,11 @@ export class POSService {
         averageTaxRate,
         totalDiscount,
         transactionData.discount_breakdown ||
-          (discountResult ? JSON.stringify(discountResult.appliedDiscounts) : null)
+          (discountResult ? JSON.stringify(discountResult.appliedDiscounts) : null),
+        totalTax,
+        discountAccountCode,
+        discountBreakdownByAccount ? JSON.stringify(discountBreakdownByAccount) : null,
+        customerType,
       ];
 
       if (approvalColumnsToInsert.includes('requires_approval')) {
@@ -827,7 +869,8 @@ export class POSService {
       console.log(`🔵 [${new Date().toISOString()}] Transaction inserted with status='pending' (id: ${transaction.id}) - ${Date.now() - requestStart}ms`);
 
       // ------------------------------------------------------------------
-      // STEP 6: Insert transaction items (while status is still 'pending')
+      // STEP 5: Insert transaction items with new columns
+      // PATCH 3: Added net_unit_price, line_tax_amount, item_discount_amount
       // ------------------------------------------------------------------
       const processedTransactionItems = [];
 
@@ -842,8 +885,6 @@ export class POSService {
         const transactionItemId = await UUIDService.getUUID({
           context: 'pos_transaction_item'
         });
-
-        const itemTotalPrice = item.quantity * item.unit_price;
 
         try {
           const itemResult = await client.query(
@@ -864,11 +905,14 @@ export class POSService {
               discount_amount,
               tax_rate,
               tax_category_code,
+              net_unit_price,
+              line_tax_amount,
+              item_discount_amount,
               created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
             RETURNING id, product_id, inventory_item_id, service_id, equipment_id, booking_id,
                       item_type, item_name, quantity, unit_price, discount_amount, total_price,
-                      tax_rate, tax_category_code, created_at`,
+                      tax_rate, tax_category_code, net_unit_price, line_tax_amount, item_discount_amount, created_at`,
             [
               transactionItemId,
               businessId,
@@ -882,18 +926,18 @@ export class POSService {
               item.item_name,
               item.quantity,
               item.unit_price,
-              itemTotalPrice,
-              item.discount_amount || 0,
+              item.grossItemTotal,
+              item.item_discount_amount,
               item.tax_rate,
-              item.tax_category_code || 'STANDARD_GOODS'
+              item.tax_category_code || 'STANDARD_GOODS',
+              item.net_unit_price,
+              item.line_tax_amount,
+              item.item_discount_amount,
             ]
           );
 
           const insertedItem = itemResult.rows[0];
-          const calculatedTaxAmount =
-            item.quantity * item.unit_price * (item.tax_rate || 0) / 100;
 
-          // STEP 7: Tax audit trail - Now using the tax calculation result directly
           await POSTaxCalculator.createTaxTransaction(
             client,
             businessId,
@@ -901,9 +945,9 @@ export class POSService {
             item,
             {
               taxRate: item.tax_rate,
-              taxAmount: calculatedTaxAmount,
+              taxAmount: item.line_tax_amount,
               taxCategoryCode: item.tax_category_code,
-              itemTotal: itemTotalPrice,
+              itemTotal: item.net_unit_price * item.quantity,
               taxId: item.tax_id,
               taxCode: item.tax_code,
               taxName: item.tax_name
@@ -921,7 +965,7 @@ export class POSService {
             amount: insertedItem.unit_price,
             quantity: insertedItem.quantity,
             total_price: insertedItem.total_price,
-            tax_amount: calculatedTaxAmount,
+            tax_amount: insertedItem.line_tax_amount,
             tax_id: item.tax_id,
             tax_code: item.tax_code
           });
@@ -931,7 +975,7 @@ export class POSService {
             transactionId: transaction.id,
             itemName: insertedItem.item_name,
             quantity: insertedItem.quantity,
-            unitPrice: insertedItem.unit_price,
+            netUnitPrice: insertedItem.net_unit_price,
             totalPrice: insertedItem.total_price,
             taxRate: insertedItem.tax_rate,
             taxId: item.tax_id,
@@ -949,9 +993,7 @@ export class POSService {
       console.log(`🔵 [${new Date().toISOString()}] All ${processedItems.length} items inserted - ${Date.now() - requestStart}ms`);
 
       // ------------------------------------------------------------------
-      // STEP 6.5: Update status to 'completed' to trigger accounting
-      // TWO-PHASE COMMIT: This UPDATE fires the database trigger AFTER all items exist
-      // The trigger will then create complete 5-line journal entries
+      // STEP 6: Update status to 'completed' to trigger accounting
       // ------------------------------------------------------------------
       await client.query(
         `UPDATE pos_transactions
@@ -962,7 +1004,7 @@ export class POSService {
       console.log(`🔵 [${new Date().toISOString()}] Status updated to 'completed' - Accounting trigger fired - ${Date.now() - requestStart}ms`);
 
       // ------------------------------------------------------------------
-      // STEP 8: Discount allocation (after items exist for FK constraint)
+      // STEP 7: Discount allocation (after items exist for FK constraint)
       // ------------------------------------------------------------------
       if (discountResult && discountResult.totalDiscount > 0 && !requiresApproval) {
         try {
@@ -1010,7 +1052,6 @@ export class POSService {
         }
       }
 
-      // Update approval record with transaction ID if one was created
       if (approvalId) {
         try {
           await client.query(
@@ -1042,9 +1083,6 @@ export class POSService {
         }
       }
 
-      // ------------------------------------------------------------------
-      // STEP 9: Equipment hire (placeholder for future logic)
-      // ------------------------------------------------------------------
       const equipmentItems = processedItems.filter(
         item => item.item_type === 'equipment_hire'
       );
@@ -1058,17 +1096,6 @@ export class POSService {
         }
       }
 
-      // ------------------------------------------------------------------
-      // STEP 10: Inventory COGS accounting (direct inventory items)
-      // ========= COMMENTED OUT - Database trigger handles COGS ==========
-      // ------------------------------------------------------------------
-      // The database trigger create_journal_entry_for_pos_transaction_fixed
-      // automatically creates the COGS debit and Inventory credit entries
-      // when status is updated to 'completed'
-
-      // ------------------------------------------------------------------
-      // STEP 11: Audit log
-      // ------------------------------------------------------------------
       await auditLogger.logAction({
         businessId,
         userId,
@@ -1091,9 +1118,6 @@ export class POSService {
         }
       });
 
-      // ------------------------------------------------------------------
-      // STEP 12: COMMIT and IMMEDIATELY release connection #1
-      // ------------------------------------------------------------------
       await client.query('COMMIT');
       committed = true;
       client.release();
@@ -1108,20 +1132,14 @@ export class POSService {
         customerType,
         itemCount: processedItems.length,
         requiresApproval,
-        note: 'Status updated from pending→completed, database trigger should have created complete journal entries'
+        note: 'Tax calculated on NET amount (post-discount)'
       });
 
-      // ------------------------------------------------------------------
-      // STEP 13: Post-commit accounting verification (optional)
-      // Database trigger handles everything - just verify it worked
-      // ------------------------------------------------------------------
       console.log(`🔵 [${new Date().toISOString()}] Verifying accounting trigger results... - ${Date.now() - requestStart}ms`);
       let accountingResult = { success: true, linesCreated: 0, message: "Handled by database trigger" };
 
-      // Small delay to allow trigger to complete
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Verify accounting was created by the trigger
       const verifyClient = await getClient();
       try {
         const checkResult = await verifyClient.query(
@@ -1132,13 +1150,13 @@ export class POSService {
            WHERE je.reference_type = 'pos_transaction' AND je.reference_id = $1::text`,
           [transaction.id]
         );
-        
+
         const entryCount = parseInt(checkResult.rows[0].count);
         if (entryCount > 0) {
           accountingResult.linesCreated = entryCount;
           accountingResult.verified = true;
           accountingResult.cogs_detected = parseInt(checkResult.rows[0].cogs_count) > 0;
-          
+
           log.info('✅ Database trigger created journal entries', {
             transactionId: transaction.id,
             linesCreated: entryCount,
@@ -1155,7 +1173,6 @@ export class POSService {
         verifyClient.release();
       }
 
-      // ✅ Single consolidated update client for accounting flags
       const updateClient = await getClient();
       try {
         if (accountingResult?.verified === true) {
@@ -1193,20 +1210,19 @@ export class POSService {
         updateClient.release();
       }
 
-      // ------------------------------------------------------------------
-      // STEP 14: Build and return response
-      // ------------------------------------------------------------------
       const response = {
         ...transaction,
-        status: 'completed', // Override in response since we updated it
+        status: 'completed',
         items: processedTransactionItems,
         tax_breakdown: {
-          subtotal: totalSubtotal,
+          subtotal: subtotalAfterDiscount,
+          gross_subtotal: totalSubtotal,
           tax_amount: totalTax,
           tax_rate: averageTaxRate,
           discount_amount: totalDiscount,
           final_amount: finalAmount,
-          customer_type: customerType
+          customer_type: customerType,
+          tax_calculation_method: 'net_amount_after_discount'
         },
         discount_info:
           discountResult && !discountResult.requiresApproval
@@ -1225,10 +1241,11 @@ export class POSService {
           method: 'database_trigger (two-phase commit)',
           status: accountingResult?.verified === true ? 'created' : 'failed',
           entries_created: accountingResult?.linesCreated || 0,
-          note: accountingResult?.verified === true 
+          note: accountingResult?.verified === true
             ? 'Complete journal entries created by database trigger (Cash debit, Revenue credit, Tax Payable credit, COGS debit, Inventory credit)'
             : accountingResult?.message || 'Accounting creation failed - check trigger status',
           tax_calculated: true,
+          tax_calculation_base: 'NET amount (post-discount)',
           customer_type_used: customerType,
           items_with_tax: processedItems.filter(item => item.tax_amount > 0).length,
           two_phase_commit: 'pending→completed status transition fired trigger after items inserted'
@@ -1242,21 +1259,20 @@ export class POSService {
         accounting_verified: accountingResult?.verified === true,
         lines_created: accountingResult?.linesCreated || 0,
         requires_approval: requiresApproval,
-        status_flow: 'pending → completed'
+        status_flow: 'pending → completed',
+        tax_calculation: 'NET amount (post-discount)'
       });
 
       console.log(`🟢 [${new Date().toISOString()}] ========== POS TRANSACTION COMPLETE in ${Date.now() - requestStart}ms ==========\n`);
       return response;
 
     } catch (error) {
-      // Only rollback if we never committed
       if (!committed) {
         await client.query('ROLLBACK');
       }
       log.error('❌ POS transaction creation failed:', error);
       throw error;
     } finally {
-      // ✅ Only release here if the commit path never ran
       if (!committed) {
         client.release();
       }
@@ -1642,7 +1658,6 @@ export class POSService {
 
       const transaction = currentTransaction.rows[0];
 
-      // journal_entries.reference_id is VARCHAR — cast UUID to text
       const accountingCheck = await client.query(
         `SELECT COUNT(*) as count FROM journal_entries
          WHERE reference_type = 'pos_transaction' AND reference_id = $1::text`,
@@ -1660,7 +1675,6 @@ export class POSService {
         [businessId, transactionId]
       );
 
-      // inventory_transactions.reference_id is UUID — no cast needed
       await client.query(
         `DELETE FROM inventory_transactions
          WHERE business_id = $1 AND reference_id = $2 AND reference_type = 'pos_transaction'`,

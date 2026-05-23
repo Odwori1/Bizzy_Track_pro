@@ -57,18 +57,18 @@ export class DiscountAccountingService {
                      ON CONFLICT (business_id, account_code) DO NOTHING`,
                     [businessId, accountCode, `Sales Discounts - ${accountCode}`]
                 );
-                
+
                 // Try again
                 const retryResult = await client.query(
                     `SELECT id FROM chart_of_accounts
                      WHERE business_id = $1 AND account_code = $2 AND is_active = true`,
                     [businessId, accountCode]
                 );
-                
+
                 if (retryResult.rows.length === 0) {
                     throw new Error(`Discount account ${accountCode} could not be created for business`);
                 }
-                
+
                 return retryResult.rows[0].id;
             }
 
@@ -103,18 +103,18 @@ export class DiscountAccountingService {
                      ON CONFLICT (business_id, account_code) DO NOTHING`,
                     [businessId]
                 );
-                
+
                 // Try again
                 const retryResult = await client.query(
                     `SELECT id FROM chart_of_accounts
                      WHERE business_id = $1 AND account_code = '4100' AND is_active = true`,
                     [businessId]
                 );
-                
+
                 if (retryResult.rows.length === 0) {
                     throw new Error('Revenue account (4100) could not be created for business');
                 }
-                
+
                 return retryResult.rows[0].id;
             }
 
@@ -166,8 +166,30 @@ export class DiscountAccountingService {
 
     /**
      * Create journal entry for a single discount
+     * PATCH 1: POS guard added - skips POS transactions (handled by trigger)
+     * PATCH 3: Revenue line changed from 'credit' to 'debit'
      */
     static async createDiscountJournalEntry(transaction, discountInfo, userId) {
+        // ── PATCH 1: POS GUARD ──────────────────────────────────────────────────────────────
+        // POS discount lines are created by the database trigger as part of the
+        // main sale journal entry. Calling this method for POS transactions would
+        // create a second, duplicate entry and re-introduce Bug B.
+        // Invoice discounts still flow through here as before.
+        if (transaction.type === 'POS' || transaction.type === 'pos_transaction') {
+            log.info('POS discount accounting handled by database trigger — skipping journal creation', {
+                transactionId: transaction.id,
+                discountAmount: discountInfo.discount_amount,
+                ruleType: discountInfo.rule_type,
+            });
+            return {
+                skipped: true,
+                reason: 'POS transactions use database trigger for discount accounting',
+                transactionId: transaction.id,
+                discountAmount: discountInfo.discount_amount,
+            };
+        }
+        // ── END PATCH 1 ──────────────────────────────────────────────────────────────────────
+
         const client = await getClient();
 
         try {
@@ -187,7 +209,7 @@ export class DiscountAccountingService {
             const journalResult = await client.query(
                 `INSERT INTO journal_entries (
                     business_id, journal_date, reference_number, description,
-                    reference_type, reference_id, total_amount, status, 
+                    reference_type, reference_id, total_amount, status,
                     created_by, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
                 RETURNING id, reference_number`,
@@ -206,13 +228,15 @@ export class DiscountAccountingService {
 
             const journalId = journalResult.rows[0].id;
 
-            // Create journal lines (debit discount account, credit revenue account)
+            // ── PATCH 3: Revenue line is DEBIT (reduces revenue) not CREDIT ─────────
+            // A discount reduces revenue. To reduce a credit-normal account (revenue),
+            // you DEBIT it. The original code had 'credit' here which INCREASED revenue.
             await client.query(
                 `INSERT INTO journal_entry_lines (
                     business_id, journal_entry_id, account_id, line_type, amount, description, created_at
-                ) VALUES 
+                ) VALUES
                     ($1, $2, $3, 'debit', $4, $5, NOW()),
-                    ($1, $2, $6, 'credit', $4, $7, NOW())`,
+                    ($1, $2, $6, 'debit', $4, $7, NOW())`,
                 [
                     businessId,
                     journalId,
@@ -223,6 +247,7 @@ export class DiscountAccountingService {
                     `Revenue reduction from ${discountInfo.rule_type} discount`
                 ]
             );
+            // ── END PATCH 3 ──────────────────────────────────────────────────────────
 
             // Link allocation to journal entry if allocation exists
             if (discountInfo.allocation_id) {
@@ -266,7 +291,7 @@ export class DiscountAccountingService {
                 account_code: accountCode,
                 lines: [
                     { account_id: discountAccountId, line_type: 'debit', amount: discountInfo.discount_amount },
-                    { account_id: revenueAccountId, line_type: 'credit', amount: discountInfo.discount_amount }
+                    { account_id: revenueAccountId, line_type: 'debit', amount: discountInfo.discount_amount }
                 ]
             };
 
@@ -281,8 +306,26 @@ export class DiscountAccountingService {
 
     /**
      * Create journal entry for multiple discounts (stacked)
+     * PATCH 2: POS guard added - skips POS transactions (handled by trigger)
+     * PATCH 3: Revenue line changed from 'credit' to 'debit'
      */
     static async createBulkDiscountJournalEntries(transaction, discounts, userId) {
+        // ── PATCH 2: POS GUARD ──────────────────────────────────────────────────────────────
+        if (transaction.type === 'POS' || transaction.type === 'pos_transaction') {
+            log.info('POS bulk discount accounting handled by database trigger — skipping', {
+                transactionId: transaction.id,
+                discountCount: discounts.length,
+                totalDiscount: discounts.reduce((s, d) => s + d.discount_amount, 0),
+            });
+            return {
+                skipped: true,
+                reason: 'POS transactions use database trigger for discount accounting',
+                transactionId: transaction.id,
+                discountCount: discounts.length,
+            };
+        }
+        // ── END PATCH 2 ──────────────────────────────────────────────────────────────────────
+
         const client = await getClient();
 
         try {
@@ -316,7 +359,7 @@ export class DiscountAccountingService {
             const journalResult = await client.query(
                 `INSERT INTO journal_entries (
                     business_id, journal_date, reference_number, description,
-                    reference_type, reference_id, total_amount, status, 
+                    reference_type, reference_id, total_amount, status,
                     created_by, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
                 RETURNING id, reference_number`,
@@ -335,7 +378,7 @@ export class DiscountAccountingService {
 
             const journalId = journalResult.rows[0].id;
 
-            // Create debit lines for each discount account
+            // Create debit lines for each discount account (unchanged — these were correct)
             for (const [accountCode, data] of Object.entries(discountsByAccount)) {
                 const accountId = await this.getDiscountAccountId(businessId, accountCode);
 
@@ -365,11 +408,13 @@ export class DiscountAccountingService {
                 }
             }
 
-            // Create credit line for revenue account
+            // ── PATCH 3: Revenue line is DEBIT for non-POS flows ────────────────────
+            // Changed from 'credit' to 'debit'.
+            // A discount reduces revenue — debit a revenue account to reduce it.
             await client.query(
                 `INSERT INTO journal_entry_lines (
                     business_id, journal_entry_id, account_id, line_type, amount, description, created_at
-                ) VALUES ($1, $2, $3, 'credit', $4, $5, NOW())`,
+                ) VALUES ($1, $2, $3, 'debit', $4, $5, NOW())`,
                 [
                     businessId,
                     journalId,
@@ -378,6 +423,7 @@ export class DiscountAccountingService {
                     `Revenue reduction from ${discounts.length} discounts`
                 ]
             );
+            // ── END PATCH 3 ──────────────────────────────────────────────────────────
 
             await auditLogger.logAction({
                 businessId,
@@ -454,7 +500,7 @@ export class DiscountAccountingService {
             const journalResult = await client.query(
                 `INSERT INTO journal_entries (
                     business_id, journal_date, reference_number, description,
-                    reference_type, reference_id, total_amount, status, 
+                    reference_type, reference_id, total_amount, status,
                     created_by, created_at, updated_at, voided_at, voided_by, void_reason
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW(), $10, $11)
                 RETURNING id, reference_number`,
@@ -484,7 +530,7 @@ export class DiscountAccountingService {
             for (const line of lines.rows) {
                 // Swap line_type for reversal
                 const reversalType = line.line_type === 'debit' ? 'credit' : 'debit';
-                
+
                 await client.query(
                     `INSERT INTO journal_entry_lines (
                         business_id, journal_entry_id, account_id, line_type, amount, description, created_at
@@ -892,7 +938,7 @@ export class DiscountAccountingService {
             const journalResult = await client.query(
                 `INSERT INTO journal_entries (
                     business_id, journal_date, reference_number, description,
-                    reference_type, reference_id, total_amount, status, 
+                    reference_type, reference_id, total_amount, status,
                     created_by, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
                 RETURNING id, reference_number`,

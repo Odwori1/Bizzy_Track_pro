@@ -3,13 +3,17 @@ import Joi from 'joi';
 export const createExpenseCategorySchema = Joi.object({
   name: Joi.string().max(200).required(),
   description: Joi.string().max(1000).optional().allow(''),
-  is_active: Joi.boolean().default(true)
+  is_active: Joi.boolean().default(true),
+  color: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).optional().default('#3B82F6'),
+  account_code: Joi.string().max(20).optional().allow(null, '')  // ✅ ADD THIS
 });
 
 export const updateExpenseCategorySchema = Joi.object({
   name: Joi.string().max(200).optional(),
   description: Joi.string().max(1000).optional().allow(''),
-  is_active: Joi.boolean().optional()
+  is_active: Joi.boolean().optional(),
+  color: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).optional(),
+  account_code: Joi.string().max(20).optional().allow(null, '')  // ✅ ADD THIS
 });
 
 export const createExpenseSchema = Joi.object({
