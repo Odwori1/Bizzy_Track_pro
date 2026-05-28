@@ -17,8 +17,8 @@ export const posDiscountSchemas = {
                 equipment_id: Joi.string().uuid().optional(),
                 booking_id: Joi.string().uuid().optional(),
                 item_type: Joi.string().valid(
-                    'service', 
-                    'product', 
+                    'service',
+                    'product',
                     'inventory',
                     'equipment_hire'
                 ).required(),
@@ -46,15 +46,15 @@ export const posDiscountSchemas = {
                 return value;
             }, 'Item validation')
         ).min(1).required(),
-        
+
         payment_method: Joi.string().valid(
-            'cash', 
-            'card', 
-            'mobile_money', 
-            'bank_transfer', 
+            'cash',
+            'card',
+            'mobile_money',
+            'bank_transfer',
             'multiple'
         ).required(),
-        
+
         payment_status: Joi.string().valid('pending', 'completed', 'failed').default('completed'),
         status: Joi.string().valid('draft', 'completed', 'voided').default('completed'),
         notes: Joi.string().max(500).optional().allow(''),
@@ -62,9 +62,9 @@ export const posDiscountSchemas = {
 
         // Discount fields
         promo_code: Joi.string().max(50).optional(),
-        apply_discounts: Joi.boolean().default(true),
+        apply_discounts: Joi.boolean().default(false),
         pre_approved: Joi.boolean().default(false),
-        
+
         // Calculated fields (can be passed or calculated)
         discount_amount: Joi.number().min(0).precision(2).optional(),
         total_discount: Joi.number().min(0).precision(2).optional(),

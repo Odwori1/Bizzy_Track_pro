@@ -592,7 +592,7 @@ export class POSService {
 
       const discountStart = Date.now();
 
-      if (transactionData.promo_code || transactionData.apply_discounts !== false) {
+      if (transactionData.promo_code || transactionData.apply_discounts === true) {
         try {
           const discountItems = [];
           for (const item of grossItems) {

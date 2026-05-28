@@ -17,7 +17,7 @@ export const createPOSTransactionSchema = Joi.object({
 
   // ✅ NEW: Discount and promo fields
   promo_code: Joi.string().max(50).optional().allow(null),
-  apply_discounts: Joi.boolean().default(true),
+  apply_discounts: Joi.boolean().default(false),
   pre_approved: Joi.boolean().default(false),
   discount_breakdown: Joi.object().optional(),
 
