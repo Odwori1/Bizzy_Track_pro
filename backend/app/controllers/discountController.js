@@ -1187,16 +1187,32 @@ export class DiscountController {
                 });
             }
 
+            // ✅ CONVERT from camelCase (API) to snake_case (Service/DB)
+            const serviceData = {
+                tier_name: tierData.tierName,
+                min_quantity: tierData.minQuantity,
+                min_amount: tierData.minAmount,
+                discount_percentage: tierData.discountPercentage,
+                applies_to: tierData.appliesTo || 'ALL',
+                target_category_id: tierData.targetCategoryId,
+                target_service_id: tierData.targetServiceId,
+                is_active: tierData.isActive !== false,
+                description: tierData.description
+            };
+
             log.info('Creating volume discount tier', {
                 businessId,
                 userId,
-                tierName: tierData.tierName
+                tierName: serviceData.tier_name,
+                minQuantity: serviceData.min_quantity,
+                discountPercentage: serviceData.discount_percentage
             });
 
+            // ✅ CORRECT parameter order: (data, businessId, userId)
             const result = await VolumeDiscountService.createTier(
-                tierData,
-                userId,
-                businessId
+                serviceData,
+                businessId,   // ✅ business_id for foreign key
+                userId        // ✅ created_by for audit
             );
 
             await auditLogger.logAction({

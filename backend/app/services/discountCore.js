@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountCore.js
 // PURPOSE: Core discount calculations and utilities
-// PHASE 10: DAY 1 - Foundation for Discount Accounting System
+// PHASE 10.11: PRODUCTION FIX - Stacking modes, priority sorting, governance
 // DEPENDS ON: New database tables from migration 1003
 
 import { getClient } from '../utils/database.js';
@@ -12,7 +12,7 @@ import { log } from '../utils/logger.js';
  * This service provides the foundational calculations used by all
  * discount types in the system. It handles:
  * - Base discount calculations (percentage/fixed)
- * - Stacking logic and conflict resolution
+ * - Stacking logic with configurable modes
  * - Date validity checking
  * - Maximum limit enforcement
  * - Currency rounding and precision
@@ -26,96 +26,46 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Convert any date input to UTC ISO string for database storage
-     * (Matches taxDashboardService pattern)
-     */
     static toUTCISOString(dateInput) {
-        if (!dateInput) {
-            return new Date().toISOString();
-        }
-
+        if (!dateInput) return new Date().toISOString();
         try {
-            // If it's already a string in ISO format, return as-is
-            if (typeof dateInput === "string" && dateInput.includes("T")) {
-                return dateInput;
-            }
-
-            // If it's a date-only string (YYYY-MM-DD), add time component
+            if (typeof dateInput === "string" && dateInput.includes("T")) return dateInput;
             if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
                 return new Date(dateInput + "T00:00:00Z").toISOString();
             }
-
-            // Otherwise, create Date object and convert to ISO
             const date = new Date(dateInput);
-            if (isNaN(date.getTime())) {
-                return new Date().toISOString();
-            }
-            return date.toISOString();
-
+            return isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
         } catch (error) {
             return new Date().toISOString();
         }
     }
 
-    /**
-     * Convert any date input to date-only string (YYYY-MM-DD)
-     * (Matches taxDashboardService pattern for tax calculations)
-     */
     static toDateOnlyString(dateInput) {
-        if (!dateInput) {
-            return new Date().toISOString().split("T")[0];
-        }
-
+        if (!dateInput) return new Date().toISOString().split("T")[0];
         try {
             const date = new Date(dateInput);
-            if (isNaN(date.getTime())) {
-                return new Date().toISOString().split("T")[0];
-            }
-            return date.toISOString().split("T")[0];
+            return isNaN(date.getTime()) ? new Date().toISOString().split("T")[0] : date.toISOString().split("T")[0];
         } catch (error) {
             return new Date().toISOString().split("T")[0];
         }
     }
 
-    /**
-     * Parse date to YYYY-MM-DD format (legacy method - kept for backward compatibility)
-     */
     static parseAsDateOnly(dateInput) {
         return this.toDateOnlyString(dateInput);
     }
 
-    /**
-     * Get date range based on period
-     */
     static getDateRange(period = 'month', referenceDate = new Date()) {
         const end = new Date(referenceDate);
         let start = new Date(referenceDate);
-
         switch (period) {
-            case 'week':
-                start.setDate(end.getDate() - 7);
-                break;
-            case 'month':
-                start.setMonth(end.getMonth() - 1);
-                break;
-            case 'quarter':
-                start.setMonth(end.getMonth() - 3);
-                break;
-            case 'year':
-                start.setFullYear(end.getFullYear() - 1);
-                break;
-            case 'ytd':
-                start = new Date(end.getFullYear(), 0, 1); // Jan 1st
-                break;
-            default:
-                start.setMonth(end.getMonth() - 1); // Default to month
+            case 'week': start.setDate(end.getDate() - 7); break;
+            case 'month': start.setMonth(end.getMonth() - 1); break;
+            case 'quarter': start.setMonth(end.getMonth() - 3); break;
+            case 'year': start.setFullYear(end.getFullYear() - 1); break;
+            case 'ytd': start = new Date(end.getFullYear(), 0, 1); break;
+            default: start.setMonth(end.getMonth() - 1);
         }
-
-        return {
-            startDate: this.toDateOnlyString(start),
-            endDate: this.toDateOnlyString(end)
-        };
+        return { startDate: this.toDateOnlyString(start), endDate: this.toDateOnlyString(end) };
     }
 
     /**
@@ -124,93 +74,51 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Calculate discount amount based on type and value
-     *
-     * @param {number} amount - Original amount to apply discount to
-     * @param {string} discountType - 'PERCENTAGE' or 'FIXED'
-     * @param {number} discountValue - Percentage (0-100) or fixed amount
-     * @returns {number} Calculated discount amount
-     */
     static calculateDiscount(amount, discountType, discountValue) {
-        // Input validation
         if (!amount || amount <= 0) {
             log.debug('Discount calculation skipped - invalid amount', { amount });
             return 0;
         }
-
         if (!discountValue || discountValue <= 0) {
             log.debug('Discount calculation skipped - invalid discount value', { discountValue });
             return 0;
         }
 
         let discountAmount = 0;
-
         if (discountType === 'PERCENTAGE') {
-            // Percentage discount (e.g., 15% = 0.15)
-            const percentage = Math.min(discountValue, 100); // Cap at 100%
+            const percentage = Math.min(discountValue, 100);
             discountAmount = (amount * percentage) / 100;
-            log.debug('Percentage discount calculated', {
-                amount,
-                percentage,
-                discountAmount
-            });
+            log.debug('Percentage discount calculated', { amount, percentage, discountAmount });
         } else if (discountType === 'FIXED') {
-            // Fixed amount discount (can't exceed original amount)
             discountAmount = Math.min(discountValue, amount);
-            log.debug('Fixed discount calculated', {
-                amount,
-                requestedDiscount: discountValue,
-                discountAmount
-            });
+            log.debug('Fixed discount calculated', { amount, requestedDiscount: discountValue, discountAmount });
         } else {
             log.warn('Unknown discount type', { discountType });
             return 0;
         }
-
-        // Round to 2 decimal places (currency standard)
         return Math.round(discountAmount * 100) / 100;
     }
 
-    /**
-     * Calculate discounted amount after applying discount
-     *
-     * @param {number} originalAmount - Original amount before discount
-     * @param {number} discountAmount - Calculated discount amount
-     * @returns {number} Final amount after discount
-     */
     static applyDiscount(originalAmount, discountAmount) {
         const finalAmount = Math.max(0, originalAmount - discountAmount);
-
-        log.debug('Discount applied', {
-            originalAmount,
-            discountAmount,
-            finalAmount
-        });
-
+        log.debug('Discount applied', { originalAmount, discountAmount, finalAmount });
         return Math.round(finalAmount * 100) / 100;
     }
 
     /**
      * =====================================================
-     * SECTION 2: STACKING LOGIC
+     * SECTION 2: STACKING LOGIC - PRODUCTION FIX
      * =====================================================
      */
 
     /**
      * Check if a new discount can be stacked with existing discounts
-     *
-     * @param {Array} existingDiscounts - Currently applied discounts
-     * @param {Object} newDiscount - Proposed discount to add
-     * @returns {boolean} True if discounts can stack
+     * PRODUCTION FIX: Added settings parameter for configurable stacking
      */
-    static canStack(existingDiscounts, newDiscount) {
-        // If no existing discounts, definitely can stack
-        if (!existingDiscounts || existingDiscounts.length === 0) {
-            return true;
-        }
+    static canStack(existingDiscounts, newDiscount, settings = {}) {
+        if (!existingDiscounts || existingDiscounts.length === 0) return true;
 
-        // Check if new discount is stackable
+        // Check if new discount is explicitly non-stackable
         if (newDiscount?.stackable === false) {
             log.debug('Discount cannot stack - new discount is non-stackable', {
                 discountId: newDiscount.id,
@@ -228,8 +136,9 @@ export class DiscountCore {
             return false;
         }
 
-        // Check for conflicting rule types (e.g., two volume discounts)
-        const conflictTypes = ['VOLUME', 'PROMOTIONAL', 'EARLY_PAYMENT'];
+        // PRODUCTION FIX: Use settings-driven conflict types instead of hardcoded
+        const conflictTypes = settings.conflictTypes || ['VOLUME', 'PROMOTIONAL', 'EARLY_PAYMENT'];
+
         for (const type of conflictTypes) {
             const existingOfType = existingDiscounts.filter(d => d?.rule_type === type);
             if (existingOfType.length > 0 && newDiscount?.rule_type === type) {
@@ -246,34 +155,74 @@ export class DiscountCore {
 
     /**
      * Calculate total discount from multiple stacked discounts
-     * Ensures total discount doesn't exceed original amount
-     *
-     * @param {number} originalAmount - Original amount before any discounts
-     * @param {Array} discounts - Array of discount objects to apply
-     * @returns {Object} Stacked discount result
+     * PRODUCTION FIX: Added stackingMode parameter with governance
+     * 
+     * Stacking Modes:
+     * - 'best_only': Apply only the single best discount
+     * - 'exclusive_promo': If promo code provided, apply ONLY that promo
+     * - 'exclusive_auto': Apply ONLY automatic discounts (no promo)
+     * - 'cascade': Stack sequentially on remaining amount (default)
+     * - 'parallel': Stack on original amount (additive)
+     * - 'hybrid': Best auto + promo (if provided)
      */
-    static calculateStackedDiscount(originalAmount, discounts) {
+    static calculateStackedDiscount(originalAmount, discounts, options = {}) {
+        const {
+            stackingMode = 'best_only',  // PRODUCTION FIX: Default to best_only for safety
+            maxStackDepth = 1,
+            maxDiscountPercentage = 50,
+            promoCode = null,
+            applyDiscounts = false
+        } = options;
+
         if (!discounts || discounts.length === 0) {
             return {
                 totalDiscount: 0,
                 finalAmount: originalAmount,
                 appliedDiscounts: [],
-                remainingAmount: originalAmount
+                remainingAmount: originalAmount,
+                stackingMode
             };
         }
+
+        // PRODUCTION FIX: Filter discounts based on stacking mode
+        let eligibleDiscounts = this._filterDiscountsByMode(discounts, stackingMode, promoCode, applyDiscounts);
+
+        if (eligibleDiscounts.length === 0) {
+            return {
+                totalDiscount: 0,
+                finalAmount: originalAmount,
+                appliedDiscounts: [],
+                remainingAmount: originalAmount,
+                stackingMode
+            };
+        }
+
+        // PRODUCTION FIX: Sort by priority ASCENDING (lower number = higher priority)
+        // This was previously sorting DESCENDING which caused wrong application order
+        const sortedDiscounts = [...eligibleDiscounts].sort((a, b) =>
+            (a.priority || 999) - (b.priority || 999)
+        );
+
+        log.debug('Discounts sorted by priority', {
+            stackingMode,
+            discountCount: sortedDiscounts.length,
+            priorities: sortedDiscounts.map(d => ({ name: d.name, priority: d.priority, type: d.rule_type }))
+        });
 
         let remainingAmount = originalAmount;
         const appliedDiscounts = [];
         let totalDiscount = 0;
-
-        // Sort by priority (higher priority first)
-        const sortedDiscounts = [...discounts].sort((a, b) =>
-            (b.priority || 0) - (a.priority || 0)
-        );
+        let stackDepth = 0;
 
         for (const discount of sortedDiscounts) {
-            // Check if this discount can be applied
-            if (!this.canStack(appliedDiscounts, discount)) {
+            // Check max stack depth
+            if (stackDepth >= maxStackDepth) {
+                log.debug('Max stack depth reached', { maxStackDepth, currentDepth: stackDepth });
+                break;
+            }
+
+            // Check if this discount can be stacked
+            if (!this.canStack(appliedDiscounts, discount, options)) {
                 log.debug('Discount skipped - cannot stack', {
                     discountId: discount.id,
                     discountName: discount.name
@@ -281,14 +230,14 @@ export class DiscountCore {
                 continue;
             }
 
-            // Calculate discount on remaining amount
+            // Calculate discount
             const discountAmount = this.calculateDiscount(
                 remainingAmount,
                 discount.discount_type || discount.calculation_method,
                 discount.discount_value
             );
 
-            // Apply max discount limit if specified
+            // Apply max discount limit
             const finalDiscountAmount = this.applyMaxDiscount(
                 discountAmount,
                 discount.max_discount_amount,
@@ -303,6 +252,33 @@ export class DiscountCore {
 
                 totalDiscount += finalDiscountAmount;
                 remainingAmount -= finalDiscountAmount;
+                stackDepth++;
+
+                log.debug('Discount applied', {
+                    discountId: discount.id,
+                    name: discount.name,
+                    type: discount.rule_type,
+                    amount: finalDiscountAmount,
+                    remainingAmount
+                });
+            }
+        }
+
+        // PRODUCTION FIX: Enforce max discount percentage
+        const maxAllowedDiscount = (originalAmount * maxDiscountPercentage) / 100;
+        if (totalDiscount > maxAllowedDiscount) {
+            log.warn('Total discount exceeds maximum allowed, capping', {
+                totalDiscount,
+                maxAllowedDiscount,
+                maxDiscountPercentage
+            });
+
+            // Cap the last discount to meet the limit
+            const excess = totalDiscount - maxAllowedDiscount;
+            if (appliedDiscounts.length > 0) {
+                appliedDiscounts[appliedDiscounts.length - 1].calculatedDiscount -= excess;
+                totalDiscount = maxAllowedDiscount;
+                remainingAmount = originalAmount - totalDiscount;
             }
         }
 
@@ -310,8 +286,78 @@ export class DiscountCore {
             totalDiscount: Math.round(totalDiscount * 100) / 100,
             finalAmount: Math.max(0, originalAmount - totalDiscount),
             appliedDiscounts,
-            remainingAmount: Math.max(0, remainingAmount)
+            remainingAmount: Math.max(0, remainingAmount),
+            stackingMode
         };
+    }
+
+    /**
+     * PRODUCTION FIX: Filter discounts based on stacking mode
+     */
+    static _filterDiscountsByMode(discounts, stackingMode, promoCode, applyDiscounts) {
+        const promotionalDiscounts = discounts.filter(d => d.rule_type === 'PROMOTIONAL');
+        const autoDiscounts = discounts.filter(d => 
+            ['VOLUME', 'CATEGORY', 'PRICING_RULE', 'EARLY_PAYMENT'].includes(d.rule_type)
+        );
+
+        switch (stackingMode) {
+            case 'best_only':
+                // Return only the single best discount
+                return [this._findBestDiscount(discounts)];
+
+            case 'exclusive_promo':
+                // If promo code provided, return ONLY matching promo
+                // If no promo match, return empty (error handled upstream)
+                if (promoCode) {
+                    const matchingPromo = promotionalDiscounts.find(d => 
+                        d.promo_code?.toUpperCase() === promoCode.toUpperCase()
+                    );
+                    return matchingPromo ? [matchingPromo] : [];
+                }
+                // No promo code, return best auto discount
+                return [this._findBestDiscount(autoDiscounts)];
+
+            case 'exclusive_auto':
+                // Return ONLY automatic discounts, no promos
+                return autoDiscounts;
+
+            case 'cascade':
+                // Return all discounts (stack sequentially)
+                return discounts;
+
+            case 'parallel':
+                // Return all discounts (stack on original amount)
+                return discounts;
+
+            case 'hybrid':
+                // Best auto discount + matching promo (if provided)
+                const bestAuto = this._findBestDiscount(autoDiscounts);
+                const matchingPromo = promoCode ? promotionalDiscounts.find(d => 
+                    d.promo_code?.toUpperCase() === promoCode.toUpperCase()
+                ) : null;
+
+                const hybridDiscounts = [];
+                if (bestAuto) hybridDiscounts.push(bestAuto);
+                if (matchingPromo) hybridDiscounts.push(matchingPromo);
+                return hybridDiscounts;
+
+            default:
+                log.warn('Unknown stacking mode, defaulting to best_only', { stackingMode });
+                return [this._findBestDiscount(discounts)];
+        }
+    }
+
+    /**
+     * Find the single best discount from a list
+     */
+    static _findBestDiscount(discounts) {
+        if (!discounts || discounts.length === 0) return null;
+
+        return discounts.reduce((best, current) => {
+            const bestValue = parseFloat(best.discount_value || 0);
+            const currentValue = parseFloat(current.discount_value || 0);
+            return currentValue > bestValue ? current : best;
+        });
     }
 
     /**
@@ -320,53 +366,21 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Apply maximum discount limits
-     *
-     * @param {number} calculatedDiscount - Initially calculated discount
-     * @param {number} maxAmount - Maximum allowed discount amount
-     * @param {number} originalAmount - Original amount (for absolute limits)
-     * @returns {number} Discount amount capped by limits
-     */
     static applyMaxDiscount(calculatedDiscount, maxAmount, originalAmount) {
         let finalDiscount = calculatedDiscount;
-
-        // Apply maximum amount limit
         if (maxAmount && maxAmount > 0) {
             finalDiscount = Math.min(finalDiscount, maxAmount);
-            log.debug('Max amount limit applied', {
-                originalDiscount: calculatedDiscount,
-                maxAmount,
-                finalDiscount
-            });
+            log.debug('Max amount limit applied', { originalDiscount: calculatedDiscount, maxAmount, finalDiscount });
         }
-
-        // Can never discount more than the original amount
         finalDiscount = Math.min(finalDiscount, originalAmount);
-
         return Math.round(finalDiscount * 100) / 100;
     }
 
-    /**
-     * Check if a discount exceeds approval threshold
-     *
-     * @param {number} discountPercentage - Discount percentage (0-100)
-     * @param {number} threshold - Approval threshold percentage
-     * @returns {boolean} True if approval required
-     */
     static requiresApproval(discountPercentage, threshold) {
-        // Validate inputs
         if (!discountPercentage || discountPercentage <= 0) return false;
         if (!threshold || threshold <= 0) return false;
-
         const requires = discountPercentage >= threshold;
-
-        log.debug('Approval check', {
-            discountPercentage,
-            threshold,
-            requiresApproval: requires
-        });
-
+        log.debug('Approval check', { discountPercentage, threshold, requiresApproval: requires });
         return requires;
     }
 
@@ -376,80 +390,31 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Validate discount dates against current date
-     * Uses toDateOnlyString for consistent date comparison
-     *
-     * @param {Date|string} validFrom - Start date
-     * @param {Date|string} validTo - End date
-     * @returns {boolean} True if discount is currently valid
-     */
     static isValid(validFrom, validTo) {
         const today = this.toDateOnlyString(new Date());
         const todayDate = new Date(today);
-
-        // Parse dates to date-only strings for comparison
         const fromDateStr = validFrom ? this.toDateOnlyString(validFrom) : null;
         const toDateStr = validTo ? this.toDateOnlyString(validTo) : null;
-
         const fromDate = fromDateStr ? new Date(fromDateStr) : null;
         const toDate = toDateStr ? new Date(toDateStr) : null;
 
-        // Check valid_from
         if (fromDate && fromDate > todayDate) {
-            log.debug('Discount not yet valid', {
-                validFrom: fromDateStr,
-                today: today
-            });
+            log.debug('Discount not yet valid', { validFrom: fromDateStr, today });
             return false;
         }
-
-        // Check valid_to
         if (toDate && toDate < todayDate) {
-            log.debug('Discount expired', {
-                validTo: toDateStr,
-                today: today
-            });
+            log.debug('Discount expired', { validTo: toDateStr, today });
             return false;
         }
-
         return true;
     }
 
-    /**
-     * Validate discount value based on type
-     *
-     * @param {string} discountType - 'PERCENTAGE' or 'FIXED'
-     * @param {number} discountValue - Value to validate
-     * @returns {Object} Validation result
-     */
     static validateDiscountValue(discountType, discountValue) {
-        // Check for null/undefined
-        if (!discountValue) {
-            return {
-                valid: false,
-                reason: 'Discount value is required'
-            };
+        if (!discountValue) return { valid: false, reason: 'Discount value is required' };
+        if (discountValue <= 0) return { valid: false, reason: 'Discount value must be positive' };
+        if (discountType === 'PERCENTAGE' && discountValue > 100) {
+            return { valid: false, reason: 'Percentage discount cannot exceed 100%' };
         }
-
-        // Check positive
-        if (discountValue <= 0) {
-            return {
-                valid: false,
-                reason: 'Discount value must be positive'
-            };
-        }
-
-        // Type-specific validation
-        if (discountType === 'PERCENTAGE') {
-            if (discountValue > 100) {
-                return {
-                    valid: false,
-                    reason: 'Percentage discount cannot exceed 100%'
-                };
-            }
-        }
-
         return { valid: true };
     }
 
@@ -459,54 +424,27 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Get discount rule by ID from database
-     *
-     * @param {string} ruleId - Discount rule ID
-     * @param {string} businessId - Business ID
-     * @returns {Promise<Object>} Discount rule object
-     */
     static async getDiscountRule(ruleId, businessId) {
         const client = await getClient();
-
         try {
-            // Check in discount_rules table first
             const result = await client.query(
-                `SELECT * FROM discount_rules
-                 WHERE id = $1 AND business_id = $2 AND is_active = true`,
+                `SELECT * FROM discount_rules WHERE id = $1 AND business_id = $2 AND is_active = true`,
                 [ruleId, businessId]
             );
-
-            if (result.rows.length > 0) {
-                return result.rows[0];
-            }
-
-            // Fall back to category_discount_rules
+            if (result.rows.length > 0) return result.rows[0];
             const categoryResult = await client.query(
-                `SELECT * FROM category_discount_rules
-                 WHERE id = $1 AND business_id = $2`,
+                `SELECT * FROM category_discount_rules WHERE id = $1 AND business_id = $2`,
                 [ruleId, businessId]
             );
-
             return categoryResult.rows[0] || null;
-
         } catch (error) {
-            log.error('Error fetching discount rule', {
-                ruleId,
-                businessId,
-                error: error.message
-            });
+            log.error('Error fetching discount rule', { ruleId, businessId, error: error.message });
             return null;
         } finally {
             client.release();
         }
     }
 
-    /**
-     * Log discount calculation for audit trail
-     *
-     * @param {Object} calculation - Calculation details
-     */
     static async logCalculation(calculation) {
         log.info('Discount calculation performed', {
             timestamp: this.toUTCISOString(new Date()),
@@ -520,24 +458,11 @@ export class DiscountCore {
      * =====================================================
      */
 
-    /**
-     * Format discount amount for display
-     *
-     * @param {number} amount - Discount amount
-     * @param {string} currency - Currency code (e.g., 'UGX')
-     * @returns {string} Formatted discount string
-     */
     static formatDiscount(amount, currency = 'UGX') {
         if (!amount || amount <= 0) return `${currency} 0.00`;
         return `${currency} ${amount.toFixed(2)}`;
     }
 
-    /**
-     * Format discount percentage for display
-     *
-     * @param {number} percentage - Discount percentage
-     * @returns {string} Formatted percentage string
-     */
     static formatPercentage(percentage) {
         if (!percentage || percentage <= 0) return '0.0%';
         return `${percentage.toFixed(1)}%`;

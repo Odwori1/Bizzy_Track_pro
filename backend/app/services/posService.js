@@ -113,7 +113,7 @@ class POSTaxCalculator {
     let taxRate = 0;
     let taxAmount = 0;
     let taxCategoryCode = 'STANDARD_GOODS';
-    
+
     // When posService.js has pre-computed the net (post-discount) amount,
     // it passes it via _override_amount so the tax base is always correct.
     // Fallback to quantity * unit_price for non-discounted transactions.
@@ -577,10 +577,10 @@ export class POSService {
         console.log(`🟢 [${new Date().toISOString()}] Item validated in ${Date.now() - itemStart}ms`);
       }
 
-      // ------------------------------------------------------------------
+      // ============================================================================
       // STEP 2: Calculate discount on the FULL gross subtotal
       // Discount must be known before we calculate any tax.
-      // ------------------------------------------------------------------
+      // ============================================================================
       let discountResult = null;
       let requiresApproval = false;
       let approvalId = null;
@@ -591,6 +591,9 @@ export class POSService {
         : new Date().toISOString().split('T')[0];
 
       const discountStart = Date.now();
+
+      // FIX PHASE 1: Calculate total quantity from all items for volume discount evaluation
+      const totalQuantity = grossItems.reduce((sum, item) => sum + item.quantity, 0);
 
       if (transactionData.promo_code || transactionData.apply_discounts === true) {
         try {
@@ -620,18 +623,23 @@ export class POSService {
 
           log.info('Calculating discounts for POS transaction', {
             promoCode: transactionData.promo_code,
+            applyDiscounts: transactionData.apply_discounts,
             itemCount: discountItems.length,
+            totalQuantity: totalQuantity,  // FIX: Log total quantity
             subtotal: totalSubtotal
           });
 
+          // FIX PHASE 1: Pass totalQuantity and applyDiscounts flag to engine
           const discountCheck = await DiscountRuleEngine.calculateFinalPrice({
             businessId,
             customerId: transactionData.customer_id,
             items: discountItems,
             amount: totalSubtotal,
+            quantity: totalQuantity,        // ← FIX: Pass aggregated quantity
             userId,
             transactionDate: transactionDateForTax,
             promoCode: transactionData.promo_code,
+            applyDiscounts: transactionData.apply_discounts === true, // ← FIX: Pass flag
             transactionId: null,
             transactionType: 'POS',
             createAllocation: false,
@@ -671,13 +679,19 @@ export class POSService {
             log.info('Discounts will be applied', {
               originalSubtotal: totalSubtotal,
               totalDiscount: discountCheck.totalDiscount,
-              discountCount: discountCheck.appliedDiscounts.length
+              discountCount: discountCheck.appliedDiscounts.length,
+              appliedDiscounts: discountCheck.appliedDiscounts.map(d => ({
+                type: d.type,
+                name: d.name,
+                amount: d.amount
+              }))
             });
           }
         } catch (discountError) {
           log.error('Discount calculation failed, continuing without discounts', {
             error: discountError.message,
-            promoCode: transactionData.promo_code
+            promoCode: transactionData.promo_code,
+            stack: discountError.stack
           });
         }
       }
@@ -755,7 +769,7 @@ export class POSService {
 
       if (totalDiscount > 0 && discountResult?.appliedDiscounts?.length > 0) {
         const { DiscountAccountingService } = await import('./discountAccountingService.js');
-        
+
         discountBreakdownByAccount = discountResult.appliedDiscounts.reduce((acc, d) => {
           const code = DiscountAccountingService.getDiscountAccountByType(d.type);
           acc[code] = (acc[code] || 0) + d.amount;
@@ -1543,7 +1557,7 @@ export class POSService {
     }
   }
 
-  // ============================================================================
+  // ==========================================================================
   // updateTransaction
   // ============================================================================
   static async updateTransaction(businessId, transactionId, updateData, userId) {

@@ -17,16 +17,27 @@ export class DiscountRules {
 
     /**
      * Get all applicable discounts for a transaction
+     * FIX 3: Defensive quantity calculation from items array
      */
     static async getApplicableDiscounts(businessId, context) {
         const startTime = Date.now();
 
         try {
+            // FIX: Defensive quantity calculation from items array
+            if ((!context.quantity || context.quantity <= 0) && context.items && Array.isArray(context.items)) {
+                context.quantity = context.items.reduce((sum, item) => 
+                    sum + (parseInt(item.quantity) || 1), 0);
+                log.debug('Computed quantity from items array', { 
+                    computedQuantity: context.quantity,
+                    itemCount: context.items.length 
+                });
+            }
+
             log.debug('Getting applicable discounts', {
                 businessId,
                 customerId: context.customerId,
                 amount: context.amount,
-                quantity: context.quantity,
+                quantity: context.quantity,  // ← Now shows actual quantity
                 promoCode: context.promoCode
             });
 
@@ -131,7 +142,7 @@ export class DiscountRules {
             const { transactionDate, promoCode, customerId, amount } = context;
 
             let query = `
-                SELECT 
+                SELECT
                     id,
                     promo_code,
                     description,
@@ -189,9 +200,9 @@ export class DiscountRules {
             return promotions;
 
         } catch (error) {
-            log.error('Error getting active promotions', { 
+            log.error('Error getting active promotions', {
                 businessId,
-                error: error.message 
+                error: error.message
             });
             return [];
         } finally {
@@ -230,13 +241,13 @@ export class DiscountRules {
 
     /**
      * =====================================================
-     * SECTION 3: VOLUME DISCOUNTS - FIXED
+     * SECTION 3: VOLUME DISCOUNTS - FIXED (FIX 4)
      * =====================================================
      */
 
     /**
      * Get applicable volume discount tiers
-     * FIXED: Now returns ALL matching tiers, not just one
+     * FIXED: Now properly receives quantity from context
      */
     static async getVolumeDiscounts(businessId, context) {
         const client = await getClient();
@@ -244,13 +255,21 @@ export class DiscountRules {
         try {
             const { quantity, amount, categoryId, transactionDate } = context;
 
-            if ((!quantity || quantity <= 0) && (!amount || amount <= 0)) {
+            // FIX: Better validation - accept quantity OR amount
+            const effectiveQuantity = parseInt(quantity) || 0;
+            const effectiveAmount = parseFloat(amount) || 0;
+
+            if (effectiveQuantity <= 0 && effectiveAmount <= 0) {
+                log.debug('Volume discounts skipped - no quantity or amount', { 
+                    quantity: effectiveQuantity, 
+                    amount: effectiveAmount 
+                });
                 return [];
             }
 
             // Find ALL matching tiers
             const query = `
-                SELECT 
+                SELECT
                     id,
                     tier_name,
                     min_quantity,
@@ -269,23 +288,28 @@ export class DiscountRules {
                     AND is_active = true
                     AND (
                         (min_quantity IS NOT NULL AND $2 >= min_quantity)
-                        OR 
+                        OR
                         (min_amount IS NOT NULL AND $3 >= min_amount)
                     )
-                ORDER BY 
-                    -- Higher discount first
+                ORDER BY
                     discount_percentage DESC,
-                    -- Higher quantity threshold first
                     min_quantity DESC NULLS LAST,
-                    -- Higher amount threshold first
                     min_amount DESC NULLS LAST
             `;
 
             const result = await client.query(query, [
-                businessId, 
-                quantity || 0, 
-                amount || 0
+                businessId,
+                effectiveQuantity,
+                effectiveAmount
             ]);
+
+            log.debug('Volume discount query result', {
+                businessId,
+                quantity: effectiveQuantity,
+                amount: effectiveAmount,
+                tiersFound: result.rows.length,
+                tierNames: result.rows.map(r => r.tier_name)
+            });
 
             if (result.rows.length === 0) {
                 return [];
@@ -294,10 +318,13 @@ export class DiscountRules {
             // Filter by category if needed
             const validTiers = [];
             for (const tier of result.rows) {
-                // Check if tier applies to this category
                 if (tier.applies_to === 'CATEGORY' &&
                     tier.target_category_id &&
                     tier.target_category_id !== categoryId) {
+                    continue;
+                }
+                // FIX: Also check applies_to = 'PRODUCTS' vs item type
+                if (tier.applies_to === 'PRODUCTS' && context.itemType && context.itemType !== 'product') {
                     continue;
                 }
                 validTiers.push(this.normalizeDiscount(tier, 'VOLUME'));
@@ -306,9 +333,9 @@ export class DiscountRules {
             return validTiers;
 
         } catch (error) {
-            log.error('Error getting volume discounts', { 
+            log.error('Error getting volume discounts', {
                 businessId,
-                error: error.message 
+                error: error.message
             });
             return [];
         } finally {
@@ -335,7 +362,7 @@ export class DiscountRules {
 
             // Get the best active terms for the business
             const query = `
-                SELECT 
+                SELECT
                     id,
                     term_name,
                     discount_percentage,
@@ -392,7 +419,7 @@ export class DiscountRules {
             if (!categoryId && !serviceId) return [];
 
             const query = `
-                SELECT 
+                SELECT
                     id,
                     category_id,
                     service_id,
@@ -414,17 +441,17 @@ export class DiscountRules {
                     AND (valid_from IS NULL OR valid_from::date <= $4::date)
                     AND (valid_until IS NULL OR valid_until::date >= $4::date)
                     AND (min_amount IS NULL OR $5 >= min_amount)
-                ORDER BY 
-                    CASE 
+                ORDER BY
+                    CASE
                         WHEN discount_type = 'percentage' THEN discount_value
-                        ELSE 0 
+                        ELSE 0
                     END DESC,
                     created_at DESC
             `;
 
             const result = await client.query(query, [
-                businessId, 
-                categoryId, 
+                businessId,
+                categoryId,
                 serviceId,
                 transactionDate,
                 amount || 0
@@ -468,7 +495,7 @@ export class DiscountRules {
             const { customerId, serviceId, customerCategoryId, quantity, transactionDate } = context;
 
             const query = `
-                SELECT 
+                SELECT
                     id,
                     name,
                     description,
@@ -504,7 +531,7 @@ export class DiscountRules {
                         name: rule.name,
                         description: rule.description,
                         rule_type: 'PRICING_RULE',
-                        discount_type: rule.adjustment_type === 'percentage' ? 'PERCENTAGE' : 
+                        discount_type: rule.adjustment_type === 'percentage' ? 'PERCENTAGE' :
                                        rule.adjustment_type === 'fixed' ? 'FIXED' : 'PERCENTAGE',
                         discount_value: parseFloat(rule.adjustment_value),
                         source: 'pricing_rules',
@@ -525,9 +552,9 @@ export class DiscountRules {
             return applicableRules;
 
         } catch (error) {
-            log.error('Error getting pricing rules', { 
+            log.error('Error getting pricing rules', {
                 businessId,
-                error: error.message 
+                error: error.message
             });
             return [];
         } finally {
@@ -543,7 +570,7 @@ export class DiscountRules {
 
         // Customer category rule
         if (rule.rule_type === 'customer_category') {
-            if (conditions.customer_category_id && 
+            if (conditions.customer_category_id &&
                 conditions.customer_category_id !== context.customerCategoryId) {
                 return false;
             }
@@ -579,20 +606,20 @@ export class DiscountRules {
         }
 
         // Target entity checks
-        if (rule.target_entity === 'service' && 
-            rule.target_id && 
+        if (rule.target_entity === 'service' &&
+            rule.target_id &&
             rule.target_id !== context.serviceId) {
             return false;
         }
 
-        if (rule.target_entity === 'customer' && 
-            rule.target_id && 
+        if (rule.target_entity === 'customer' &&
+            rule.target_id &&
             rule.target_id !== context.customerId) {
             return false;
         }
 
-        if (rule.target_entity === 'category' && 
-            rule.target_id && 
+        if (rule.target_entity === 'category' &&
+            rule.target_id &&
             rule.target_id !== context.categoryId) {
             return false;
         }
@@ -628,7 +655,7 @@ export class DiscountRules {
             // First by type priority
             const aPriority = typePriority[a.rule_type] || 999;
             const bPriority = typePriority[b.rule_type] || 999;
-            
+
             if (aPriority !== bPriority) {
                 return aPriority - bPriority;
             }
@@ -636,7 +663,7 @@ export class DiscountRules {
             // Then by discount value (higher first for same type)
             const aValue = parseFloat(a.discount_value || 0);
             const bValue = parseFloat(b.discount_value || 0);
-            
+
             return bValue - aValue;
         });
     }

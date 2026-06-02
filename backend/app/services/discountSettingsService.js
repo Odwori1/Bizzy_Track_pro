@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountSettingsService.js
-// PURPOSE: Manage business-specific discount settings
-// CREATED: February 28, 2026
+// PURPOSE: Manage business-specific discount settings with stacking governance
+// UPDATED: 2026-06-02 - Added stacking mode configuration
 
 import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
@@ -10,7 +10,7 @@ export class DiscountSettingsService {
 
     /**
      * Get discount settings for a business
-     * If no settings exist, creates default settings
+     * If no settings exist, creates default settings with stacking governance
      */
     static async getSettings(businessId, client = null) {
         const shouldCloseClient = !client;
@@ -26,11 +26,22 @@ export class DiscountSettingsService {
                 return result.rows[0];
             }
 
-            // Create default settings if none exist
+            // Create default settings with stacking governance
             const insertResult = await dbClient.query(
-                `INSERT INTO discount_settings (business_id)
-                 VALUES ($1)
-                 RETURNING *`,
+                `INSERT INTO discount_settings (
+                    business_id,
+                    approval_threshold,
+                    auto_approve_up_to,
+                    require_approval_for_stacked,
+                    max_discount_per_transaction,
+                    default_allocation_method,
+                    stacking_mode,
+                    allow_volume_promo_stack,
+                    allow_auto_promo_stack,
+                    max_stack_depth,
+                    max_discount_percentage
+                ) VALUES ($1, 20.00, 0, false, NULL, 'PRO_RATA_AMOUNT', 'best_only', false, false, 1, 50.00)
+                RETURNING *`,
                 [businessId]
             );
 
@@ -46,6 +57,7 @@ export class DiscountSettingsService {
 
     /**
      * Update discount settings for a business
+     * UPDATED: Added stacking configuration fields
      */
     static async updateSettings(businessId, settings, userId) {
         const client = await getClient();
@@ -53,7 +65,6 @@ export class DiscountSettingsService {
         try {
             await client.query('BEGIN');
 
-            // Build dynamic update query based on provided fields
             const updates = [];
             const values = [businessId];
             let paramCount = 2;
@@ -63,14 +74,18 @@ export class DiscountSettingsService {
                 'auto_approve_up_to',
                 'require_approval_for_stacked',
                 'max_discount_per_transaction',
-                'default_allocation_method'
+                'default_allocation_method',
+                'stacking_mode',
+                'allow_volume_promo_stack',
+                'allow_auto_promo_stack',
+                'max_stack_depth',
+                'max_discount_percentage'
             ];
 
             for (const field of allowedFields) {
                 if (settings[field] !== undefined) {
-                    updates.push(`${field} = $${paramCount}`);
+                    updates.push(`${field} = $${paramCount++}`);
                     values.push(settings[field]);
-                    paramCount++;
                 }
             }
 
@@ -78,7 +93,6 @@ export class DiscountSettingsService {
                 return await this.getSettings(businessId, client);
             }
 
-            // Add updated_by and updated_at
             updates.push(`updated_by = $${paramCount}`);
             values.push(userId);
             paramCount++;
@@ -94,7 +108,6 @@ export class DiscountSettingsService {
 
             const result = await client.query(query, values);
 
-            // Log audit trail
             await auditLogger.logAction({
                 businessId,
                 userId,
@@ -119,8 +132,41 @@ export class DiscountSettingsService {
     }
 
     /**
+     * Get stacking configuration for a business
+     * NEW METHOD: Returns structured stacking config for the engine
+     */
+    static async getStackingConfig(businessId) {
+        try {
+            const settings = await this.getSettings(businessId);
+
+            return {
+                stackingMode: settings.stacking_mode || 'best_only',
+                allowVolumePromoStack: settings.allow_volume_promo_stack || false,
+                allowAutoPromoStack: settings.allow_auto_promo_stack || false,
+                maxStackDepth: parseInt(settings.max_stack_depth) || 1,
+                maxDiscountPercentage: parseFloat(settings.max_discount_percentage) || 50,
+                maxDiscountPerTransaction: settings.max_discount_per_transaction ? 
+                    parseFloat(settings.max_discount_per_transaction) : null,
+                requireApprovalForStacked: settings.require_approval_for_stacked || false
+            };
+
+        } catch (error) {
+            log.error('Error getting stacking config', { error: error.message, businessId });
+            // Return safe defaults
+            return {
+                stackingMode: 'best_only',
+                allowVolumePromoStack: false,
+                allowAutoPromoStack: false,
+                maxStackDepth: 1,
+                maxDiscountPercentage: 50,
+                maxDiscountPerTransaction: null,
+                requireApprovalForStacked: false
+            };
+        }
+    }
+
+    /**
      * Get approval threshold for a business
-     * This is the main method used by the rule engine
      */
     static async getApprovalThreshold(businessId) {
         try {
@@ -128,7 +174,7 @@ export class DiscountSettingsService {
             return parseFloat(settings.approval_threshold);
         } catch (error) {
             log.error('Error getting approval threshold', { error: error.message, businessId });
-            return 20.00; // Fallback to default
+            return 20.00;
         }
     }
 
@@ -139,20 +185,13 @@ export class DiscountSettingsService {
         const settings = await this.getSettings(businessId);
         const threshold = parseFloat(settings.approval_threshold);
 
-        // Check if discount exceeds threshold
-        if (discountPercentage > threshold) {
-            return true;
-        }
+        if (discountPercentage > threshold) return true;
 
-        // Check if stacked discounts require approval even if individually under threshold
         if (settings.require_approval_for_stacked && stackedDiscounts.length > 1) {
             const totalPercentage = stackedDiscounts.reduce((sum, d) => sum + d.percentage, 0);
-            if (totalPercentage > threshold) {
-                return true;
-            }
+            if (totalPercentage > threshold) return true;
         }
 
-        // Check if discount is auto-approved (under auto_approve_up_to)
         if (settings.auto_approve_up_to > 0 && discountPercentage <= settings.auto_approve_up_to) {
             return false;
         }
@@ -165,13 +204,13 @@ export class DiscountSettingsService {
      */
     static async validateDiscountLimit(businessId, discountPercentage) {
         const settings = await this.getSettings(businessId);
+        const maxPercentage = parseFloat(settings.max_discount_percentage) || 50;
 
-        if (settings.max_discount_per_transaction && 
-            discountPercentage > parseFloat(settings.max_discount_per_transaction)) {
+        if (discountPercentage > maxPercentage) {
             return {
                 valid: false,
-                reason: `Discount exceeds maximum allowed (${settings.max_discount_per_transaction}%)`,
-                maxAllowed: settings.max_discount_per_transaction
+                reason: `Discount exceeds maximum allowed (${maxPercentage}%)`,
+                maxAllowed: maxPercentage
             };
         }
 
@@ -194,6 +233,11 @@ export class DiscountSettingsService {
                      require_approval_for_stacked = false,
                      max_discount_per_transaction = NULL,
                      default_allocation_method = 'PRO_RATA_AMOUNT',
+                     stacking_mode = 'best_only',
+                     allow_volume_promo_stack = false,
+                     allow_auto_promo_stack = false,
+                     max_stack_depth = 1,
+                     max_discount_percentage = 50.00,
                      updated_by = $2,
                      updated_at = NOW()
                  WHERE business_id = $1

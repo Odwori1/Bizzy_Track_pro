@@ -1,6 +1,6 @@
 // File: ~/Bizzy_Track_pro/backend/app/services/discountRuleEngine.js
 // PURPOSE: Master orchestrator that combines all discount services
-// PHASE 10.9: FIXED VERSION - With client propagation for transaction safety
+// PHASE 10.11: PRODUCTION FIX - Quantity propagation and discount discovery fixes
 // UPDATED: Dynamic approval threshold from business settings
 
 import { getClient } from '../utils/database.js';
@@ -30,13 +30,13 @@ export class DiscountRuleEngine {
      * UPDATED: Accepts client parameter for transaction consistency
      */
     static async calculateFinalPrice(context) {
-        const { 
-            businessId, 
-            userId, 
+        const {
+            businessId,
+            userId,
             transactionDate = new Date(),
             client: externalClient // Add this parameter
         } = context;
-        
+
         const startTime = Date.now();
         const shouldUseExternalClient = !!externalClient;
         const dbClient = externalClient || await getClient();
@@ -50,7 +50,9 @@ export class DiscountRuleEngine {
                 businessId,
                 customerId: context.customerId,
                 amount: context.amount || context.subtotal,
-                promoCode: context.promoCode
+                promoCode: context.promoCode,
+                quantity: context.quantity,
+                applyDiscounts: context.applyDiscounts
             });
 
             // Step 1: Validate input
@@ -75,16 +77,16 @@ export class DiscountRuleEngine {
             // Step 5: If approval required and not pre-approved, return approval request
             if (approvalRequired && !context.preApproved) {
                 const approvalThreshold = await this._getApprovalThreshold(businessId);
-                
+
                 // Create approval request
                 const approvalRequest = await this._createApprovalRequest(
-                    context, 
-                    applicableDiscounts, 
-                    userId, 
-                    businessId, 
+                    context,
+                    applicableDiscounts,
+                    userId,
+                    businessId,
                     dbClient
                 );
-                
+
                 return {
                     success: false,
                     requiresApproval: true,
@@ -214,7 +216,7 @@ export class DiscountRuleEngine {
      */
     static async _createApprovalRequest(context, discounts, userId, businessId, client) {
         const { amount, customerId, promoCode, transactionId, transactionType } = context;
-        
+
         const totalDiscount = discounts.reduce((sum, d) => sum + parseFloat(d.discount_value || 0), 0);
         const discountPercentage = amount > 0 ? (totalDiscount / amount) * 100 : 0;
         const threshold = await this._getApprovalThreshold(businessId);
@@ -393,19 +395,40 @@ export class DiscountRuleEngine {
 
     /**
      * Discover all applicable discounts from all sources
+     * FIX PHASE 1: Properly propagate quantity and applyDiscounts from context
      */
     static async discoverDiscounts(context) {
         const { businessId, customerId, amount, quantity, promoCode, transactionDate } = context;
 
+        // FIX: Build ruleContext with explicit quantity and applyDiscounts
+        // Ensure quantity is properly extracted from context or computed from items
+        let effectiveQuantity = quantity;
+        if (!effectiveQuantity && context.items && Array.isArray(context.items)) {
+            effectiveQuantity = context.items.reduce((sum, item) => 
+                sum + (parseInt(item.quantity) || 1), 0);
+        }
+
         const ruleContext = {
             customerId,
             amount: amount || context.subtotal || 0,
-            quantity: quantity || 1,
+            quantity: effectiveQuantity || 1,  // ← FIX: Use computed or passed quantity
             promoCode,
             transactionDate: transactionDate || new Date(),
             categoryId: context.categoryId,
-            serviceId: context.serviceId
+            serviceId: context.serviceId,
+            applyDiscounts: context.applyDiscounts || false,  // ← FIX: Pass through
+            items: context.items || []  // ← Pass items array for defensive calc
         };
+
+        log.debug('Discovering discounts with context', {
+            businessId,
+            customerId,
+            amount: ruleContext.amount,
+            quantity: ruleContext.quantity,
+            promoCode: ruleContext.promoCode,
+            applyDiscounts: ruleContext.applyDiscounts,
+            itemCount: ruleContext.items?.length
+        });
 
         const discounts = await DiscountRules.getApplicableDiscounts(businessId, ruleContext);
 
@@ -427,7 +450,276 @@ export class DiscountRuleEngine {
             return enriched;
         });
 
+        log.info('Discounts discovered', {
+            businessId,
+            totalFound: enrichedDiscounts.length,
+            types: enrichedDiscounts.map(d => d.rule_type),
+            names: enrichedDiscounts.map(d => d.name)
+        });
+
         return enrichedDiscounts;
+    }
+
+    /**
+     * Get all applicable discounts for a transaction
+     * FIX PHASE 1: Defensive quantity calculation from items array
+     */
+    static async getApplicableDiscounts(businessId, context) {
+        const startTime = Date.now();
+
+        try {
+            // FIX: Defensive quantity calculation from items array
+            if ((!context.quantity || context.quantity <= 0) && context.items && Array.isArray(context.items)) {
+                context.quantity = context.items.reduce((sum, item) => 
+                    sum + (parseInt(item.quantity) || 1), 0);
+                log.debug('Computed quantity from items array', { 
+                    computedQuantity: context.quantity,
+                    itemCount: context.items.length 
+                });
+            }
+
+            log.debug('Getting applicable discounts', {
+                businessId,
+                customerId: context.customerId,
+                amount: context.amount,
+                quantity: context.quantity,  // ← Now shows actual quantity
+                promoCode: context.promoCode,
+                applyDiscounts: context.applyDiscounts
+            });
+
+            // Parse date once for all date-based queries
+            const transactionDate = DiscountCore.parseAsDateOnly(context.transactionDate || new Date());
+
+            // Create a fresh context with parsed date
+            const evalContext = {
+                ...context,
+                transactionDate
+            };
+
+            // Get discounts from all sources in parallel
+            const [
+                promotions,
+                volumeDiscounts,
+                earlyPaymentTerms,
+                categoryDiscounts,
+                pricingRules
+            ] = await Promise.allSettled([
+                this.getActivePromotions(businessId, evalContext),
+                this.getVolumeDiscounts(businessId, evalContext),
+                this.getCustomerPaymentTerms(businessId, evalContext),
+                this.getCategoryDiscounts(businessId, evalContext),
+                this.getPricingRules(businessId, evalContext)
+            ]);
+
+            // Collect successful results
+            const allDiscounts = [];
+
+            if (promotions.status === 'fulfilled' && promotions.value) {
+                if (Array.isArray(promotions.value)) {
+                    allDiscounts.push(...promotions.value);
+                } else if (promotions.value) {
+                    allDiscounts.push(promotions.value);
+                }
+            }
+
+            if (volumeDiscounts.status === 'fulfilled' && volumeDiscounts.value) {
+                if (Array.isArray(volumeDiscounts.value)) {
+                    allDiscounts.push(...volumeDiscounts.value);
+                } else {
+                    allDiscounts.push(volumeDiscounts.value);
+                }
+            }
+
+            if (earlyPaymentTerms.status === 'fulfilled' && earlyPaymentTerms.value) {
+                allDiscounts.push(earlyPaymentTerms.value);
+            }
+
+            if (categoryDiscounts.status === 'fulfilled' && categoryDiscounts.value) {
+                if (Array.isArray(categoryDiscounts.value)) {
+                    allDiscounts.push(...categoryDiscounts.value);
+                }
+            }
+
+            if (pricingRules.status === 'fulfilled' && pricingRules.value) {
+                if (Array.isArray(pricingRules.value)) {
+                    allDiscounts.push(...pricingRules.value);
+                }
+            }
+
+            // Apply filters
+            const validDiscounts = this.filterExpired(allDiscounts, transactionDate);
+            const qualifiedDiscounts = this.filterByMinimum(validDiscounts, evalContext);
+            const sortedDiscounts = this.sortByType(qualifiedDiscounts);
+
+            log.info('Discount rules evaluation complete', {
+                businessId,
+                totalFound: allDiscounts.length,
+                validCount: validDiscounts.length,
+                qualifiedCount: qualifiedDiscounts.length,
+                finalCount: sortedDiscounts.length,
+                discountTypes: sortedDiscounts.map(d => d.rule_type),
+                duration: Date.now() - startTime
+            });
+
+            return sortedDiscounts;
+
+        } catch (error) {
+            log.error('Error in getApplicableDiscounts', {
+                businessId,
+                error: error.message,
+                stack: error.stack
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Get applicable volume discount tiers
+     * FIXED: Now properly receives and uses quantity from context
+     * FIXED: Enhanced logging to trace why discounts are found or not found
+     */
+    static async getVolumeDiscounts(businessId, context) {
+        const client = await getClient();
+
+        try {
+            const { quantity, amount, categoryId, transactionDate } = context;
+
+            // FIX: Better validation - accept quantity OR amount
+            const effectiveQuantity = parseInt(quantity) || 0;
+            const effectiveAmount = parseFloat(amount) || 0;
+
+            log.debug('Evaluating volume discounts', {
+                businessId,
+                quantity: effectiveQuantity,
+                amount: effectiveAmount,
+                categoryId,
+                transactionDate
+            });
+
+            if (effectiveQuantity <= 0 && effectiveAmount <= 0) {
+                log.debug('Volume discounts skipped - no quantity or amount', { 
+                    quantity: effectiveQuantity, 
+                    amount: effectiveAmount 
+                });
+                return [];
+            }
+
+            // Find ALL matching tiers
+            const query = `
+                SELECT
+                    id,
+                    tier_name,
+                    min_quantity,
+                    min_amount,
+                    discount_percentage,
+                    applies_to,
+                    target_category_id,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    'PERCENTAGE' as discount_type,
+                    discount_percentage as discount_value,
+                    'VOLUME' as rule_type
+                FROM volume_discount_tiers
+                WHERE business_id = $1
+                    AND is_active = true
+                    AND (
+                        (min_quantity IS NOT NULL AND $2 >= min_quantity)
+                        OR
+                        (min_amount IS NOT NULL AND $3 >= min_amount)
+                    )
+                ORDER BY
+                    -- Higher discount first
+                    discount_percentage DESC,
+                    -- Higher quantity threshold first
+                    min_quantity DESC NULLS LAST,
+                    -- Higher amount threshold first
+                    min_amount DESC NULLS LAST
+            `;
+
+            const result = await client.query(query, [
+                businessId,
+                effectiveQuantity,
+                effectiveAmount
+            ]);
+
+            log.debug('Volume discount query result', {
+                businessId,
+                quantity: effectiveQuantity,
+                amount: effectiveAmount,
+                tiersFound: result.rows.length,
+                tierNames: result.rows.map(r => r.tier_name),
+                tierMinQuantities: result.rows.map(r => r.min_quantity)
+            });
+
+            if (result.rows.length === 0) {
+                log.info('No volume discount tiers match criteria', {
+                    businessId,
+                    quantity: effectiveQuantity,
+                    amount: effectiveAmount,
+                    reason: 'No tiers meet min_quantity or min_amount thresholds'
+                });
+                return [];
+            }
+
+            // Filter by category if needed
+            const validTiers = [];
+            for (const tier of result.rows) {
+                // Check if tier applies to this category
+                if (tier.applies_to === 'CATEGORY' &&
+                    tier.target_category_id &&
+                    tier.target_category_id !== categoryId) {
+                    log.debug('Volume tier filtered out - category mismatch', {
+                        tierName: tier.tier_name,
+                        appliesTo: tier.applies_to,
+                        targetCategoryId: tier.target_category_id,
+                        itemCategoryId: categoryId
+                    });
+                    continue;
+                }
+
+                // FIX: Check applies_to = 'PRODUCTS' vs item type
+                if (tier.applies_to === 'PRODUCTS' && context.itemType && context.itemType !== 'product') {
+                    log.debug('Volume tier filtered out - product type mismatch', {
+                        tierName: tier.tier_name,
+                        appliesTo: tier.applies_to,
+                        itemType: context.itemType
+                    });
+                    continue;
+                }
+
+                // FIX: Check applies_to = 'SERVICES' vs item type
+                if (tier.applies_to === 'SERVICES' && context.itemType && context.itemType !== 'service') {
+                    log.debug('Volume tier filtered out - service type mismatch', {
+                        tierName: tier.tier_name,
+                        appliesTo: tier.applies_to,
+                        itemType: context.itemType
+                    });
+                    continue;
+                }
+
+                validTiers.push(this.normalizeDiscount(tier, 'VOLUME'));
+            }
+
+            log.info('Volume discounts evaluated', {
+                businessId,
+                tiersQueried: result.rows.length,
+                tiersValid: validTiers.length,
+                tierNames: validTiers.map(t => t.tier_name)
+            });
+
+            return validTiers;
+
+        } catch (error) {
+            log.error('Error getting volume discounts', {
+                businessId,
+                error: error.message,
+                stack: error.stack
+            });
+            return [];
+        } finally {
+            client.release();
+        }
     }
 
     /**
@@ -718,7 +1010,7 @@ export class DiscountRuleEngine {
 
         // Ensure all line items have valid UUIDs
         const validItems = items.filter(item => item.id && UUIDService.isValidUUID(item.id));
-        
+
         if (validItems.length === 0) {
             log.error('Cannot create allocation: No valid line item IDs', {
                 transactionId,
