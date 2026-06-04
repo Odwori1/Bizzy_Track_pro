@@ -580,6 +580,7 @@ export class POSService {
       // ============================================================================
       // STEP 2: Calculate discount on the FULL gross subtotal
       // Discount must be known before we calculate any tax.
+      // PRODUCTION FIX: Added promo code validation before discount calculation
       // ============================================================================
       let discountResult = null;
       let requiresApproval = false;
@@ -595,7 +596,72 @@ export class POSService {
       // FIX PHASE 1: Calculate total quantity from all items for volume discount evaluation
       const totalQuantity = grossItems.reduce((sum, item) => sum + item.quantity, 0);
 
-      if (transactionData.promo_code || transactionData.apply_discounts === true) {
+      // PRODUCTION FIX: Validate promo code before calling discount engine
+      let promoValidationResult = null;
+      if (transactionData.promo_code) {
+        try {
+          const { PromotionalDiscountService } = await import('./promotionalDiscountService.js');
+          promoValidationResult = await PromotionalDiscountService.validateAndApplyPromo(
+            businessId,
+            transactionData.promo_code,
+            totalSubtotal,
+            transactionData.customer_id
+          );
+
+          if (!promoValidationResult.valid) {
+            log.warn('Invalid promo code provided, aborting discount calculation', {
+              promoCode: transactionData.promo_code,
+              reason: promoValidationResult.reason,
+              businessId
+            });
+
+            // Transaction proceeds WITHOUT any discount
+            discountResult = {
+              success: false,
+              error: 'INVALID_PROMO_CODE',
+              errorMessage: promoValidationResult.reason,
+              totalDiscount: 0,
+              appliedDiscounts: [],
+              originalAmount: totalSubtotal,
+              finalAmount: totalSubtotal
+            };
+
+            await auditLogger.logAction({
+              businessId,
+              userId,
+              action: 'pos.promo_code_invalid',
+              resourceType: 'promotional_discount',
+              resourceId: null,
+              newValues: {
+                promo_code: transactionData.promo_code,
+                reason: promoValidationResult.reason,
+                subtotal: totalSubtotal
+              }
+            });
+          } else {
+            log.info('Promo code validated successfully', {
+              promoCode: transactionData.promo_code,
+              discountAmount: promoValidationResult.discountAmount,
+              businessId
+            });
+          }
+        } catch (validationError) {
+          log.error('Promo validation failed, continuing without discount', {
+            error: validationError.message,
+            promoCode: transactionData.promo_code
+          });
+          promoValidationResult = { valid: false, reason: 'Validation error' };
+        }
+      }
+
+      // Only proceed with discount engine if:
+      // 1. apply_discounts is true (auto-discount mode), OR
+      // 2. promo_code is provided AND passed validation
+      const shouldCalculateDiscount =
+        transactionData.apply_discounts === true ||
+        (transactionData.promo_code && promoValidationResult?.valid);
+
+      if (shouldCalculateDiscount) {
         try {
           const discountItems = [];
           for (const item of grossItems) {
@@ -625,26 +691,27 @@ export class POSService {
             promoCode: transactionData.promo_code,
             applyDiscounts: transactionData.apply_discounts,
             itemCount: discountItems.length,
-            totalQuantity: totalQuantity,  // FIX: Log total quantity
-            subtotal: totalSubtotal
+            totalQuantity: totalQuantity,
+            subtotal: totalSubtotal,
+            promoValid: promoValidationResult?.valid || null
           });
 
-          // FIX PHASE 1: Pass totalQuantity and applyDiscounts flag to engine
           const discountCheck = await DiscountRuleEngine.calculateFinalPrice({
             businessId,
             customerId: transactionData.customer_id,
             items: discountItems,
             amount: totalSubtotal,
-            quantity: totalQuantity,        // ← FIX: Pass aggregated quantity
+            quantity: totalQuantity,
             userId,
             transactionDate: transactionDateForTax,
             promoCode: transactionData.promo_code,
-            applyDiscounts: transactionData.apply_discounts === true, // ← FIX: Pass flag
+            applyDiscounts: transactionData.apply_discounts === true,
             transactionId: null,
             transactionType: 'POS',
             createAllocation: false,
             createJournalEntries: false,
-            preApproved: transactionData.pre_approved || false
+            preApproved: transactionData.pre_approved || false,
+            promoValidation: promoValidationResult
           });
 
           if (discountCheck.requiresApproval && !transactionData.pre_approved) {
@@ -686,6 +753,13 @@ export class POSService {
                 amount: d.amount
               }))
             });
+          } else if (discountCheck.error) {
+            log.warn('Discount engine returned error', {
+              error: discountCheck.error,
+              message: discountCheck.errorMessage
+            });
+            if (!transactionData.notes) transactionData.notes = '';
+            transactionData.notes += ` [Discount Error: ${discountCheck.errorMessage}]`;
           }
         } catch (discountError) {
           log.error('Discount calculation failed, continuing without discounts', {
@@ -694,6 +768,12 @@ export class POSService {
             stack: discountError.stack
           });
         }
+      } else {
+        log.info('Skipping discount calculation', {
+          reason: transactionData.promo_code ? 'Invalid promo code' : 'No discount flags set',
+          promoCode: transactionData.promo_code,
+          applyDiscounts: transactionData.apply_discounts
+        });
       }
 
       console.log(`🔵 [${new Date().toISOString()}] Discount check complete in ${Date.now() - discountStart}ms`);
