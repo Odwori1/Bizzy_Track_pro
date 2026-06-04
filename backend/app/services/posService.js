@@ -763,6 +763,8 @@ export class POSService {
       // ------------------------------------------------------------------
       // Build accounting metadata for the trigger
       // The trigger reads these columns to create the correct journal entry.
+      // PRODUCTION FIX: Single discount uses its specific account code;
+      //                  multiple discounts use account with largest share.
       // ------------------------------------------------------------------
       let discountAccountCode = null;
       let discountBreakdownByAccount = null;
@@ -770,14 +772,22 @@ export class POSService {
       if (totalDiscount > 0 && discountResult?.appliedDiscounts?.length > 0) {
         const { DiscountAccountingService } = await import('./discountAccountingService.js');
 
+        // Build accurate breakdown by discount type
         discountBreakdownByAccount = discountResult.appliedDiscounts.reduce((acc, d) => {
           const code = DiscountAccountingService.getDiscountAccountByType(d.type);
           acc[code] = (acc[code] || 0) + d.amount;
           return acc;
         }, {});
 
-        discountAccountCode = Object.entries(discountBreakdownByAccount)
-          .sort(([, a], [, b]) => b - a)[0]?.[0] || '4110';
+        // PRODUCTION FIX: If only ONE discount applied, use its specific account.
+        // If multiple, use the account with the highest discount amount.
+        if (discountResult.appliedDiscounts.length === 1) {
+          const singleDiscount = discountResult.appliedDiscounts[0];
+          discountAccountCode = DiscountAccountingService.getDiscountAccountByType(singleDiscount.type);
+        } else {
+          discountAccountCode = Object.entries(discountBreakdownByAccount)
+            .sort(([, a], [, b]) => b - a)[0]?.[0] || '4110';
+        }
       }
 
       const subtotalAfterDiscount = totalSubtotal - totalDiscount;

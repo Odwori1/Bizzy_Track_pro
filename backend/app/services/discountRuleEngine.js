@@ -2,6 +2,7 @@
 // PURPOSE: Master orchestrator that combines all discount services
 // PHASE 10.11: PRODUCTION FIX - Quantity propagation and discount discovery fixes
 // UPDATED: Dynamic approval threshold from business settings
+// PRODUCTION FIX: Added promo validation and error handling
 
 import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
@@ -27,14 +28,16 @@ export class DiscountRuleEngine {
 
     /**
      * MAIN ENTRY POINT - Calculate final price with all discounts
-     * UPDATED: Accepts client parameter for transaction consistency
+     * PRODUCTION FIX: Added promo validation and error handling
      */
     static async calculateFinalPrice(context) {
         const {
             businessId,
             userId,
             transactionDate = new Date(),
-            client: externalClient // Add this parameter
+            client: externalClient,
+            promoCode,
+            promoValidation
         } = context;
 
         const startTime = Date.now();
@@ -51,9 +54,27 @@ export class DiscountRuleEngine {
                 customerId: context.customerId,
                 amount: context.amount || context.subtotal,
                 promoCode: context.promoCode,
-                quantity: context.quantity,
                 applyDiscounts: context.applyDiscounts
             });
+
+            // PRODUCTION FIX: Check promo validation result from upstream
+            if (promoValidation && !promoValidation.valid) {
+                log.warn('Promo validation failed upstream, returning error', {
+                    promoCode,
+                    reason: promoValidation.reason
+                });
+
+                return {
+                    success: false,
+                    error: 'INVALID_PROMO_CODE',
+                    errorMessage: promoValidation.reason,
+                    originalAmount: context.amount || context.subtotal || 0,
+                    totalDiscount: 0,
+                    finalAmount: context.amount || context.subtotal || 0,
+                    appliedDiscounts: [],
+                    requiresApproval: false
+                };
+            }
 
             // Step 1: Validate input
             this.validateContext(context);
@@ -70,6 +91,26 @@ export class DiscountRuleEngine {
 
             // Step 3: Discover all applicable discounts
             const applicableDiscounts = await this.discoverDiscounts(context);
+
+            // PRODUCTION FIX: Check for promo error markers in discovered discounts
+            const promoError = applicableDiscounts.find(d => d._error && d._errorType === 'PROMO_NOT_FOUND');
+            if (promoError) {
+                log.error('Promo code not found in discount rules', { 
+                    promoCode: promoError._promoCode,
+                    businessId 
+                });
+
+                return {
+                    success: false,
+                    error: 'PROMO_NOT_FOUND',
+                    errorMessage: `Promo code '${promoError._promoCode}' not found or inactive`,
+                    originalAmount: context.amount || context.subtotal || 0,
+                    totalDiscount: 0,
+                    finalAmount: context.amount || context.subtotal || 0,
+                    appliedDiscounts: [],
+                    requiresApproval: false
+                };
+            }
 
             // Step 4: Check if any discounts require approval
             const approvalRequired = await this.checkApprovalRequired(applicableDiscounts, context);
@@ -97,14 +138,38 @@ export class DiscountRuleEngine {
                 };
             }
 
-            // Step 6: Calculate stacked discount
+            // Step 6: Get stacking configuration from settings
+            const stackingConfig = await DiscountSettingsService.getStackingConfig(businessId);
+
+            // PRODUCTION FIX: Determine stacking mode based on context
+            let stackingMode = stackingConfig.stackingMode;
+
+            // If promo code provided and valid, use exclusive_promo mode
+            if (promoCode && promoValidation?.valid) {
+                stackingMode = 'exclusive_promo';
+                log.info('Using exclusive promo mode', { promoCode, stackingMode });
+            }
+            // If apply_discounts=true without promo, use exclusive_auto mode
+            else if (context.applyDiscounts && !promoCode) {
+                stackingMode = 'exclusive_auto';
+                log.info('Using exclusive auto mode', { stackingMode });
+            }
+
+            // Step 7: Calculate stacked discount with configured mode
             const originalAmount = context.amount || context.subtotal || 0;
             const stackedResult = DiscountCore.calculateStackedDiscount(
                 originalAmount,
-                applicableDiscounts
+                applicableDiscounts,
+                {
+                    stackingMode,
+                    maxStackDepth: stackingConfig.maxStackDepth,
+                    maxDiscountPercentage: stackingConfig.maxDiscountPercentage,
+                    promoCode,
+                    applyDiscounts: context.applyDiscounts || false
+                }
             );
 
-            // Step 7: Create allocation if discounts applied and not preview mode
+            // Step 8: Create allocation if discounts applied and not preview mode
             let allocation = null;
             if (stackedResult.appliedDiscounts.length > 0 &&
                 context.createAllocation !== false &&
@@ -114,11 +179,11 @@ export class DiscountRuleEngine {
                     context,
                     userId,
                     businessId,
-                    dbClient // Pass the client
+                    dbClient
                 );
             }
 
-            // Step 8: Create journal entries if needed
+            // Step 9: Create journal entries if needed
             let accounting = null;
             if (allocation && context.createJournalEntries !== false) {
                 accounting = await this._createJournalEntriesFromAllocation(
@@ -127,18 +192,18 @@ export class DiscountRuleEngine {
                     context,
                     userId,
                     businessId,
-                    dbClient // Pass the client
+                    dbClient
                 );
             }
 
-            // Step 9: Update analytics (async - don't await)
+            // Step 10: Update analytics (async - don't await)
             if (stackedResult.totalDiscount > 0) {
                 this._updateAnalyticsAsync(stackedResult, context, businessId).catch(error => {
                     log.error('Error updating analytics', { error: error.message });
                 });
             }
 
-            // Step 10: Prepare final result
+            // Step 11: Prepare final result
             const result = {
                 success: true,
                 originalAmount,
@@ -153,7 +218,8 @@ export class DiscountRuleEngine {
                     description: d.description
                 })),
                 requiresApproval: false,
-                calculationTime: Date.now() - startTime
+                calculationTime: Date.now() - startTime,
+                stackingMode: stackedResult.stackingMode
             };
 
             // Add allocation if created
@@ -189,6 +255,7 @@ export class DiscountRuleEngine {
                 totalDiscount: stackedResult.totalDiscount,
                 finalAmount: stackedResult.finalAmount,
                 discountCount: stackedResult.appliedDiscounts.length,
+                stackingMode: stackedResult.stackingMode,
                 duration: Date.now() - startTime
             });
 
@@ -404,7 +471,7 @@ export class DiscountRuleEngine {
         // Ensure quantity is properly extracted from context or computed from items
         let effectiveQuantity = quantity;
         if (!effectiveQuantity && context.items && Array.isArray(context.items)) {
-            effectiveQuantity = context.items.reduce((sum, item) => 
+            effectiveQuantity = context.items.reduce((sum, item) =>
                 sum + (parseInt(item.quantity) || 1), 0);
         }
 
@@ -470,11 +537,11 @@ export class DiscountRuleEngine {
         try {
             // FIX: Defensive quantity calculation from items array
             if ((!context.quantity || context.quantity <= 0) && context.items && Array.isArray(context.items)) {
-                context.quantity = context.items.reduce((sum, item) => 
+                context.quantity = context.items.reduce((sum, item) =>
                     sum + (parseInt(item.quantity) || 1), 0);
-                log.debug('Computed quantity from items array', { 
+                log.debug('Computed quantity from items array', {
                     computedQuantity: context.quantity,
-                    itemCount: context.items.length 
+                    itemCount: context.items.length
                 });
             }
 
@@ -597,9 +664,9 @@ export class DiscountRuleEngine {
             });
 
             if (effectiveQuantity <= 0 && effectiveAmount <= 0) {
-                log.debug('Volume discounts skipped - no quantity or amount', { 
-                    quantity: effectiveQuantity, 
-                    amount: effectiveAmount 
+                log.debug('Volume discounts skipped - no quantity or amount', {
+                    quantity: effectiveQuantity,
+                    amount: effectiveAmount
                 });
                 return [];
             }
@@ -720,6 +787,235 @@ export class DiscountRuleEngine {
         } finally {
             client.release();
         }
+    }
+
+    /**
+     * Get active promotions
+     */
+    static async getActivePromotions(businessId, context) {
+        const client = await getClient();
+
+        try {
+            const { promoCode, amount, transactionDate } = context;
+
+            if (!promoCode) {
+                return [];
+            }
+
+            const query = `
+                SELECT 
+                    pd.id,
+                    pd.promo_code,
+                    pd.name,
+                    pd.discount_type,
+                    pd.discount_value,
+                    pd.min_purchase_amount,
+                    pd.start_date,
+                    pd.end_date,
+                    pd.usage_limit,
+                    pd.used_count,
+                    pd.is_active,
+                    'PROMOTIONAL' as rule_type
+                FROM promotional_discounts pd
+                WHERE pd.business_id = $1
+                    AND pd.promo_code = $2
+                    AND pd.is_active = true
+                    AND pd.start_date <= $3
+                    AND (pd.end_date IS NULL OR pd.end_date >= $3)
+                    AND (pd.usage_limit IS NULL OR pd.used_count < pd.usage_limit)
+                    AND (pd.min_purchase_amount IS NULL OR $4 >= pd.min_purchase_amount)
+            `;
+
+            const result = await client.query(query, [
+                businessId,
+                promoCode,
+                transactionDate || new Date(),
+                amount || 0
+            ]);
+
+            if (result.rows.length === 0) {
+                log.info('No active promo found', { businessId, promoCode });
+                return [];
+            }
+
+            return result.rows.map(row => this.normalizeDiscount(row, 'PROMOTIONAL'));
+
+        } catch (error) {
+            log.error('Error getting active promotions', {
+                businessId,
+                error: error.message
+            });
+            return [];
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get customer payment terms
+     */
+    static async getCustomerPaymentTerms(businessId, context) {
+        const client = await getClient();
+
+        try {
+            const { customerId, transactionDate } = context;
+
+            if (!customerId) {
+                return null;
+            }
+
+            const query = `
+                SELECT 
+                    pet.id,
+                    pet.term_name,
+                    pet.discount_percentage,
+                    pet.days_until_due,
+                    pet.is_active,
+                    'EARLY_PAYMENT' as rule_type,
+                    'PERCENTAGE' as discount_type,
+                    pet.discount_percentage as discount_value
+                FROM payment_terms pet
+                JOIN customers c ON c.payment_term_id = pet.id
+                WHERE c.id = $1
+                    AND c.business_id = $2
+                    AND pet.is_active = true
+                    AND (pet.effective_from IS NULL OR pet.effective_from <= $3)
+                    AND (pet.effective_to IS NULL OR pet.effective_to >= $3)
+                LIMIT 1
+            `;
+
+            const result = await client.query(query, [
+                customerId,
+                businessId,
+                transactionDate || new Date()
+            ]);
+
+            if (result.rows.length === 0) {
+                return null;
+            }
+
+            return this.normalizeDiscount(result.rows[0], 'EARLY_PAYMENT');
+
+        } catch (error) {
+            log.error('Error getting customer payment terms', {
+                businessId,
+                error: error.message
+            });
+            return null;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get category discounts
+     */
+    static async getCategoryDiscounts(businessId, context) {
+        const client = await getClient();
+
+        try {
+            const { categoryId, transactionDate } = context;
+
+            if (!categoryId) {
+                return [];
+            }
+
+            const query = `
+                SELECT 
+                    cd.id,
+                    cd.name,
+                    cd.discount_percentage,
+                    cd.start_date,
+                    cd.end_date,
+                    cd.is_active,
+                    'CATEGORY' as rule_type,
+                    'PERCENTAGE' as discount_type,
+                    cd.discount_percentage as discount_value
+                FROM category_discounts cd
+                WHERE cd.business_id = $1
+                    AND cd.category_id = $2
+                    AND cd.is_active = true
+                    AND cd.start_date <= $3
+                    AND (cd.end_date IS NULL OR cd.end_date >= $3)
+            `;
+
+            const result = await client.query(query, [
+                businessId,
+                categoryId,
+                transactionDate || new Date()
+            ]);
+
+            return result.rows.map(row => this.normalizeDiscount(row, 'CATEGORY'));
+
+        } catch (error) {
+            log.error('Error getting category discounts', {
+                businessId,
+                error: error.message
+            });
+            return [];
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get pricing rules
+     */
+    static async getPricingRules(businessId, context) {
+        // Placeholder for future pricing rules
+        return [];
+    }
+
+    /**
+     * Normalize discount to common format
+     */
+    static normalizeDiscount(discount, ruleType) {
+        return {
+            ...discount,
+            rule_type: ruleType,
+            discount_type: discount.discount_type || 'PERCENTAGE',
+            discount_value: parseFloat(discount.discount_value || discount.discount_percentage || 0),
+            stackable: discount.stackable !== false
+        };
+    }
+
+    /**
+     * Filter expired discounts
+     */
+    static filterExpired(discounts, transactionDate) {
+        return discounts.filter(discount => {
+            if (discount.end_date && new Date(discount.end_date) < transactionDate) {
+                return false;
+            }
+            if (discount.start_date && new Date(discount.start_date) > transactionDate) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    /**
+     * Filter by minimum requirements
+     */
+    static filterByMinimum(discounts, context) {
+        const { amount, quantity } = context;
+
+        return discounts.filter(discount => {
+            if (discount.min_purchase_amount && parseFloat(amount) < parseFloat(discount.min_purchase_amount)) {
+                return false;
+            }
+            if (discount.min_quantity && parseInt(quantity) < parseInt(discount.min_quantity)) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    /**
+     * Sort discounts by type priority
+     */
+    static sortByType(discounts) {
+        return this.prioritizeDiscounts(discounts);
     }
 
     /**

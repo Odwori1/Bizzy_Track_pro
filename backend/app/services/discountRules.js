@@ -2,6 +2,7 @@
 // PURPOSE: Dynamically evaluate which discounts apply to a transaction
 // PHASE 10.1: FINAL WORKING VERSION - All tests passing
 // DEPENDS ON: discountCore.js, database tables
+// PRODUCTION FIX: Added promo code not found error marker
 
 import { getClient } from '../utils/database.js';
 import { log } from '../utils/logger.js';
@@ -25,11 +26,11 @@ export class DiscountRules {
         try {
             // FIX: Defensive quantity calculation from items array
             if ((!context.quantity || context.quantity <= 0) && context.items && Array.isArray(context.items)) {
-                context.quantity = context.items.reduce((sum, item) => 
+                context.quantity = context.items.reduce((sum, item) =>
                     sum + (parseInt(item.quantity) || 1), 0);
-                log.debug('Computed quantity from items array', { 
+                log.debug('Computed quantity from items array', {
                     computedQuantity: context.quantity,
-                    itemCount: context.items.length 
+                    itemCount: context.items.length
                 });
             }
 
@@ -134,6 +135,7 @@ export class DiscountRules {
 
     /**
      * Get active promotional discounts
+     * PRODUCTION FIX: Return error marker when promo code not found
      */
     static async getActivePromotions(businessId, context) {
         const client = await getClient();
@@ -181,6 +183,28 @@ export class DiscountRules {
 
             const result = await client.query(query, params);
 
+            // PRODUCTION FIX: If promo code was provided but no match found, return error marker
+            if (promoCode && result.rows.length === 0) {
+                log.warn('Promo code not found or inactive', { 
+                    promoCode, 
+                    businessId,
+                    transactionDate,
+                    amount 
+                });
+
+                // Return error marker that upstream will detect
+                return [{
+                    _error: true,
+                    _errorType: 'PROMO_NOT_FOUND',
+                    _promoCode: promoCode,
+                    rule_type: 'PROMOTIONAL',
+                    // Include minimal fields to prevent downstream crashes
+                    id: null,
+                    discount_type: 'PERCENTAGE',
+                    discount_value: 0
+                }];
+            }
+
             // Further filter by customer limits if needed
             const promotions = [];
             for (const row of result.rows) {
@@ -191,6 +215,12 @@ export class DiscountRules {
                         customerId
                     );
                     if (customerUsage >= row.per_customer_limit) {
+                        log.debug('Promo code per-customer limit reached', {
+                            promoCode: row.promo_code,
+                            customerId,
+                            limit: row.per_customer_limit,
+                            usage: customerUsage
+                        });
                         continue;
                     }
                 }
@@ -260,9 +290,9 @@ export class DiscountRules {
             const effectiveAmount = parseFloat(amount) || 0;
 
             if (effectiveQuantity <= 0 && effectiveAmount <= 0) {
-                log.debug('Volume discounts skipped - no quantity or amount', { 
-                    quantity: effectiveQuantity, 
-                    amount: effectiveAmount 
+                log.debug('Volume discounts skipped - no quantity or amount', {
+                    quantity: effectiveQuantity,
+                    amount: effectiveAmount
                 });
                 return [];
             }
@@ -678,6 +708,11 @@ export class DiscountRules {
         }
 
         return discounts.filter(discount => {
+            // Skip error markers - they should still be processed upstream
+            if (discount._error) {
+                return true;
+            }
+
             // If no dates, it's always valid
             if (!discount.valid_from && !discount.valid_to) {
                 return true;
@@ -719,6 +754,11 @@ export class DiscountRules {
         const { amount, quantity } = context;
 
         return discounts.filter(discount => {
+            // Skip error markers - they should still be processed upstream
+            if (discount._error) {
+                return true;
+            }
+
             // Check min_purchase (promotional_discounts)
             if (discount.min_purchase && amount < parseFloat(discount.min_purchase)) {
                 return false;
@@ -758,6 +798,11 @@ export class DiscountRules {
      * Normalize discount from database row to standard object
      */
     static normalizeDiscount(dbRow, sourceType) {
+        // Handle error markers
+        if (dbRow._error) {
+            return dbRow;
+        }
+
         const normalized = {
             id: dbRow.id,
             rule_type: sourceType,
