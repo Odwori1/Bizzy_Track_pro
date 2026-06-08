@@ -1,12 +1,10 @@
-// File: backend/app/routes/refundApprovalRoutes.js
-// Dynamic refund approval routes with ABAC (using your permission system)
+// File: backend/app/routes/refundRoutes.js
+// Main refund routes (NOT approval routes)
 
 import express from 'express';
-import { RefundApprovalController } from '../controllers/refundApprovalController.js';
+import { RefundController } from '../controllers/refundController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { validateRequest } from '../middleware/validation.js';
-import Joi from 'joi';
 
 const router = express.Router();
 
@@ -14,42 +12,32 @@ const router = express.Router();
 router.use(authenticate);
 
 // ============================================================================
-// SETTINGS ROUTES - Requires configure permission
+// MAIN REFUND CRUD ROUTES
 // ============================================================================
-router.get('/settings', requirePermission('refund_approval:configure'), RefundApprovalController.getSettings);
-router.put('/settings', requirePermission('refund_approval:configure'), RefundApprovalController.updateSettings);
+
+// Create a new refund request
+router.post('/', RefundController.createRefund);
+
+// List refunds with filters
+router.get('/', RefundController.listRefunds);
+
+// Get refund statistics
+router.get('/stats/summary', RefundController.getRefundStats);
+
+// Get refund by ID (must come AFTER /stats/summary to avoid conflict)
+router.get('/:id', RefundController.getRefund);
 
 // ============================================================================
-// CHECK ROUTE - Anyone can check (no permission required for preview)
+// REFUND ACTION ROUTES
 // ============================================================================
-router.post('/check', 
-    validateRequest(Joi.object({
-        amount: Joi.number().positive().required(),
-        monthly_sales: Joi.number().min(0).optional()
-    })),
-    RefundApprovalController.checkApprovalRequired
-);
 
-// ============================================================================
-// PENDING APPROVALS - Requires view permission
-// ============================================================================
-router.get('/pending', requirePermission('refund_approval:view_pending'), RefundApprovalController.getPendingApprovals);
-router.get('/my-pending', RefundApprovalController.getUserPendingApprovals);
+// Process/execute a refund (triggers accounting)
+router.post('/:id/process', requirePermission('refund:process'), RefundController.processRefund);
 
-// ============================================================================
-// APPROVAL BY ID - Users can view their own, admins can view any
-// ============================================================================
-router.get('/:approvalId', RefundApprovalController.getApprovalById);
+// Approve a refund (legacy - now calls processRefund)
+router.post('/:id/approve', requirePermission('refund:approve'), RefundController.approveRefund);
 
-// ============================================================================
-// STATISTICS - Requires stats permission
-// ============================================================================
-router.get('/stats', requirePermission('refund_approval:view_stats'), RefundApprovalController.getApprovalStats);
-
-// ============================================================================
-// APPROVAL ACTIONS - Requires specific permissions
-// ============================================================================
-router.post('/:approvalId/approve', requirePermission('refund_approval:approve'), RefundApprovalController.approveRefund);
-router.post('/:approvalId/reject', requirePermission('refund_approval:reject'), RefundApprovalController.rejectRefund);
+// Reject a refund
+router.post('/:id/reject', requirePermission('refund:reject'), RefundController.rejectRefund);
 
 export default router;

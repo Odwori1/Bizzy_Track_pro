@@ -14,13 +14,13 @@ export class RefundApprovalService {
      */
     static async getSettings(businessId) {
         const client = await getClient();
-        
+
         try {
             const result = await client.query(
                 `SELECT * FROM refund_approval_settings WHERE business_id = $1`,
                 [businessId]
             );
-            
+
             if (result.rows.length === 0) {
                 // Create default settings
                 const insertResult = await client.query(
@@ -31,7 +31,7 @@ export class RefundApprovalService {
                 );
                 return insertResult.rows[0];
             }
-            
+
             return result.rows[0];
         } finally {
             client.release();
@@ -47,21 +47,21 @@ export class RefundApprovalService {
      */
     static async updateSettings(businessId, settings, userId) {
         const client = await getClient();
-        
+
         try {
             await client.query('BEGIN');
-            
+
             const allowedFields = [
                 'approval_type', 'threshold_amount', 'threshold_percentage',
                 'requires_approval_for_refund', 'approver_roles',
                 'auto_approve_if_below_threshold', 'notify_approvers',
                 'notify_on_approval', 'notify_on_rejection', 'escalation_hours'
             ];
-            
+
             const updates = [];
             const values = [businessId];
             let paramCount = 2;
-            
+
             for (const field of allowedFields) {
                 if (settings[field] !== undefined) {
                     updates.push(`${field} = $${paramCount}`);
@@ -69,22 +69,22 @@ export class RefundApprovalService {
                     paramCount++;
                 }
             }
-            
+
             updates.push(`updated_by = $${paramCount}`);
             values.push(userId);
             paramCount++;
-            
+
             updates.push(`updated_at = NOW()`);
-            
+
             const query = `
                 UPDATE refund_approval_settings
                 SET ${updates.join(', ')}
                 WHERE business_id = $1
                 RETURNING *
             `;
-            
+
             const result = await client.query(query, values);
-            
+
             await auditLogger.logAction({
                 businessId,
                 userId,
@@ -93,7 +93,7 @@ export class RefundApprovalService {
                 resourceId: businessId,
                 newValues: settings
             });
-            
+
             await client.query('COMMIT');
             return result.rows[0];
         } catch (error) {
@@ -114,7 +114,7 @@ export class RefundApprovalService {
      */
     static async requiresApproval(businessId, refundAmount, monthlySales = null) {
         const client = await getClient();
-        
+
         try {
             const result = await client.query(
                 `SELECT * FROM check_refund_approval_required($1, $2, $3)`,
@@ -134,7 +134,7 @@ export class RefundApprovalService {
      */
     static async userCanApprove(userId, businessId) {
         const client = await getClient();
-        
+
         try {
             const result = await client.query(
                 `SELECT user_can_approve_refunds($1, $2) as can_approve`,
@@ -152,14 +152,18 @@ export class RefundApprovalService {
      * @param {string} refundId - Refund ID
      * @param {string} userId - User requesting
      * @param {Object} options - Additional options
+     * @param {Object} existingClient - Optional existing DB client (for nested transactions)
      * @returns {Promise<Object>} Approval request
      */
-    static async createApprovalRequest(businessId, refundId, userId, options = {}) {
-        const client = await getClient();
-        
+    static async createApprovalRequest(businessId, refundId, userId, options = {}, existingClient = null) {
+        const client = existingClient || await getClient();
+
         try {
-            await client.query('BEGIN');
-            
+            // Only manage transaction if we created the client
+            if (!existingClient) {
+                await client.query('BEGIN');
+            }
+
             // Get refund details
             const refundResult = await client.query(
                 `SELECT refund_number, total_refunded, refund_reason
@@ -167,28 +171,30 @@ export class RefundApprovalService {
                  WHERE id = $1 AND business_id = $2`,
                 [refundId, businessId]
             );
-            
+
             if (refundResult.rows.length === 0) {
                 throw new Error('Refund not found');
             }
-            
+
             const refund = refundResult.rows[0];
-            
+
             // Check if approval already exists
             const existing = await client.query(
-                `SELECT * FROM refund_approval_queue 
+                `SELECT * FROM refund_approval_queue
                  WHERE refund_id = $1 AND approval_status = 'PENDING'`,
                 [refundId]
             );
-            
+
             if (existing.rows.length > 0) {
-                await client.query('COMMIT');
+                if (!existingClient) {
+                    await client.query('COMMIT');
+                }
                 return existing.rows[0];
             }
-            
+
             // Calculate expiry (default 48 hours)
             const expiryHours = options.expiryHours || 48;
-            
+
             // Create approval record
             const result = await client.query(
                 `INSERT INTO refund_approval_queue (
@@ -202,36 +208,43 @@ export class RefundApprovalService {
                     JSON.stringify(options.metadata || {})
                 ]
             );
-            
+
             const approval = result.rows[0];
-            
-            // Update refund status
+
+            // FIXED: Update refund status to 'PENDING' (not 'PENDING_APPROVAL')
+            // 'PENDING' is the only valid status for pending refunds in the enum
             await client.query(
-                `UPDATE refunds 
-                 SET status = 'PENDING_APPROVAL',
+                `UPDATE refunds
+                 SET status = 'PENDING',
                      requires_approval = true,
                      approval_id = $1,
                      updated_at = NOW()
                  WHERE id = $2`,
                 [approval.id, refundId]
             );
-            
-            await client.query('COMMIT');
-            
+
+            if (!existingClient) {
+                await client.query('COMMIT');
+            }
+
             log.info('Approval request created', {
                 businessId,
                 refundId,
                 approvalId: approval.id,
                 amount: refund.total_refunded
             });
-            
+
             return approval;
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (!existingClient) {
+                await client.query('ROLLBACK');
+            }
             log.error('Error creating approval request:', error);
             throw error;
         } finally {
-            client.release();
+            if (!existingClient) {
+                client.release();
+            }
         }
     }
 
@@ -244,10 +257,10 @@ export class RefundApprovalService {
      */
     static async approveRefund(approvalId, userId, notes = null) {
         const client = await getClient();
-        
+
         try {
             await client.query('BEGIN');
-            
+
             // Get approval details
             const approvalResult = await client.query(
                 `SELECT raq.*, r.business_id, r.refund_number
@@ -256,21 +269,21 @@ export class RefundApprovalService {
                  WHERE raq.id = $1`,
                 [approvalId]
             );
-            
+
             if (approvalResult.rows.length === 0) {
                 throw new Error('Approval request not found');
             }
-            
+
             const approval = approvalResult.rows[0];
-            
+
             if (approval.approval_status !== 'PENDING') {
                 throw new Error(`Approval already ${approval.approval_status}`);
             }
-            
+
             if (approval.expires_at < new Date()) {
                 throw new Error('Approval request has expired');
             }
-            
+
             // Update approval status
             await client.query(
                 `UPDATE refund_approval_queue
@@ -282,7 +295,7 @@ export class RefundApprovalService {
                  WHERE id = $3`,
                 [userId, notes, approvalId]
             );
-            
+
             // Add to history
             await client.query(
                 `INSERT INTO refund_approval_history (
@@ -294,10 +307,10 @@ export class RefundApprovalService {
                     userId, 'PENDING', 'APPROVED', notes
                 ]
             );
-            
-            // Update refund status
+
+            // Update refund status to APPROVED
             await client.query(
-                `UPDATE refunds 
+                `UPDATE refunds
                  SET status = 'APPROVED',
                      approved_by = $1,
                      approved_at = NOW(),
@@ -305,9 +318,9 @@ export class RefundApprovalService {
                  WHERE id = $2`,
                 [userId, approval.refund_id]
             );
-            
+
             await client.query('COMMIT');
-            
+
             // Process the refund (import dynamically to avoid circular dependency)
             const { RefundService } = await import('./refundService.js');
             const processResult = await RefundService.processRefund(
@@ -315,7 +328,7 @@ export class RefundApprovalService {
                 userId,
                 approval.business_id
             );
-            
+
             return {
                 success: true,
                 approval: approval,
@@ -340,10 +353,10 @@ export class RefundApprovalService {
      */
     static async rejectRefund(approvalId, userId, reason) {
         const client = await getClient();
-        
+
         try {
             await client.query('BEGIN');
-            
+
             // Get approval details
             const approvalResult = await client.query(
                 `SELECT raq.*, r.business_id, r.refund_number
@@ -352,13 +365,13 @@ export class RefundApprovalService {
                  WHERE raq.id = $1`,
                 [approvalId]
             );
-            
+
             if (approvalResult.rows.length === 0) {
                 throw new Error('Approval request not found');
             }
-            
+
             const approval = approvalResult.rows[0];
-            
+
             // Update approval status
             await client.query(
                 `UPDATE refund_approval_queue
@@ -370,7 +383,7 @@ export class RefundApprovalService {
                  WHERE id = $3`,
                 [userId, reason, approvalId]
             );
-            
+
             // Add to history
             await client.query(
                 `INSERT INTO refund_approval_history (
@@ -382,19 +395,19 @@ export class RefundApprovalService {
                     userId, 'PENDING', 'REJECTED', reason
                 ]
             );
-            
-            // Update refund status
+
+            // Update refund status to REJECTED
             await client.query(
-                `UPDATE refunds 
+                `UPDATE refunds
                  SET status = 'REJECTED',
                      notes = COALESCE(notes, '') || '\nRejected: ' || $1,
                      updated_at = NOW()
                  WHERE id = $2`,
                 [reason, approval.refund_id]
             );
-            
+
             await client.query('COMMIT');
-            
+
             return {
                 success: true,
                 approval: approval,
@@ -419,19 +432,19 @@ export class RefundApprovalService {
         const client = await getClient();
         const limit = options.limit || 50;
         const offset = options.offset || 0;
-        
+
         try {
             const result = await client.query(
                 `SELECT * FROM get_pending_refund_approvals(NULL, $1, $2, $3)`,
                 [businessId, limit, offset]
             );
-            
+
             const countResult = await client.query(
                 `SELECT COUNT(*) FROM refund_approval_queue
                  WHERE business_id = $1 AND approval_status = 'PENDING' AND expires_at > NOW()`,
                 [businessId]
             );
-            
+
             return {
                 approvals: result.rows,
                 total: parseInt(countResult.rows[0].count),
@@ -454,13 +467,13 @@ export class RefundApprovalService {
         const client = await getClient();
         const limit = options.limit || 50;
         const offset = options.offset || 0;
-        
+
         try {
             const result = await client.query(
                 `SELECT * FROM get_pending_refund_approvals($1, $2, $3, $4)`,
                 [userId, businessId, limit, offset]
             );
-            
+
             return {
                 approvals: result.rows,
                 total: result.rows.length,
@@ -480,10 +493,10 @@ export class RefundApprovalService {
      */
     static async getApprovalById(approvalId, businessId) {
         const client = await getClient();
-        
+
         try {
             const result = await client.query(
-                `SELECT raq.*, 
+                `SELECT raq.*,
                         r.refund_number, r.total_refunded, r.refund_reason,
                         r.created_at as refund_created_at,
                         req.full_name as requested_by_name,
@@ -497,13 +510,13 @@ export class RefundApprovalService {
                  WHERE raq.id = $1 AND raq.business_id = $2`,
                 [approvalId, businessId]
             );
-            
+
             if (result.rows.length === 0) {
                 return null;
             }
-            
+
             const approval = result.rows[0];
-            
+
             // Get history
             const historyResult = await client.query(
                 `SELECT * FROM refund_approval_history
@@ -511,9 +524,9 @@ export class RefundApprovalService {
                  ORDER BY action_at DESC`,
                 [approvalId]
             );
-            
+
             approval.history = historyResult.rows;
-            
+
             return approval;
         } finally {
             client.release();
@@ -526,7 +539,7 @@ export class RefundApprovalService {
      */
     static async autoExpireApprovals() {
         const client = await getClient();
-        
+
         try {
             const result = await client.query(
                 `SELECT auto_expire_pending_refund_approvals() as expired_count`
@@ -545,7 +558,7 @@ export class RefundApprovalService {
      */
     static async getApprovalStats(businessId, period = 'month') {
         const client = await getClient();
-        
+
         let interval;
         switch (period) {
             case 'day': interval = '1 day'; break;
@@ -554,7 +567,7 @@ export class RefundApprovalService {
             case 'year': interval = '365 days'; break;
             default: interval = '30 days';
         }
-        
+
         try {
             const result = await client.query(
                 `SELECT
@@ -570,7 +583,7 @@ export class RefundApprovalService {
                    AND requested_at >= NOW() - ($2 || ' days')::INTERVAL`,
                 [businessId, interval]
             );
-            
+
             return result.rows[0];
         } finally {
             client.release();
