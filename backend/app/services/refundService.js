@@ -1,6 +1,7 @@
 // File: backend/app/services/refundService.js
 // PERFECT VERSION: Real-world business refund system
 // Fixes: COGS reversal, correct discount account, quantity/amount separation, period protection
+// FIX: Removed duplicate reverseInventory() call — trigger handles all inventory reversal
 
 import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
@@ -202,6 +203,13 @@ export class RefundService {
         );
         approvalId = approvalRequest.id;
 
+        // PRODUCTION FIX: Persist approval_id to refunds table and update in-memory object
+        await client.query(
+          `UPDATE refunds SET approval_id = $1 WHERE id = $2`,
+          [approvalId, refund.id]
+        );
+        refund.approval_id = approvalId;
+
         await client.query('COMMIT');
         return {
           success: true,
@@ -254,6 +262,9 @@ export class RefundService {
 
   /**
    * Process refund (approve and execute all reversals)
+   * FIX: Removed service-layer reverseInventory() call. All inventory, discount, tax,
+   * and journal entry mutations are now handled exclusively by the database trigger
+   * process_refund_accounting() to prevent duplication and ensure single source of truth.
    */
   static async processRefund(refundId, userId, businessId) {
     const client = await getClient();
@@ -299,33 +310,10 @@ export class RefundService {
         };
       }
 
-      // STEP 1: REVERSE INVENTORY - FIXED: Join with inventory_items to get correct cost_price
-      const refundItems = await client.query(
-        `SELECT ri.*, pti.inventory_item_id as original_inventory_item_id,
-                ii.cost_price as original_cost_price
-         FROM refund_items ri
-         LEFT JOIN pos_transaction_items pti ON ri.original_line_item_id = pti.id
-         LEFT JOIN inventory_items ii ON pti.inventory_item_id = ii.id
-         WHERE ri.refund_id = $1 AND ri.business_id = $2`,
-        [refundId, businessId]
-      );
-
-      const inventoryItems = refundItems.rows.filter(
-        item => item.product_id || item.original_inventory_item_id
-      );
-
-      let inventoryReversalResult = null;
-      if (inventoryItems.length > 0) {
-        inventoryReversalResult = await this.reverseInventory(
-          businessId,
-          refundId,
-          inventoryItems,
-          userId
-        );
-      }
-
-      // STEP 2-4: Trigger handles discount, tax, and journal entry
-      // The database trigger process_refund_accounting() fires on status = 'APPROVED'
+      // FIX: All inventory, discount, tax, and journal entry mutations are handled
+      // by the database trigger process_refund_accounting() when status changes to APPROVED.
+      // Do NOT call reverseInventory(), reverseDiscounts(), or reverseTaxes() here.
+      // The trigger is the single source of truth for all refund accounting.
 
       // Update status to APPROVED (trigger will fire)
       await client.query(
@@ -347,7 +335,6 @@ export class RefundService {
         success: true,
         refund: completedRefund,
         journal_entry_id: completedRefund.journal_entry_id,
-        inventory_reversal: inventoryReversalResult,
         message: 'Refund processed successfully'
       };
 
@@ -362,11 +349,11 @@ export class RefundService {
 
   /**
    * Reverse inventory for refunded items
-   * @param {string} businessId - Business ID
-   * @param {string} refundId - Refund ID
-   * @param {Array} items - Refund items with inventory
-   * @param {string} userId - User ID
-   * @returns {Promise<Object>} Reversal result
+   * NOTE: This method is now ORPHANED from the main processRefund() flow.
+   * It is kept for backward compatibility and potential direct use only.
+   * The database trigger process_refund_accounting() handles all inventory reversal
+   * automatically when refund status changes to APPROVED.
+   * @deprecated Use database trigger instead. Kept for direct/manual use only.
    */
   static async reverseInventory(businessId, refundId, items, userId) {
     const client = await getClient();
@@ -431,7 +418,7 @@ export class RefundService {
             inventory.cost_price,
             'refund',
             refundId,
-            `Refund reversal for ${item.item_name} - ${quantity} units`,
+            `Manual refund reversal for ${item.item_name} - ${quantity} units`,
             userId
           ]
         );
@@ -466,15 +453,10 @@ export class RefundService {
 
   /**
    * Reverse discounts for refund
-   * @param {Object} client - Database client
-   * @param {string} businessId - Business ID
-   * @param {string} refundId - Refund ID
-   * @param {string} originalTransactionId - Original transaction ID
-   * @param {string} transactionType - Transaction type (POS/INVOICE)
-   * @param {number} refundAmount - Total refund amount
-   * @param {number} discountRefunded - Discount portion refunded
-   * @param {string} userId - User ID
-   * @returns {Promise<Object>} Reversal result
+   * NOTE: This method is now ORPHANED from the main processRefund() flow.
+   * The database trigger reverse_discounts_on_refund() handles all discount reversal
+   * automatically when refund status changes to APPROVED.
+   * @deprecated Use database trigger instead. Kept for direct/manual use only.
    */
   static async reverseDiscounts(client, businessId, refundId, originalTransactionId,
                                  transactionType, refundAmount, discountRefunded, userId) {
@@ -597,15 +579,10 @@ export class RefundService {
 
   /**
    * Reverse taxes for refund
-   * @param {Object} client - Database client
-   * @param {string} businessId - Business ID
-   * @param {string} refundId - Refund ID
-   * @param {string} originalTransactionId - Original transaction ID
-   * @param {string} transactionType - Transaction type
-   * @param {number} refundAmount - Total refund amount
-   * @param {number} taxRefunded - Tax portion refunded
-   * @param {string} userId - User ID
-   * @returns {Promise<Object>} Reversal result
+   * NOTE: This method is now ORPHANED from the main processRefund() flow.
+   * The database trigger reverse_tax_on_refund() handles all tax reversal
+   * automatically when refund status changes to APPROVED.
+   * @deprecated Use database trigger instead. Kept for direct/manual use only.
    */
   static async reverseTaxes(client, businessId, refundId, originalTransactionId,
                              transactionType, refundAmount, taxRefunded, userId) {
@@ -1066,6 +1043,7 @@ export class RefundService {
       refund_reason: refund.refund_reason,
       notes: refund.notes,
       requires_approval: refund.requires_approval,
+      approval_id: refund.approval_id,  // PRODUCTION FIX: Include approval_id in response
       created_at: refund.created_at,
       approved_at: refund.approved_at,
       completed_at: refund.completed_at,
