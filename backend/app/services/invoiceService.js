@@ -459,14 +459,23 @@ export const invoiceService = {
       let approvalId = null;
       let discountAmount = 0;
 
-      // Generate invoice number
+      // ================ FIX: Invoice Number Generation with Advisory Lock ================
+      // Acquire advisory lock for atomic invoice number generation
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1::text || \'_invoice\'))',
+        [businessId]
+      );
+      
       const invoiceNumberQuery = `
-        SELECT COUNT(*) as invoice_count
+        SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 5) AS INTEGER)), 0) + 1 as next_num
         FROM invoices
         WHERE business_id = $1
+          AND invoice_number ~ '^INV-[0-9]+$'
       `;
+      
       const countResult = await client.query(invoiceNumberQuery, [businessId]);
-      const invoiceNumber = `INV-${(parseInt(countResult.rows[0].invoice_count) + 1).toString().padStart(4, '0')}`;
+      const nextNum = parseInt(countResult.rows[0].next_num);
+      const invoiceNumber = `INV-${nextNum.toString().padStart(4, '0')}`;
 
       // Create invoice first (without discount)
       const createInvoiceQuery = `
@@ -609,14 +618,14 @@ export const invoiceService = {
           const discountItems = [];
           for (const item of invoiceData.line_items) {
             const itemId = item.service_id || item.product_id;
-            
+
             if (!itemId) {
               // ✅ FIX: Use UUIDService to get a real UUID instead of manual- prefix
               const generatedId = await UUIDService.getUUID({
                 context: 'invoice_discount_item',
                 useCache: true
               });
-              
+
               discountItems.push({
                 id: generatedId,  // Now a real UUID
                 amount: item.unit_price,
