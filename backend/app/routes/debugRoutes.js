@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 

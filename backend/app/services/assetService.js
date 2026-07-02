@@ -52,7 +52,6 @@ export class AssetService {
       // ✅ FIX: Set session variable for RLS policy (transaction-scoped with 'true')
       // The 'true' parameter makes it transaction-local, but we set it again after commit
       await client.query(
-        "SELECT set_config('app.current_business_id', $1, false)",
         [businessId]
       );
 
@@ -321,7 +320,6 @@ export class AssetService {
 
           // Try setting it again and re-query
           await client.query(
-            "SELECT set_config('app.current_business_id', $1, false)",
             [businessId]
           );
 

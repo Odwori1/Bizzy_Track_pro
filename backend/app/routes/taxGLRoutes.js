@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/taxGLRoutes.js
 // Pattern follows: openingBalanceRoutes.js, taxRoutes.js
 // Purpose: Tax-to-GL API routes
@@ -12,7 +13,7 @@ import { TaxGLSchemas } from '../schemas/taxGLSchemas.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // ============================================================================
 // TAX GL ROUTES

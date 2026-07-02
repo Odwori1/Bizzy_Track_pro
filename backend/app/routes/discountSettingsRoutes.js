@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: ~/Bizzy_Track_pro/backend/app/routes/discountSettingsRoutes.js
 // PURPOSE: Discount settings API routes
 // CREATED: February 28, 2026
@@ -55,7 +56,7 @@ const settingsSchema = Joi.object({
 });
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 /**
  * @route   GET /api/discounts/settings

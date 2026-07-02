@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/openingBalanceRoutes.js
 // Pattern follows: refundRoutes.js, refundApprovalRoutes.js
 
@@ -11,7 +12,7 @@ import { OpeningBalanceSchemas } from '../schemas/openingBalanceSchemas.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // ============================================================================
 // STATUS & INITIALIZATION ROUTES

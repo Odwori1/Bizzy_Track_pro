@@ -136,6 +136,11 @@ export class DiscountRules {
     /**
      * Get active promotional discounts
      * PRODUCTION FIX: Return error marker when promo code not found
+     * PRODUCTION FIX: promo codes are opt-in only. Without an explicit
+     * code, never return promotional discounts — otherwise any active
+     * code below the approval threshold silently applies to every
+     * transaction in the business, and any code above it blocks
+     * unrelated, legitimate volume/category discounts.
      */
     static async getActivePromotions(businessId, context) {
         const client = await getClient();
@@ -143,39 +148,32 @@ export class DiscountRules {
         try {
             const { transactionDate, promoCode, customerId, amount } = context;
 
+            // PRODUCTION FIX: promo codes are opt-in only. Without an explicit
+            // code, never return promotional discounts — otherwise any active
+            // code below the approval threshold silently applies to every
+            // transaction in the business, and any code above it blocks
+            // unrelated, legitimate volume/category discounts.
+            if (!promoCode) {
+                log.debug('getActivePromotions called without promoCode - returning empty', { businessId });
+                return [];
+            }
+
             let query = `
                 SELECT
-                    id,
-                    promo_code,
-                    description,
-                    discount_type,
-                    discount_value,
-                    min_purchase,
-                    max_uses,
-                    times_used,
-                    per_customer_limit,
-                    valid_from,
-                    valid_to,
-                    is_active,
+                    id, promo_code, description, discount_type, discount_value,
+                    min_purchase, max_uses, times_used, per_customer_limit,
+                    valid_from, valid_to, is_active,
                     'PROMOTIONAL' as rule_type
                 FROM promotional_discounts
                 WHERE business_id = $1
+                    AND promo_code = $2
                     AND is_active = true
-                    AND (valid_from IS NULL OR valid_from::date <= $2::date)
-                    AND (valid_to IS NULL OR valid_to::date >= $2::date)
+                    AND (valid_from IS NULL OR valid_from::date <= $3::date)
+                    AND (valid_to IS NULL OR valid_to::date >= $3::date)
+                    AND (max_uses IS NULL OR times_used < max_uses)
             `;
+            const params = [businessId, promoCode, transactionDate];
 
-            const params = [businessId, transactionDate];
-
-            if (promoCode) {
-                query += ` AND promo_code = $${params.length + 1}`;
-                params.push(promoCode);
-            }
-
-            // Check global usage limits
-            query += ` AND (max_uses IS NULL OR times_used < max_uses)`;
-
-            // Check minimum purchase
             if (amount) {
                 query += ` AND (min_purchase IS NULL OR $${params.length + 1} >= min_purchase)`;
                 params.push(amount);
@@ -183,44 +181,24 @@ export class DiscountRules {
 
             const result = await client.query(query, params);
 
-            // PRODUCTION FIX: If promo code was provided but no match found, return error marker
-            if (promoCode && result.rows.length === 0) {
-                log.warn('Promo code not found or inactive', { 
-                    promoCode, 
-                    businessId,
-                    transactionDate,
-                    amount 
-                });
-
-                // Return error marker that upstream will detect
+            if (result.rows.length === 0) {
+                log.warn('Promo code not found or inactive', { promoCode, businessId, transactionDate, amount });
                 return [{
                     _error: true,
                     _errorType: 'PROMO_NOT_FOUND',
                     _promoCode: promoCode,
                     rule_type: 'PROMOTIONAL',
-                    // Include minimal fields to prevent downstream crashes
                     id: null,
                     discount_type: 'PERCENTAGE',
                     discount_value: 0
                 }];
             }
 
-            // Further filter by customer limits if needed
             const promotions = [];
             for (const row of result.rows) {
                 if (row.per_customer_limit && customerId) {
-                    const customerUsage = await this._getCustomerPromoUsage(
-                        businessId,
-                        row.id,
-                        customerId
-                    );
+                    const customerUsage = await this._getCustomerPromoUsage(businessId, row.id, customerId);
                     if (customerUsage >= row.per_customer_limit) {
-                        log.debug('Promo code per-customer limit reached', {
-                            promoCode: row.promo_code,
-                            customerId,
-                            limit: row.per_customer_limit,
-                            usage: customerUsage
-                        });
                         continue;
                     }
                 }
@@ -230,10 +208,7 @@ export class DiscountRules {
             return promotions;
 
         } catch (error) {
-            log.error('Error getting active promotions', {
-                businessId,
-                error: error.message
-            });
+            log.error('Error getting active promotions', { businessId, error: error.message });
             return [];
         } finally {
             client.release();

@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/periodClosingRoutes.js
 // Pattern follows: financialStatementRoutes.js
 // Purpose: Period closing API routes
@@ -11,7 +12,7 @@ import { FinancialStatementSchemas } from '../schemas/financialStatementSchemas.
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // ============================================================================
 // PERIOD CLOSING ROUTES

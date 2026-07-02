@@ -61,6 +61,12 @@ export const businessService = {
 
     try {
       await client.query('BEGIN');
+      // PRODUCTION FIX: registration creates the business/owner that RLS context
+      // would otherwise depend on already existing — a chicken-and-egg problem.
+      // SET LOCAL scopes the bypass to this transaction only; it cannot leak to
+      // other requests sharing this pooled connection, and resets automatically
+      // on COMMIT/ROLLBACK.
+      await client.query('SET LOCAL ROLE bizzytrack_bootstrap');
 
       // Get currency symbol dynamically
       const currencySymbol = getCurrencySymbol(currency);
@@ -263,17 +269,11 @@ export const businessService = {
 
     const client = await getClient();
     try {
-      // Find user by email
-      const userQuery = `
-        SELECT
-          u.id, u.email, u.full_name, u.password_hash, u.role, u.timezone,
-          u.business_id, b.name as business_name, b.currency, b.currency_symbol, b.timezone as business_timezone
-        FROM users u
-        JOIN businesses b ON u.business_id = b.id
-        WHERE u.email = $1
-      `;
-
-      const userResult = await client.query(userQuery, [email.toLowerCase().trim()]);
+      // Find user by email using the database function
+      const userResult = await client.query(
+        `SELECT * FROM get_user_credentials_for_login($1)`,
+        [email.toLowerCase().trim()]
+      );
 
       if (userResult.rows.length === 0) {
         log.warn('Login failed: user not found', { email });
@@ -356,40 +356,40 @@ export const businessService = {
   // Add this method to businessService.js (or update if exists)
   async updateBusinessCountry(businessId, countryCode) {
     const client = await getClient();
-    
+
     try {
       // Validate country exists in tax_countries
       const countryCheck = await client.query(
         'SELECT 1 FROM tax_countries WHERE country_code = $1',
         [countryCode]
       );
-      
+
       if (countryCheck.rows.length === 0) {
         throw new Error(`Invalid country code: ${countryCode}`);
       }
-      
+
       // Update business country
       const result = await client.query(
-        `UPDATE businesses 
-         SET country_code = $1, 
+        `UPDATE businesses
+         SET country_code = $1,
              country_name = (SELECT country_name FROM tax_countries WHERE country_code = $1)
          WHERE id = $2
          RETURNING id, name, country_code, country_name`,
         [countryCode, businessId]
       );
-      
+
       if (result.rows.length === 0) {
         throw new Error(`Business not found: ${businessId}`);
       }
-      
+
       log.info('Business country updated', {
         businessId,
         countryCode,
         businessName: result.rows[0].name
       });
-      
+
       return result.rows[0];
-      
+
     } catch (error) {
       log.error('Failed to update business country', {
         businessId,

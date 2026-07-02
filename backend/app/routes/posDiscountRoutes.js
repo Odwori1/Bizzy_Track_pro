@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: ~/Bizzy_Track_pro/backend/app/routes/posDiscountRoutes.js
 // PURPOSE: POS discount API routes
 
@@ -10,7 +11,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 /**
  * @route   POST /api/pos/transactions-with-discount

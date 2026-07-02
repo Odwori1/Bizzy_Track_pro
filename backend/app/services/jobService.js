@@ -8,7 +8,6 @@ const setRLSContext = async (client, businessId, userId) => {
     throw new Error('Invalid businessId for RLS context');
   }
 
-  await client.query(`SET app.current_business_id = '${businessId}'`);
 
   if (userId && typeof userId === 'string') {
     await client.query(`SET app.current_user_id = '${userId}'`);

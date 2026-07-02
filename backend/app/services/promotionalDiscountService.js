@@ -110,6 +110,13 @@ export class PromotionalDiscountService {
             });
 
             await client.query('COMMIT');
+
+            // PRODUCTION FIX: invalidate the discount calculation cache so a
+            // newly-created promo takes effect immediately instead of up to
+            // 5 minutes later (calculateFinalPrice caches results for 300s).
+            const { DiscountRuleEngine } = await import('./discountRuleEngine.js');
+            await DiscountRuleEngine.invalidateCache(businessId);
+
             return result.rows[0];
 
         } catch (error) {
@@ -198,6 +205,9 @@ export class PromotionalDiscountService {
 
     /**
      * Update promotion
+     * PRODUCTION FIX: Properly maps camelCase to snake_case for database
+     * PRODUCTION FIX: Fails loudly on no-op updates
+     * PRODUCTION FIX: Invalidates cache after update
      */
     static async updatePromotion(id, data, userId, businessId) {
         const client = await getClient();
@@ -205,7 +215,6 @@ export class PromotionalDiscountService {
         try {
             await client.query('BEGIN');
 
-            // Get existing promotion
             const existing = await client.query(
                 `SELECT * FROM promotional_discounts WHERE id = $1 AND business_id = $2`,
                 [id, businessId]
@@ -215,7 +224,31 @@ export class PromotionalDiscountService {
                 throw new Error('Promotion not found');
             }
 
-            // Build dynamic update query
+            // PRODUCTION FIX: the API contract uses camelCase (isActive, promoCode,
+            // etc.) but DB columns are snake_case. allowedFields only matched
+            // snake_case, so { isActive: false } matched nothing — the UPDATE
+            // touched zero real columns and the endpoint returned success:true
+            // while changing nothing. Map both conventions defensively, the
+            // same way createPromotion() already does.
+            const fieldMap = {
+                promoCode: 'promo_code',
+                description: 'description',
+                discountType: 'discount_type',
+                discountValue: 'discount_value',
+                minPurchase: 'min_purchase',
+                maxUses: 'max_uses',
+                perCustomerLimit: 'per_customer_limit',
+                validFrom: 'valid_from',
+                validTo: 'valid_to',
+                isActive: 'is_active'
+            };
+
+            const normalized = {};
+            for (const [camel, snake] of Object.entries(fieldMap)) {
+                if (data[camel] !== undefined) normalized[snake] = data[camel];
+                if (data[snake] !== undefined) normalized[snake] = data[snake];
+            }
+
             const updates = [];
             const params = [];
             let paramCount = 1;
@@ -227,10 +260,17 @@ export class PromotionalDiscountService {
             ];
 
             for (const field of allowedFields) {
-                if (data[field] !== undefined) {
+                if (normalized[field] !== undefined) {
                     updates.push(`${field} = $${paramCount++}`);
-                    params.push(data[field]);
+                    params.push(normalized[field]);
                 }
+            }
+
+            // PRODUCTION FIX: fail loudly on a no-op update instead of silently
+            // "succeeding" — this is what would have caught this exact bug at
+            // the API layer instead of a manual curl session.
+            if (updates.length === 0) {
+                throw new Error('No valid fields provided to update');
             }
 
             updates.push(`updated_at = NOW()`);
@@ -246,18 +286,23 @@ export class PromotionalDiscountService {
             const result = await client.query(query, params);
 
             await auditLogger.logAction({
-                businessId,
-                userId,
-                action: 'promotion.updated',
-                resourceType: 'promotional_discount',
-                resourceId: id,
-                oldValues: existing.rows[0],
-                newValues: result.rows[0]
+                businessId, userId, action: 'promotion.updated',
+                resourceType: 'promotional_discount', resourceId: id,
+                oldValues: existing.rows[0], newValues: result.rows[0]
             });
 
             log.info('Promotion updated', { businessId, userId, promoId: id });
 
             await client.query('COMMIT');
+
+            // PRODUCTION FIX: invalidate the discount calculation cache so a
+            // deactivation/activation takes effect immediately instead of up
+            // to 5 minutes later (calculateFinalPrice caches results for 300s).
+            // Lazy import avoids a circular dependency, since
+            // discountRuleEngine.js imports this file.
+            const { DiscountRuleEngine } = await import('./discountRuleEngine.js');
+            await DiscountRuleEngine.invalidateCache(businessId);
+
             return result.rows[0];
 
         } catch (error) {

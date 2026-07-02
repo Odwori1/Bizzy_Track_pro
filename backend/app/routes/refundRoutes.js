@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/refundRoutes.js
 // Main refund routes (NOT approval routes)
 
@@ -9,7 +10,7 @@ import { requirePermission } from '../middleware/permissions.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // ============================================================================
 // MAIN REFUND CRUD ROUTES

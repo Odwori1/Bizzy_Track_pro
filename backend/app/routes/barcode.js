@@ -1,5 +1,5 @@
 import express from 'express';
-import db from '../config/database.js';
+import { query as db } from '../utils/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
 import { requirePermission } from '../middleware/permissions.js';

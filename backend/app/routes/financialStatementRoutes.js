@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/financialStatementRoutes.js
 // Pattern follows: openingBalanceRoutes.js, taxRoutes.js
 // Purpose: Financial statement API routes
@@ -11,7 +12,7 @@ import { FinancialStatementSchemas } from '../schemas/financialStatementSchemas.
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // ============================================================================
 // FINANCIAL STATEMENT ROUTES

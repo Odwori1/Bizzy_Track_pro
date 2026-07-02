@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/refundApprovalRoutes.js
 // Dynamic refund approval routes with ABAC (using your permission system)
 
@@ -11,7 +12,7 @@ import Joi from 'joi';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 // Settings routes - requires configure permission
 router.get('/settings', requirePermission('refund_approval:configure'), RefundApprovalController.getSettings);

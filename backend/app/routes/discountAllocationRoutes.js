@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: ~/Bizzy_Track_pro/backend/app/routes/discountAllocationRoutes.js
 // PURPOSE: Define all discount allocation routes
 // PHASE 10.10: Following patterns from discountRoutes.js
@@ -12,7 +13,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 /**
  * =====================================================

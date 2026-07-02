@@ -95,9 +95,9 @@ export class DiscountRuleEngine {
             // PRODUCTION FIX: Check for promo error markers in discovered discounts
             const promoError = applicableDiscounts.find(d => d._error && d._errorType === 'PROMO_NOT_FOUND');
             if (promoError) {
-                log.error('Promo code not found in discount rules', { 
+                log.error('Promo code not found in discount rules', {
                     promoCode: promoError._promoCode,
-                    businessId 
+                    businessId
                 });
 
                 return {
@@ -284,8 +284,34 @@ export class DiscountRuleEngine {
     static async _createApprovalRequest(context, discounts, userId, businessId, client) {
         const { amount, customerId, promoCode, transactionId, transactionType } = context;
 
-        const totalDiscount = discounts.reduce((sum, d) => sum + parseFloat(d.discount_value || 0), 0);
-        const discountPercentage = amount > 0 ? (totalDiscount / amount) * 100 : 0;
+        // PRODUCTION FIX: discount_value for PERCENTAGE-type discounts is a percent,
+        // not currency — summing raw values across discounts and dividing by amount
+        // produced meaningless figures (e.g. "75" / 150000 = "0.05%"). Convert each
+        // candidate to its actual currency value first, and report the single
+        // largest discount's percentage — that's the one that actually determines
+        // whether approval is required.
+        let totalDiscount = 0;
+        let maxPercentage = 0;
+
+        for (const d of discounts) {
+            const value = parseFloat(d.discount_value || 0);
+            let currencyAmount;
+            let percentage;
+
+            if (d.discount_type === 'FIXED') {
+                currencyAmount = value;
+                percentage = amount > 0 ? (value / amount) * 100 : 0;
+            } else {
+                // PERCENTAGE
+                currencyAmount = amount * (value / 100);
+                percentage = value;
+            }
+
+            totalDiscount += currencyAmount;
+            maxPercentage = Math.max(maxPercentage, percentage);
+        }
+
+        const discountPercentage = maxPercentage;
         const threshold = await this._getApprovalThreshold(businessId);
 
         // Build approval data
@@ -499,8 +525,15 @@ export class DiscountRuleEngine {
 
         const discounts = await DiscountRules.getApplicableDiscounts(businessId, ruleContext);
 
+        // SAFETY NET: never let a PROMOTIONAL discount through unless it's an
+        // exact match for a code the customer actually entered this transaction.
+        const safeguarded = discounts.filter(d => {
+            if (d.rule_type !== 'PROMOTIONAL' || d._error) return true;
+            return !!ruleContext.promoCode && d.promo_code === ruleContext.promoCode;
+        });
+
         // Enrich with names
-        const enrichedDiscounts = discounts.map(discount => {
+        const enrichedDiscounts = safeguarded.map(discount => {
             const enriched = { ...discount };
 
             if (discount.rule_type === 'PROMOTIONAL' && discount.promo_code) {
@@ -803,7 +836,7 @@ export class DiscountRuleEngine {
             }
 
             const query = `
-                SELECT 
+                SELECT
                     pd.id,
                     pd.promo_code,
                     pd.name,
@@ -865,7 +898,7 @@ export class DiscountRuleEngine {
             }
 
             const query = `
-                SELECT 
+                SELECT
                     pet.id,
                     pet.term_name,
                     pet.discount_percentage,
@@ -921,7 +954,7 @@ export class DiscountRuleEngine {
             }
 
             const query = `
-                SELECT 
+                SELECT
                     cd.id,
                     cd.name,
                     cd.discount_percentage,
@@ -1116,8 +1149,35 @@ export class DiscountRuleEngine {
 
             // Get applicable discounts
             const discounts = await this.discoverDiscounts(context);
-            const totalDiscount = discounts.reduce((sum, d) => sum + parseFloat(d.discount_value || 0), 0);
-            const discountPercentage = amount > 0 ? (totalDiscount / amount) * 100 : 0;
+
+            // PRODUCTION FIX: discount_value for PERCENTAGE-type discounts is a percent,
+            // not currency — summing raw values across discounts and dividing by amount
+            // produced meaningless figures (e.g. "75" / 150000 = "0.05%"). Convert each
+            // candidate to its actual currency value first, and report the single
+            // largest discount's percentage — that's the one that actually determines
+            // whether approval is required.
+            let totalDiscount = 0;
+            let maxPercentage = 0;
+
+            for (const d of discounts) {
+                const value = parseFloat(d.discount_value || 0);
+                let currencyAmount;
+                let percentage;
+
+                if (d.discount_type === 'FIXED') {
+                    currencyAmount = value;
+                    percentage = amount > 0 ? (value / amount) * 100 : 0;
+                } else {
+                    // PERCENTAGE
+                    currencyAmount = amount * (value / 100);
+                    percentage = value;
+                }
+
+                totalDiscount += currencyAmount;
+                maxPercentage = Math.max(maxPercentage, percentage);
+            }
+
+            const discountPercentage = maxPercentage;
 
             // Get dynamic threshold
             const threshold = await DiscountSettingsService.getApprovalThreshold(businessId);

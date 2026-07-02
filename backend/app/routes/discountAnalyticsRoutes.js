@@ -1,3 +1,4 @@
+import { requireAuth } from '../middleware/requireAuth.js';
 // File: backend/app/routes/discountAnalyticsRoutes.js
 // PURPOSE: Define all discount analytics and reporting routes
 // PHASE 10.10: Following patterns from accountingRoutes.js
@@ -12,7 +13,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(requireAuth);
 
 /**
  * =====================================================
