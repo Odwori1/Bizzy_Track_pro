@@ -355,7 +355,7 @@ export class DiscountAllocationService {
             if (data.lines && data.lines.length > 0) {
                 // Determine transaction type to validate correct line item table
                 const isPos = !!data.pos_transaction_id;
-                
+
                 // Verify all line_item_ids exist in the database
                 for (const line of data.lines) {
                     let exists;
@@ -370,12 +370,12 @@ export class DiscountAllocationService {
                             [line.line_item_id]
                         );
                     }
-                    
+
                     if (exists.rows.length === 0) {
                         throw new Error(`Line item ${line.line_item_id} does not exist in ${isPos ? 'pos_transaction_items' : 'invoice_line_items'}`);
                     }
                 }
-                
+
                 await this.createAllocationLinesWithClient(allocation.id, data.lines, client);
             }
 
@@ -414,15 +414,16 @@ export class DiscountAllocationService {
 
     /**
      * Create allocation lines
+     * FIXED: Added business_id to lineData for RLS policy compliance
      */
     static async createAllocationLines(allocationId, lines, client) {
         if (!lines || lines.length === 0) {
             return [];
         }
 
-        // Get the allocation to determine if it's POS or Invoice
+        // Get the allocation to determine if it's POS or Invoice and get business_id
         const allocationResult = await client.query(
-            `SELECT pos_transaction_id, invoice_id
+            `SELECT pos_transaction_id, invoice_id, business_id
              FROM discount_allocations
              WHERE id = $1`,
             [allocationId]
@@ -433,6 +434,7 @@ export class DiscountAllocationService {
         }
 
         const isPos = allocationResult.rows[0].pos_transaction_id ? true : false;
+        const businessId = allocationResult.rows[0].business_id;
         const createdLines = [];
 
         for (const line of lines) {
@@ -444,6 +446,7 @@ export class DiscountAllocationService {
             // Build the line data with actual column names
             const lineData = {
                 allocation_id: allocationId,
+                business_id: businessId,  // PRODUCTION FIX: required by RLS policy
                 line_amount: line.line_amount || 0,
                 discount_amount: line.discount_amount || 0,
                 created_at: new Date()
@@ -485,15 +488,16 @@ export class DiscountAllocationService {
 
     /**
      * Create allocation lines with existing client connection
+     * FIXED: Added business_id to lineData for RLS policy compliance
      */
     static async createAllocationLinesWithClient(allocationId, lines, client) {
         if (!lines || lines.length === 0) {
             return [];
         }
 
-        // Get the allocation to determine if it's POS or Invoice
+        // Get the allocation to determine if it's POS or Invoice and get business_id
         const allocationResult = await client.query(
-            `SELECT pos_transaction_id, invoice_id
+            `SELECT pos_transaction_id, invoice_id, business_id
              FROM discount_allocations
              WHERE id = $1`,
             [allocationId]
@@ -504,6 +508,7 @@ export class DiscountAllocationService {
         }
 
         const isPos = allocationResult.rows[0].pos_transaction_id ? true : false;
+        const businessId = allocationResult.rows[0].business_id;
         const createdLines = [];
 
         for (const line of lines) {
@@ -515,6 +520,7 @@ export class DiscountAllocationService {
             // Build the line data with actual column names
             const lineData = {
                 allocation_id: allocationId,
+                business_id: businessId,  // PRODUCTION FIX: required by RLS policy
                 line_amount: line.line_amount || 0,
                 discount_amount: line.discount_amount || 0,
                 created_at: new Date()
