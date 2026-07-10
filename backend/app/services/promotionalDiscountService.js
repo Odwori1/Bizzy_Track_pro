@@ -208,6 +208,7 @@ export class PromotionalDiscountService {
      * PRODUCTION FIX: Properly maps camelCase to snake_case for database
      * PRODUCTION FIX: Fails loudly on no-op updates
      * PRODUCTION FIX: Invalidates cache after update
+     * PRODUCTION FIX: Returns 404 status code when promotion not found
      */
     static async updatePromotion(id, data, userId, businessId) {
         const client = await getClient();
@@ -221,7 +222,9 @@ export class PromotionalDiscountService {
             );
 
             if (existing.rows.length === 0) {
-                throw new Error('Promotion not found');
+                const err = new Error('Promotion not found');
+                err.statusCode = 404;
+                throw err;
             }
 
             // PRODUCTION FIX: the API contract uses camelCase (isActive, promoCode,

@@ -82,8 +82,8 @@ export const posController = {
         total_sales: transactions.reduce((sum, t) => sum + (parseFloat(t.final_amount) || 0), 0),
         total_tax: transactions.reduce((sum, t) => sum + (parseFloat(t.tax_amount) || 0), 0),
         total_discount: transactions.reduce((sum, t) => sum + (parseFloat(t.discount_amount) || 0), 0),
-        average_transaction_value: transactions.length > 0 
-          ? transactions.reduce((sum, t) => sum + (parseFloat(t.final_amount) || 0), 0) / transactions.length 
+        average_transaction_value: transactions.length > 0
+          ? transactions.reduce((sum, t) => sum + (parseFloat(t.final_amount) || 0), 0) / transactions.length
           : 0
       };
 
@@ -120,6 +120,9 @@ export const posController = {
       });
 
     } catch (error) {
+      if (error.message === 'POS transaction not found or access denied') {
+        return res.status(404).json({ success: false, error: error.message });
+      }
       log.error('POS transaction fetch by ID controller error', error);
       next(error);
     }

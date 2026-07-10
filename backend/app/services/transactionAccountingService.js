@@ -401,14 +401,14 @@ export class TransactionAccountingService {
              AND EXISTS (
                SELECT 1 FROM journal_entry_lines jel
                WHERE jel.journal_entry_id = je.id
-                 AND jel.account_code IN ('4110','4111','4112')
+                 AND jel.account_code IN ('4110','4111','4112','4113')
              )) as discount_entries,
 
           (SELECT json_agg(it.*)
            FROM inventory_transactions it
            WHERE it.business_id = $1
              AND it.reference_type = 'pos_transaction'
-             AND it.reference_id = $2::text) as inventory_transactions,
+             AND it.reference_id = $2::uuid) as inventory_transactions,
 
           (SELECT COALESCE(SUM(jel.amount),0)
            FROM journal_entry_lines jel
@@ -433,7 +433,7 @@ export class TransactionAccountingService {
            WHERE je.business_id=$1
              AND je.reference_type='pos_transaction'
              AND je.reference_id=$2::text
-             AND jel.account_code IN ('4110','4111','4112')) as total_discounts
+             AND jel.account_code IN ('4110','4111','4112','4113')) as total_discounts
         `,
         [businessId, transactionId]
       );
