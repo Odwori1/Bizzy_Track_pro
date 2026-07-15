@@ -36,9 +36,9 @@ router.get('/:id', RefundController.getRefund);
 router.post('/:id/process', requirePermission('refund:process'), RefundController.processRefund);
 
 // Approve a refund (legacy - now calls processRefund)
-router.post('/:id/approve', requirePermission('refund:approve'), RefundController.approveRefund);
+router.post('/:id/approve', requirePermission('refund_approval:approve'), RefundController.approveRefund);
 
 // Reject a refund
-router.post('/:id/reject', requirePermission('refund:reject'), RefundController.rejectRefund);
+router.post('/:id/reject', requirePermission('refund_approval:reject'), RefundController.rejectRefund);
 
 export default router;

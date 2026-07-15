@@ -1,7 +1,19 @@
 // File: backend/app/controllers/refundController.js
 // UPDATED: Full integration with enhanced RefundService
+// PATCHED: approveRefund() and rejectRefund() now go through
+// RefundApprovalService, which enforces userCanApprove() and maintains the
+// refund_approval_queue / refund_approval_history audit trail. Previously
+// these endpoints called RefundService.approveRefund()/rejectRefund()
+// directly, which never checked permissions or the approval queue at all —
+// this was the confirmed approval-bypass gap from the Phase 20 review.
+//
+// createRefund, getRefund, listRefunds, getRefundStats are unchanged.
+// processRefund is unchanged at the controller level — RefundService.processRefund()
+// itself now enforces assertApprovalSatisfied() (see refundService.patched.js),
+// so it's safe to leave this endpoint calling straight through.
 
 import { RefundService } from '../services/refundService.js';
+import { RefundApprovalService } from '../services/refundApprovalService.js';
 import { RefundSchemas } from '../schemas/refundSchemas.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
@@ -12,6 +24,7 @@ export class RefundController {
   /**
    * Create a new refund
    * POST /api/refunds
+   * (unchanged)
    */
   static async createRefund(req, res) {
     try {
@@ -54,7 +67,7 @@ export class RefundController {
       const result = await RefundService.createRefund(businessId, refundData, userId);
 
       const statusCode = result.requires_approval ? 202 : 201;
-      
+
       return res.status(statusCode).json({
         success: true,
         data: result.refund,
@@ -74,8 +87,11 @@ export class RefundController {
   }
 
   /**
-   * Process a refund (approve and execute)
+   * Process a refund that does NOT require approval (approval-required
+   * refunds will now be rejected by RefundService.processRefund()'s
+   * assertApprovalSatisfied() guard — see refundService.patched.js).
    * POST /api/refunds/:id/process
+   * (unchanged at the controller level)
    */
   static async processRefund(req, res) {
     try {
@@ -102,29 +118,37 @@ export class RefundController {
         success: true,
         data: result.refund,
         journal_entry_id: result.journal_entry_id,
-        inventory_reversal: result.inventory_reversal,
-        discount_reversal: result.discount_reversal,
-        tax_reversal: result.tax_reversal,
         message: result.message
       });
 
     } catch (error) {
       log.error('Error processing refund:', error);
-      return res.status(500).json({
+      // NEW: surface approval-required failures as 403, not a generic 500 —
+      // this is an authorization gap, not a server error.
+      const isApprovalGap = /requires approval/i.test(error.message || '');
+      return res.status(isApprovalGap ? 403 : 500).json({
         success: false,
-        message: 'Failed to process refund',
+        message: isApprovalGap ? 'Refund requires approval before it can be processed' : 'Failed to process refund',
         error: error.message
       });
     }
   }
 
   /**
-   * Approve a refund (legacy method - now calls processRefund)
+   * Approve a refund
    * POST /api/refunds/:id/approve
+   *
+   * PATCHED: now routes through RefundApprovalService instead of
+   * RefundService.approveRefund(). This enforces userCanApprove() and
+   * updates refund_approval_queue / refund_approval_history correctly.
+   * If no approval request exists yet for this refund (shouldn't normally
+   * happen — createRefund() creates one whenever requires_approval is
+   * true — but handled defensively), one is created first.
    */
   static async approveRefund(req, res) {
     try {
       const { id } = req.params;
+      const { notes } = req.body || {};
       const businessId = req.user.businessId || req.user.business_id;
       const userId = req.user.userId || req.user.id;
 
@@ -135,21 +159,47 @@ export class RefundController {
         });
       }
 
-      log.info('Approving refund', {
-        businessId,
-        userId,
-        refundId: id
-      });
+      const canApprove = await RefundApprovalService.userCanApprove(userId, businessId);
+      if (!canApprove) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to approve refunds for this business'
+        });
+      }
 
-      const result = await RefundService.approveRefund(id, userId, businessId);
+      const client = await getClient();
+      let approvalId;
+      try {
+        const refundRow = await client.query(
+          `SELECT approval_id, requires_approval, status FROM refunds WHERE id = $1 AND business_id = $2`,
+          [id, businessId]
+        );
+
+        if (refundRow.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'Refund not found' });
+        }
+
+        approvalId = refundRow.rows[0].approval_id;
+
+        if (!approvalId) {
+          // Defensive path: create the approval request now if one is missing.
+          const approvalRequest = await RefundApprovalService.createApprovalRequest(
+            businessId, id, userId, {}
+          );
+          approvalId = approvalRequest.id;
+        }
+      } finally {
+        client.release();
+      }
+
+      log.info('Approving refund', { businessId, userId, refundId: id, approvalId });
+
+      const result = await RefundApprovalService.approveRefund(approvalId, userId, notes);
 
       return res.status(200).json({
         success: true,
         data: result.refund,
-        journal_entry_id: result.journal_entry_id,
-        inventory_reversal: result.inventory_reversal,
-        discount_reversal: result.discount_reversal,
-        tax_reversal: result.tax_reversal,
+        approval: result.approval,
         message: result.message
       });
 
@@ -166,6 +216,10 @@ export class RefundController {
   /**
    * Reject a refund
    * POST /api/refunds/:id/reject
+   *
+   * PATCHED: now routes through RefundApprovalService so rejection is
+   * recorded in refund_approval_queue / refund_approval_history, not just
+   * as a free-text note appended to refunds.notes.
    */
   static async rejectRefund(req, res) {
     try {
@@ -188,18 +242,49 @@ export class RefundController {
         });
       }
 
-      log.info('Rejecting refund', {
-        businessId,
-        userId,
-        refundId: id,
-        reason
-      });
+      const canApprove = await RefundApprovalService.userCanApprove(userId, businessId);
+      if (!canApprove) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to reject refunds for this business'
+        });
+      }
 
-      const result = await RefundService.rejectRefund(id, userId, businessId, reason);
+      const client = await getClient();
+      let approvalId;
+      try {
+        const refundRow = await client.query(
+          `SELECT approval_id FROM refunds WHERE id = $1 AND business_id = $2`,
+          [id, businessId]
+        );
+
+        if (refundRow.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'Refund not found' });
+        }
+
+        approvalId = refundRow.rows[0].approval_id;
+
+        if (!approvalId) {
+          // No approval was ever required/created for this refund — fall back
+          // to the simple status-only rejection.
+          const result = await RefundService.rejectRefund(id, userId, businessId, reason);
+          return res.status(200).json({
+            success: true,
+            data: result.refund,
+            message: result.message
+          });
+        }
+      } finally {
+        client.release();
+      }
+
+      log.info('Rejecting refund', { businessId, userId, refundId: id, approvalId });
+
+      const result = await RefundApprovalService.rejectRefund(approvalId, userId, reason);
 
       return res.status(200).json({
         success: true,
-        data: result.refund,
+        approval: result.approval,
         message: result.message
       });
 
@@ -216,6 +301,7 @@ export class RefundController {
   /**
    * Get refund by ID with full details
    * GET /api/refunds/:id
+   * (unchanged)
    */
   static async getRefund(req, res) {
     try {
@@ -249,6 +335,7 @@ export class RefundController {
   /**
    * List refunds with filters
    * GET /api/refunds
+   * (unchanged)
    */
   static async listRefunds(req, res) {
     try {
@@ -303,6 +390,7 @@ export class RefundController {
   /**
    * Get refund statistics
    * GET /api/refunds/stats/summary
+   * (unchanged)
    */
   static async getRefundStats(req, res) {
     try {

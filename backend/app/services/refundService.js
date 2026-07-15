@@ -2,6 +2,16 @@
 // PERFECT VERSION: Real-world business refund system
 // Fixes: COGS reversal, correct discount account, quantity/amount separation, period protection
 // FIX: Removed duplicate reverseInventory() call — trigger handles all inventory reversal
+// PATCHED: Added assertApprovalSatisfied() guard, called at the top of
+// processRefund(). This closes the gap where POST /api/refunds/:id/process
+// could push a refund flagged requires_approval=true straight to APPROVED
+// (and therefore into the accounting trigger) with no permission check,
+// because RefundApprovalService was never wired into any route.
+//
+// approveRefund() is now marked @deprecated in favor of routing through
+// RefundApprovalService (see refundController.patched.js), but is left
+// functional and now enforces the same guard so it is safe even if called
+// directly.
 
 import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
@@ -15,6 +25,61 @@ import { DiscountAccountingService } from './discountAccountingService.js';
 import { RefundApprovalService } from './refundApprovalService.js';
 
 export class RefundService {
+
+  /**
+   * NEW: Guard used by processRefund() (and, defensively, by the deprecated
+   * approveRefund()) to make sure a refund that requires approval has
+   * actually cleared RefundApprovalService's queue before we let it reach
+   * status APPROVED — which is what fires the accounting trigger and moves
+   * real money/inventory/tax.
+   *
+   * Throws if:
+   *   - the refund requires approval and has no approval_id at all, or
+   *   - the linked refund_approval_queue row is not in APPROVED status.
+   *
+   * No-ops (returns true) if the refund never required approval.
+   */
+  static async assertApprovalSatisfied(client, refundId, businessId) {
+    const refundResult = await client.query(
+      `SELECT requires_approval, approval_id, status
+       FROM refunds WHERE id = $1 AND business_id = $2`,
+      [refundId, businessId]
+    );
+
+    if (refundResult.rows.length === 0) {
+      throw new Error('Refund not found');
+    }
+
+    const refund = refundResult.rows[0];
+
+    if (!refund.requires_approval) {
+      return true;
+    }
+
+    if (!refund.approval_id) {
+      throw new Error(
+        'Refund requires approval but no approval request has been created for it'
+      );
+    }
+
+    const approvalResult = await client.query(
+      `SELECT approval_status FROM refund_approval_queue WHERE id = $1`,
+      [refund.approval_id]
+    );
+
+    if (
+      approvalResult.rows.length === 0 ||
+      approvalResult.rows[0].approval_status !== 'APPROVED'
+    ) {
+      const currentStatus = approvalResult.rows[0]?.approval_status || 'MISSING';
+      throw new Error(
+        `Refund requires approval and is not yet approved (approval status: ${currentStatus}). ` +
+        `Use the refund approval endpoint, not processRefund directly.`
+      );
+    }
+
+    return true;
+  }
 
   /**
    * Create a new refund request
@@ -142,6 +207,9 @@ export class RefundService {
           const calculatedTotal = calculatedSubtotal - calculatedDiscount + calculatedTax;
 
           // Validate user-provided amounts match calculated (within tolerance)
+          // NOTE: this mismatch check still only logs a warning rather than
+          // rejecting or clamping. Flagged separately from the approval-bypass
+          // fix in this migration — tracked as a follow-up, see review notes.
           if (Math.abs(item.subtotal_refunded - calculatedSubtotal) > 1.00) {
             log.warn('Refund subtotal mismatch', {
               expected: calculatedSubtotal,
@@ -262,15 +330,26 @@ export class RefundService {
 
   /**
    * Process refund (approve and execute all reversals)
-   * FIX: Removed service-layer reverseInventory() call. All inventory, discount, tax,
-   * and journal entry mutations are now handled exclusively by the database trigger
-   * process_refund_accounting() to prevent duplication and ensure single source of truth.
+   *
+   * PATCHED: now calls assertApprovalSatisfied() as the very first check,
+   * inside the same transaction, before the wallet-sufficiency check or the
+   * status UPDATE that fires the accounting trigger. If the refund requires
+   * approval and hasn't gone through RefundApprovalService, this throws and
+   * the transaction rolls back — no partial state, nothing reaches APPROVED.
+   * 
+   * FIX: Removed service-layer reverseInventory() call. All inventory, discount,
+   * tax, and journal entry mutations are now handled exclusively by the database
+   * trigger process_refund_accounting() to prevent duplication and ensure single
+   * source of truth.
    */
   static async processRefund(refundId, userId, businessId) {
     const client = await getClient();
 
     try {
       await client.query('BEGIN');
+
+      // NEW: hard guard — must be first, before any other work in this transaction.
+      await this.assertApprovalSatisfied(client, refundId, businessId);
 
       const refundResult = await client.query(
         `SELECT r.*,
@@ -310,12 +389,11 @@ export class RefundService {
         };
       }
 
-      // FIX: All inventory, discount, tax, and journal entry mutations are handled
-      // by the database trigger process_refund_accounting() when status changes to APPROVED.
-      // Do NOT call reverseInventory(), reverseDiscounts(), or reverseTaxes() here.
-      // The trigger is the single source of truth for all refund accounting.
-
-      // Update status to APPROVED (trigger will fire)
+      // All inventory, discount, tax, and journal entry mutations are handled
+      // by the database trigger process_refund_accounting() (Migration 1504
+      // fixed its internal ordering and error propagation) when status
+      // changes to APPROVED. Do NOT call reverseInventory(), reverseDiscounts(),
+      // or reverseTaxes() here — the trigger is the single source of truth.
       await client.query(
         `UPDATE refunds
          SET status = 'APPROVED',
@@ -734,6 +812,11 @@ export class RefundService {
 
   /**
    * Approve refund (if approval required)
+   * @deprecated Prefer RefundApprovalService.approveRefund(approvalId, userId, notes)
+   * via the controller, which enforces userCanApprove() and updates the
+   * approval queue + history. This method is kept only for any direct/manual
+   * callers, and now enforces the same approval guard as processRefund() so
+   * it is safe even if invoked without going through the queue-based flow.
    */
   static async approveRefund(refundId, userId, businessId) {
     const client = await getClient();
@@ -754,6 +837,13 @@ export class RefundService {
 
       if (refundCheck.rows[0].status !== 'PENDING') {
         throw new Error(`Cannot approve refund with status: ${refundCheck.rows[0].status}`);
+      }
+
+      // NEW: even this legacy path must confirm the caller is allowed to
+      // approve refunds for this business before flipping status.
+      const canApprove = await RefundApprovalService.userCanApprove(userId, businessId);
+      if (!canApprove) {
+        throw new Error('User is not authorized to approve refunds for this business');
       }
 
       // Update refund status to APPROVED
