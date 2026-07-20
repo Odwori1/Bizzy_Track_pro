@@ -1,5 +1,6 @@
 // File: backend/app/controllers/taxDashboardController.js
 import { TaxDashboardService } from '../services/taxDashboardService.js';
+import { getClient } from '../utils/database.js';
 import { ReportGenerationService } from '../services/reportGenerationService.js';
 import { log } from '../utils/logger.js';
 import { auditLogger } from '../utils/auditLogger.js';
@@ -223,11 +224,11 @@ export class TaxDashboardController {
             const businessId = req.user.businessId;
             const userId = req.user.id;
             const { reportName } = req.params;
-            const { 
-                startDate, 
-                endDate, 
+            const {
+                startDate,
+                endDate,
                 format = 'json',
-                ...filters 
+                ...filters
             } = req.query;
 
             log.info('Generating report', {
@@ -336,7 +337,7 @@ export class TaxDashboardController {
             }
 
             // Insert into report_schedules table
-            const client = await TaxDashboardService.pool.connect();
+            const client = await getClient();
             try {
                 const result = await client.query(`
                     INSERT INTO report_schedules (
@@ -398,7 +399,7 @@ export class TaxDashboardController {
         try {
             const businessId = req.user.businessId;
 
-            const client = await TaxDashboardService.pool.connect();
+            const client = await getClient();
             try {
                 const result = await client.query(`
                     SELECT
@@ -451,7 +452,7 @@ export class TaxDashboardController {
             const businessId = req.user.businessId;
             const { scheduleId } = req.params;
 
-            const client = await TaxDashboardService.pool.connect();
+            const client = await getClient();
             try {
                 const result = await client.query(`
                     DELETE FROM report_schedules
@@ -526,7 +527,7 @@ export class TaxDashboardController {
             const userId = req.user.id;
             const { widget_config, default_date_range, auto_refresh_interval, color_scheme } = req.body;
 
-            const client = await TaxDashboardService.pool.connect();
+            const client = await getClient();
             try {
                 const result = await client.query(`
                     INSERT INTO dashboard_preferences (

@@ -296,6 +296,14 @@ export class RefundApprovalService {
                 [userId, notes, approvalId]
             );
 
+            // NEW: re-fetch so the response reflects the just-applied UPDATE
+            // rather than the pre-update row fetched at the top of this method.
+            const refreshedApprovalResult = await client.query(
+                `SELECT * FROM refund_approval_queue WHERE id = $1`,
+                [approvalId]
+            );
+            const refreshedApproval = refreshedApprovalResult.rows[0];
+
             // Add to history
             await client.query(
                 `INSERT INTO refund_approval_history (
@@ -331,7 +339,7 @@ export class RefundApprovalService {
 
             return {
                 success: true,
-                approval: approval,
+                approval: refreshedApproval,
                 refund: processResult.refund,
                 message: 'Refund approved and processed'
             };
@@ -384,6 +392,13 @@ export class RefundApprovalService {
                 [userId, reason, approvalId]
             );
 
+            // NEW: re-fetch so the response reflects the just-applied UPDATE.
+            const refreshedApprovalResult = await client.query(
+                `SELECT * FROM refund_approval_queue WHERE id = $1`,
+                [approvalId]
+            );
+            const refreshedApproval = refreshedApprovalResult.rows[0];
+
             // Add to history
             await client.query(
                 `INSERT INTO refund_approval_history (
@@ -410,7 +425,7 @@ export class RefundApprovalService {
 
             return {
                 success: true,
-                approval: approval,
+                approval: refreshedApproval,
                 message: 'Refund rejected'
             };
         } catch (error) {

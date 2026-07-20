@@ -49,14 +49,6 @@ export class AssetService {
     try {
       await client.query('BEGIN');
 
-      // ✅ FIX: Set session variable for RLS policy (transaction-scoped with 'true')
-      // The 'true' parameter makes it transaction-local, but we set it again after commit
-      await client.query(
-        [businessId]
-      );
-
-      log.info('RLS session variable set for transaction', { businessId });
-
       // Lock table to prevent race conditions in asset code generation
       await client.query('LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE');
 
@@ -91,7 +83,7 @@ export class AssetService {
         storing_months: usefulLifeMonths
       });
 
-      // ✅ FIX: Store purchase_date directly as string (already validated by schema)
+      // Store purchase_date directly as string (already validated by schema)
       const purchaseDate = assetData.purchase_date || new Date().toISOString().split('T')[0];
 
       log.info('Creating asset with purchase date:', {
@@ -167,7 +159,7 @@ export class AssetService {
 
       const asset = result.rows[0];
 
-      // ✅ Diagnostic log after the INSERT
+      // Diagnostic log after the INSERT
       log.info('Database returned purchase_date:', {
         db_value: asset.purchase_date,
         db_type: typeof asset.purchase_date,
@@ -176,7 +168,7 @@ export class AssetService {
         db_to_iso: asset.purchase_date ? asset.purchase_date.toISOString() : 'null'
       });
 
-      // ✅ FIX: Ensure purchase_date is string in YYYY-MM-DD format
+      // Ensure purchase_date is string in YYYY-MM-DD format
       if (asset.purchase_date) {
         if (asset.purchase_date instanceof Date) {
           // Get the date as stored in database (already correct)
@@ -187,7 +179,7 @@ export class AssetService {
         }
       }
 
-      // ✅ FIX: Verify persistence INSIDE transaction (before commit)
+      // Verify persistence INSIDE transaction (before commit)
       const verificationInTxn = await client.query(
         'SELECT id, purchase_date FROM assets WHERE id = $1 AND business_id = $2',
         [asset.id, businessId]
@@ -230,7 +222,7 @@ export class AssetService {
             functionSignature: 'create_asset_purchase_journal_v2(p_business_id uuid, p_asset_id uuid, p_user_id uuid, p_journal_date date, p_payment_method text)'
           });
 
-          // 🚨 UPDATED: Call V2 function with payment method parameter
+          // UPDATED: Call V2 function with payment method parameter
           const journalResult = await client.query(
             'SELECT create_asset_purchase_journal_v2($1, $2, $3, $4, $5)',
             [businessId, asset.id, userId, effectiveJournalDate, paymentMethod]
@@ -244,7 +236,7 @@ export class AssetService {
             keys: Object.keys(journalResult.rows[0] || {})
           });
 
-          // 🚨 FIX THIS LINE - Use the function name as property
+          // Use the function name as property
           asset.journal_entry_id = journalResult.rows[0].create_asset_purchase_journal_v2;
 
           log.info('Asset purchase journal created with payment method:', {
@@ -303,7 +295,7 @@ export class AssetService {
 
       log.info('Transaction committed successfully', { asset_id: asset.id });
 
-      // ✅ FIX: Post-commit verification - ensure RLS variable is still set
+      // Post-commit verification
       try {
         const verification = await client.query(
           'SELECT id, purchase_date::text as purchase_date_str FROM assets WHERE id = $1 AND business_id = $2',
@@ -315,30 +307,8 @@ export class AssetService {
             asset_id: asset.id,
             asset_code: asset.asset_code,
             business_id: businessId,
-            note: 'RLS policy may be blocking access - trying to reset session variable'
+            note: 'RLS policy may be blocking access - this should not happen as RLS context is set by getClient()'
           });
-
-          // Try setting it again and re-query
-          await client.query(
-            [businessId]
-          );
-
-          const retryVerification = await client.query(
-            'SELECT id, purchase_date::text as purchase_date_str FROM assets WHERE id = $1 AND business_id = $2',
-            [asset.id, businessId]
-          );
-
-          if (retryVerification.rows.length === 0) {
-            log.error('CRITICAL: Asset still not found after RLS reset', {
-              asset_id: asset.id,
-              asset_code: asset.asset_code
-            });
-          } else {
-            log.info('Post-commit verification passed after RLS reset', {
-              asset_id: asset.id,
-              purchase_date_verified: retryVerification.rows[0].purchase_date_str
-            });
-          }
         } else {
           log.info('Post-commit verification passed', {
             asset_id: asset.id,
@@ -354,7 +324,7 @@ export class AssetService {
         });
       }
 
-      // ✅ FIX: Format dates as strings to prevent timezone conversion in response
+      // Format dates as strings to prevent timezone conversion in response
       // Convert DATE columns to YYYY-MM-DD strings before returning
       if (asset.purchase_date instanceof Date) {
         const d = asset.purchase_date;
@@ -532,7 +502,7 @@ export class AssetService {
         [assetId]
       );
 
-      // FIX 1: Format depreciation history dates
+      // Format depreciation history dates
       const formattedDepreciationHistory = depreciationResult.rows.map(dep => {
         const formatted = { ...dep };
 
@@ -652,7 +622,7 @@ export class AssetService {
         [asset.id]
       );
 
-      // FIX 1: Format depreciation history dates
+      // Format depreciation history dates
       const formattedDepreciationHistory = depreciationResult.rows.map(dep => {
         const formatted = { ...dep };
 
@@ -1143,7 +1113,7 @@ export class AssetService {
     try {
       await client.query('BEGIN');
 
-      // ✅ Use the DATE-FIXED function
+      // Use the DATE-FIXED function
       const result = await client.query(
         'SELECT * FROM post_monthly_depreciation_fixed_bug($1, $2, $3, $4)',
         [businessId, month, year, userId]
@@ -1189,7 +1159,7 @@ export class AssetService {
     } catch (error) {
       await client.query('ROLLBACK');
 
-      // FIX 2: Better error message for already-posted months
+      // Better error message for already-posted months
       if (error.message.includes('already') || error.message.includes('duplicate') || error.message.includes('exists')) {
         log.warn('Attempt to post already-posted depreciation', { month, year, error: error.message });
         throw new Error(`Cannot post depreciation for ${month}/${year}. This period may already be posted. Check depreciation history or use correction workflow.`);
@@ -1216,7 +1186,7 @@ export class AssetService {
 
       const depreciationAmount = parseFloat(result.rows[0].depreciation_amount) || 0;
 
-      // FIX 3: Get asset details to provide context for January depreciation issue
+      // Get asset details to provide context for January depreciation issue
       const assetResult = await client.query(
         'SELECT purchase_date, depreciation_start_date FROM assets WHERE id = $1',
         [assetId]
