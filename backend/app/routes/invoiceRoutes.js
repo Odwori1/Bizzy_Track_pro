@@ -9,6 +9,7 @@ import {
   recordPaymentSchema
 } from '../schemas/invoiceSchemas.js';
 import { getClient } from '../utils/database.js';
+import { requireAccountingSetup } from '../middleware/accountingSetup.js';
 
 const router = express.Router();
 
@@ -175,6 +176,7 @@ router.get('/consolidated/:id', requirePermission('invoice:read'), async (req, r
 router.post(
   '/',
   requirePermission('invoice:create'),
+  requireAccountingSetup(),
   validateRequest(createInvoiceSchema),
   invoiceController.create
 );

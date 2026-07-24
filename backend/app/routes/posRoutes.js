@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.js';
 import { setRLSContext } from '../middleware/rlsContext.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { validateRequest } from '../middleware/validation.js';
+import { requireAccountingSetup } from '../middleware/accountingSetup.js';
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.use(authenticate, setRLSContext);
 router.post(
   '/transactions-with-discount',
   requirePermission('pos:create'),
+  requireAccountingSetup(),
   validateRequest(createPOSTransactionSchema),
   POSDiscountController.createTransactionWithDiscount
 );

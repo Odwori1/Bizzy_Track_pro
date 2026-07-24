@@ -6,6 +6,7 @@ import express from 'express';
 import { RefundController } from '../controllers/refundController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { requireAccountingSetup } from '../middleware/accountingSetup.js';
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.use(requireAuth);
 // ============================================================================
 
 // Create a new refund request
-router.post('/', RefundController.createRefund);
+router.post('/', requireAccountingSetup(), RefundController.createRefund);
 
 // List refunds with filters
 router.get('/', RefundController.listRefunds);
