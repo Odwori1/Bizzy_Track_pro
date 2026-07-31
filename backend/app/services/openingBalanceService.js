@@ -98,6 +98,55 @@ export class OpeningBalanceService {
     }
 
     /**
+     * Set opening balance for a DERIVED account (e.g. 1300 Inventory,
+     * 1410-1480 fixed asset categories). Computes the live value from the
+     * source table via post_derived_opening_balance() rather than accepting
+     * a manually-typed amount. Mirrors setOpeningBalance() in every other
+     * respect (transaction handling, logging, return shape).
+     *
+     * @param {string} businessId - Business ID
+     * @param {string} accountCode - Account code (must be registered in
+     *   derived_opening_balance_accounts, e.g. '1300')
+     * @param {string} userId - User ID
+     * @param {string} asOfDate - Date for opening balance (YYYY-MM-DD)
+     * @returns {Promise<Object>} Result with balance ID and the computed amount
+     */
+    static async setDerivedOpeningBalance(businessId, accountCode, userId, asOfDate = null) {
+        const client = await getClient();
+
+        try {
+            const result = await client.query(
+                `SELECT * FROM post_derived_opening_balance($1, $2, $3, $4)`,
+                [businessId, accountCode, userId, asOfDate || new Date().toISOString().split('T')[0]]
+            );
+
+            if (!result.rows[0]) {
+                throw new Error('Failed to set derived opening balance');
+            }
+
+            log.info('Derived opening balance set', {
+                businessId,
+                accountCode,
+                userId,
+                computedAmount: result.rows[0].computed_amount
+            });
+
+            return {
+                success: result.rows[0].success,
+                message: result.rows[0].message,
+                balanceId: result.rows[0].balance_id,
+                computedAmount: parseFloat(result.rows[0].computed_amount)
+            };
+
+        } catch (error) {
+            log.error('Error setting derived opening balance:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Get all opening balances for a business
      * @param {string} businessId - Business ID
      * @param {string} asOfDate - Optional date filter
@@ -108,7 +157,7 @@ export class OpeningBalanceService {
 
         try {
             let query = `
-                SELECT 
+                SELECT
                     ob.id,
                     ob.account_code,
                     ca.account_name,
@@ -392,17 +441,17 @@ export class OpeningBalanceService {
 
         try {
             const result = await client.query(
-                `SELECT 
+                `SELECT
                     ca.account_code,
                     ca.account_name,
                     ca.account_type,
-                    CASE 
+                    CASE
                         WHEN ca.account_type IN ('asset', 'expense') THEN 'debit'
                         ELSE 'credit'
                     END as normal_balance,
                     EXISTS (
-                        SELECT 1 FROM opening_balances ob 
-                        WHERE ob.account_id = ca.id 
+                        SELECT 1 FROM opening_balances ob
+                        WHERE ob.account_id = ca.id
                         AND ob.business_id = ca.business_id
                     ) as has_opening_balance
                 FROM chart_of_accounts ca
@@ -427,6 +476,41 @@ export class OpeningBalanceService {
 
         } catch (error) {
             log.error('Error getting available accounts:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * List which account codes are registered as derived (e.g. Inventory,
+     * fixed asset categories) so the frontend can show "calculate from
+     * records" instead of a free-entry field for these specific accounts.
+     *
+     * @param {string} businessId - Business ID (unused for now, since the
+     *   registry is business-independent, but kept for signature symmetry
+     *   with other methods and in case business-specific overrides are
+     *   ever needed)
+     * @returns {Promise<Object>} List of derived account codes
+     */
+    static async getDerivedAccounts(businessId) {
+        const client = await getClient();
+
+        try {
+            const result = await client.query(
+                `SELECT account_code, description, source_note
+                 FROM derived_opening_balance_accounts
+                 ORDER BY account_code`
+            );
+
+            return {
+                success: true,
+                accounts: result.rows,
+                count: result.rows.length
+            };
+
+        } catch (error) {
+            log.error('Error getting derived accounts:', error);
             throw error;
         } finally {
             client.release();

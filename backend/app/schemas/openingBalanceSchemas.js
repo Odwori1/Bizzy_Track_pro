@@ -43,6 +43,18 @@ export class OpeningBalanceSchemas {
     });
 
     /**
+     * Set Derived Opening Balance Schema
+     * No amount/balance_type here — those are computed server-side by
+     * post_derived_opening_balance(), never accepted from the client.
+     */
+    static setDerivedBalanceSchema = Joi.object({
+        as_of_date: Joi.date()
+            .iso()
+            .optional()
+            .default(() => new Date().toISOString().split('T')[0])
+    });
+
+    /**
      * Initialize Business Schema
      */
     static initializeBusinessSchema = Joi.object({
@@ -111,6 +123,39 @@ export class OpeningBalanceSchemas {
                 }));
 
                 log.warn('Opening balance validation failed:', { errors });
+                return { valid: false, errors, value: null };
+            }
+
+            return { valid: true, errors: null, value };
+        } catch (validationError) {
+            log.error('Unexpected validation error:', validationError);
+            return {
+                valid: false,
+                errors: [{ field: 'validation', message: 'Internal validation error' }],
+                value: null
+            };
+        }
+    }
+
+    /**
+     * Validate set derived opening balance request
+     */
+    static validateSetDerivedBalance(data) {
+        try {
+            const { error, value } = this.setDerivedBalanceSchema.validate(data || {}, {
+                abortEarly: false,
+                stripUnknown: true,
+                convert: true
+            });
+
+            if (error) {
+                const errors = error.details.map(detail => ({
+                    field: detail.path.join('.'),
+                    message: detail.message,
+                    type: detail.type
+                }));
+
+                log.warn('Derived opening balance validation failed:', { errors });
                 return { valid: false, errors, value: null };
             }
 

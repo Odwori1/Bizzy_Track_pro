@@ -40,6 +40,13 @@ router.get(
     OpeningBalanceController.getAvailableAccounts
 );
 
+// Get accounts registered as derived (e.g. Inventory) — read permission
+router.get(
+    '/derived-accounts',
+    requirePermission('accounting:read'),
+    OpeningBalanceController.getDerivedAccounts
+);
+
 // ============================================================================
 // OPENING BALANCE CRUD OPERATIONS
 // ============================================================================
@@ -57,6 +64,14 @@ router.post(
     requirePermission('accounting:write'),
     validateRequest(OpeningBalanceSchemas.setBalanceSchema),
     OpeningBalanceController.setOpeningBalance
+);
+
+// Set a derived opening balance (computed from source records) — write permission
+router.post(
+    '/derived/:accountCode',
+    requirePermission('accounting:write'),
+    validateRequest(OpeningBalanceSchemas.setDerivedBalanceSchema),
+    OpeningBalanceController.setDerivedBalance
 );
 
 // Delete opening balance (write permission)

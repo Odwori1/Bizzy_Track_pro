@@ -121,6 +121,72 @@ export class OpeningBalanceController {
     }
 
     /**
+     * Set opening balance for a DERIVED account (computed from source
+     * records, e.g. Inventory from inventory_items). Rejects account
+     * codes that aren't registered as derived — the underlying SQL
+     * function raises, which surfaces as a 500 here, consistent with how
+     * every other unexpected-state error is handled in this controller.
+     * POST /api/accounting/opening-balances/derived/:accountCode
+     */
+    static async setDerivedBalance(req, res) {
+        try {
+            const businessId = req.user.businessId || req.user.business_id;
+            const userId = req.user.userId || req.user.id;
+            const { accountCode } = req.params;
+
+            if (!businessId || !userId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Business ID or User ID not found in user session'
+                });
+            }
+
+            // Validate request
+            const validation = OpeningBalanceSchemas.validateSetDerivedBalance(req.body);
+            if (!validation.valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: validation.errors
+                });
+            }
+
+            const { as_of_date } = validation.value;
+
+            log.info('Setting derived opening balance', {
+                businessId,
+                userId,
+                accountCode,
+                as_of_date
+            });
+
+            const result = await OpeningBalanceService.setDerivedOpeningBalance(
+                businessId,
+                accountCode,
+                userId,
+                as_of_date
+            );
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    balance_id: result.balanceId,
+                    computed_amount: result.computedAmount
+                },
+                message: result.message
+            });
+
+        } catch (error) {
+            log.error('Error setting derived opening balance:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to set derived opening balance',
+                error: error.message
+            });
+        }
+    }
+
+    /**
      * Get all opening balances
      * GET /api/accounting/opening-balances
      */
@@ -370,6 +436,42 @@ export class OpeningBalanceController {
             return res.status(500).json({
                 success: false,
                 message: 'Failed to get available accounts',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * List which account codes are registered as derived, so the frontend
+     * knows which accounts should show "Calculate from records" instead
+     * of a free-entry amount field.
+     * GET /api/accounting/opening-balances/derived-accounts
+     */
+    static async getDerivedAccounts(req, res) {
+        try {
+            const businessId = req.user.businessId || req.user.business_id;
+
+            if (!businessId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Business ID not found in user session'
+                });
+            }
+
+            const result = await OpeningBalanceService.getDerivedAccounts(businessId);
+
+            return res.status(200).json({
+                success: true,
+                data: result.accounts,
+                count: result.count,
+                message: 'Derived accounts retrieved successfully'
+            });
+
+        } catch (error) {
+            log.error('Error getting derived accounts:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to get derived accounts',
                 error: error.message
             });
         }
