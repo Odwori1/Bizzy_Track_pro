@@ -336,7 +336,7 @@ export class RefundService {
    * status UPDATE that fires the accounting trigger. If the refund requires
    * approval and hasn't gone through RefundApprovalService, this throws and
    * the transaction rolls back — no partial state, nothing reaches APPROVED.
-   * 
+   *
    * FIX: Removed service-layer reverseInventory() call. All inventory, discount,
    * tax, and journal entry mutations are now handled exclusively by the database
    * trigger process_refund_accounting() to prevent duplication and ensure single
@@ -970,11 +970,20 @@ export class RefundService {
       );
       refund.inventory_transactions = invResult.rows;
 
-      // Get discount reversals
+      // CORRECTED: Match the trigger's actual behavior - it mutates the ORIGINAL
+      // allocation row in place (reversed_discount_amount, status = VOID) rather
+      // than creating a new is_refund_reversal row.
+      // Join through the refund's own original_transaction_id, since that's
+      // the real, reliable link - refund_id/is_refund_reversal were only ever
+      // populated by the deprecated RefundService.reverseDiscounts() path,
+      // which is no longer called (superseded by reverse_discounts_on_refund()
+      // trigger function, per the comment already in processRefund()).
       const discountResult = await client.query(
-        `SELECT * FROM discount_allocations
-         WHERE refund_id = $1 AND business_id = $2
-           AND is_refund_reversal = TRUE`,
+        `SELECT da.* FROM discount_allocations da
+         JOIN refunds r ON r.original_transaction_id = da.pos_transaction_id
+           OR r.original_transaction_id = da.invoice_id
+         WHERE r.id = $1 AND da.business_id = $2
+           AND da.reversed_discount_amount > 0`,
         [refundId, businessId]
       );
       refund.discount_reversals = discountResult.rows;
