@@ -31,14 +31,14 @@ class InvoiceTaxCalculator {
       );
 
       if (customerQuery.rows.length === 0) {
-        log.warn('Customer not found, using default type "company"', {
+        log.warn('Customer not found, using default type "individual"', {
           customerId,
           businessId
         });
-        return 'company'; // Default
+        return 'individual'; // Default
       }
 
-      const customerType = customerQuery.rows[0].customer_type || 'company';
+      const customerType = customerQuery.rows[0].customer_type || 'individual';
       log.debug('Customer type retrieved', {
         customerId,
         customerType
@@ -50,7 +50,7 @@ class InvoiceTaxCalculator {
         customerId,
         error: error.message
       });
-      return 'company'; // Default on error
+      return 'individual'; // Default on error
     }
   }
 
@@ -465,14 +465,14 @@ export const invoiceService = {
         'SELECT pg_advisory_xact_lock(hashtext($1::text || \'_invoice\'))',
         [businessId]
       );
-      
+
       const invoiceNumberQuery = `
         SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 5) AS INTEGER)), 0) + 1 as next_num
         FROM invoices
         WHERE business_id = $1
           AND invoice_number ~ '^INV-[0-9]+$'
       `;
-      
+
       const countResult = await client.query(invoiceNumberQuery, [businessId]);
       const nextNum = parseInt(countResult.rows[0].next_num);
       const invoiceNumber = `INV-${nextNum.toString().padStart(4, '0')}`;

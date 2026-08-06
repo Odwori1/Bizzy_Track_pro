@@ -12,8 +12,8 @@ export const customerService = {
       const createQuery = `
         INSERT INTO customers
         (business_id, category_id, first_name, last_name, email, phone,
-         company_name, tax_number, address, notes, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         company_name, tax_number, address, notes, customer_type, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `;
 
@@ -28,6 +28,7 @@ export const customerService = {
         customerData.tax_number || '',
         customerData.address || null,
         customerData.notes || '',
+        customerData.customer_type || 'individual',
         userId
       ];
 
@@ -72,6 +73,7 @@ export const customerService = {
           c.id, c.first_name, c.last_name, c.email, c.phone,
           c.company_name, c.tax_number, c.address, c.notes,
           c.total_spent, c.last_visit, c.is_active, c.created_at,
+          c.customer_type,
           cat.id as category_id, cat.name as category_name, cat.color as category_color
         FROM customers c
         LEFT JOIN customer_categories cat ON c.category_id = cat.id
@@ -194,6 +196,12 @@ export const customerService = {
       if (customerData.tax_number !== undefined) {
         updateFields.push(`tax_number = $${paramCount}`);
         values.push(customerData.tax_number);
+        paramCount++;
+      }
+
+      if (customerData.customer_type !== undefined) {
+        updateFields.push(`customer_type = $${paramCount}`);
+        values.push(customerData.customer_type);
         paramCount++;
       }
 
@@ -328,7 +336,7 @@ export const customerService = {
       const searchQuery = `
         SELECT
           c.id, c.first_name, c.last_name, c.email, c.phone,
-          c.company_name, c.is_active,
+          c.company_name, c.is_active, c.customer_type,
           cat.name as category_name
         FROM customers c
         LEFT JOIN customer_categories cat ON c.category_id = cat.id

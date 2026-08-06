@@ -17,6 +17,10 @@ export const createCustomerSchema = Joi.object({
   phone: Joi.string().trim().max(50).allow('').optional(),
   company_name: Joi.string().trim().max(255).allow('').optional(),
   tax_number: Joi.string().trim().max(100).allow('').optional(),
+  customer_type: Joi.string().valid('individual', 'company').default('individual')
+    .messages({
+      'any.only': 'customer_type must be either "individual" or "company"'
+    }),
   category_id: Joi.string().uuid().allow(null).optional(),
   address: Joi.object({
     street: Joi.string().allow('').optional(),
@@ -35,6 +39,10 @@ export const updateCustomerSchema = Joi.object({
   phone: Joi.string().trim().max(50).allow('').optional(),
   company_name: Joi.string().trim().max(255).allow('').optional(),
   tax_number: Joi.string().trim().max(100).allow('').optional(),
+  customer_type: Joi.string().valid('individual', 'company').optional()
+    .messages({
+      'any.only': 'customer_type must be either "individual" or "company"'
+    }),
   category_id: Joi.string().uuid().allow(null).optional(),
   address: Joi.object({
     street: Joi.string().allow('').optional(),
