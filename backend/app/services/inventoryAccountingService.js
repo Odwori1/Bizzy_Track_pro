@@ -89,13 +89,9 @@ export class InventoryAccountingService {
 
       const inventoryTransaction = transactionResult.rows[0];
 
-      // trg_sync_product_stock fires on this UPDATE — no Node.js sync needed.
-      await client.query(
-        `UPDATE inventory_items
-         SET current_stock = current_stock + $1, updated_at = NOW()
-         WHERE id = $2`,
-        [purchaseData.quantity, purchaseData.inventory_item_id]
-      );
+      // Stock update removed — recordMovement() calls update_inventory_stock()
+      // as the single source of truth for all stock mutations, including purchases.
+      // This prevents double-adding inventory quantities.
 
       await auditLogger.logAction({
         businessId: purchaseData.business_id,

@@ -181,6 +181,32 @@ export const inventoryController = {
       });
 
     } catch (error) {
+      // Check if this is an INSUFFICIENT_STOCK error from the database
+      if (error.code === 'P0001' && error.message && error.message.includes('INSUFFICIENT_STOCK')) {
+        log.warn('Insufficient stock error', { 
+          error: error.message,
+          itemId: req.body.inventory_item_id,
+          requestedQuantity: req.body.quantity
+        });
+        
+        // Return a 400 Bad Request with the specific error message
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+          code: 'INSUFFICIENT_STOCK'
+        });
+      }
+      
+      // Check if this is an internal use accounting failure
+      if (error.message && error.message.includes('Internal use accounting failed')) {
+        log.error('Internal use accounting failed', { error: error.message });
+        return res.status(500).json({
+          success: false,
+          error: error.message,
+          code: 'ACCOUNTING_FAILURE'
+        });
+      }
+
       log.error('Inventory movement recording controller error', error);
       next(error);
     }

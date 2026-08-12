@@ -3,6 +3,7 @@ import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
 import { InventoryAccountingService } from './inventoryAccountingService.js';
 import { InventorySyncService } from './inventorySyncService.js';
+import { randomUUID } from 'crypto';
 
 export class InventoryService {
   /**
@@ -761,7 +762,8 @@ export class InventoryService {
       const unitCost = parseFloat(movementData.unit_cost);
       const totalValue = quantity * unitCost;
 
-      // Handle purchases with accounting entries
+      // Handle purchases with accounting entries — unchanged in position,
+      // Bug 2.8 already made this stock-neutral so ordering doesn't matter here
       if (movementData.movement_type === 'purchase') {
         try {
           await InventoryAccountingService.recordInventoryPurchase(
@@ -778,22 +780,6 @@ export class InventoryService {
         } catch (accountingError) {
           log.error('Inventory purchase accounting failed:', accountingError);
           throw new Error(`Purchase accounting failed: ${accountingError.message}`);
-        }
-      }
-      // ADD THIS NEW CODE FOR INTERNAL USE ACCOUNTING:
-      else if (movementData.movement_type === 'internal_use') {
-        try {
-          await this.recordInternalUseAccounting(
-            businessId,
-            movementData.inventory_item_id,
-            quantity,
-            unitCost,
-            movementData.notes || '',
-            userId
-          );
-        } catch (accountingError) {
-          log.error('Internal use accounting failed:', accountingError);
-          throw new Error(`Internal use accounting failed: ${accountingError.message}`);
         }
       }
 
@@ -820,11 +806,29 @@ export class InventoryService {
 
       const movement = movementResult.rows[0];
 
-      // Update inventory stock
+      // Update inventory stock FIRST — if this throws INSUFFICIENT_STOCK,
+      // nothing below it runs, and the whole transaction (including the
+      // movement row above) rolls back cleanly.
       const newStock = await client.query(
         'SELECT update_inventory_stock($1, $2, $3) as new_stock',
         [movementData.inventory_item_id, quantity, movementData.movement_type]
       );
+
+      // Internal-use accounting now runs AFTER the stock check succeeds,
+      // on the SAME client/transaction — no longer its own independently
+      // committing connection. A failure here now correctly rolls back
+      // the movement row and stock change too.
+      if (movementData.movement_type === 'internal_use') {
+        try {
+          await this.recordInternalUseAccounting(
+            client, businessId, movementData.inventory_item_id, quantity, unitCost,
+            movementData.notes || '', userId
+          );
+        } catch (accountingError) {
+          log.error('Internal use accounting failed:', accountingError);
+          throw new Error(`Internal use accounting failed: ${accountingError.message}`);
+        }
+      }
 
       // Sync to product if it's a purchase or major adjustment
       if (movementData.movement_type === 'purchase' || movementData.movement_type === 'adjustment') {
@@ -974,12 +978,8 @@ export class InventoryService {
   /**
    * Record internal use of inventory with accounting entries
    */
-  static async recordInternalUseAccounting(businessId, inventoryItemId, quantity, unitCost, notes, userId) {
-    const client = await getClient();
-
+  static async recordInternalUseAccounting(client, businessId, inventoryItemId, quantity, unitCost, notes, userId) {
     try {
-      await client.query('BEGIN');
-
       // 1. Get inventory item details
       const itemResult = await client.query(
         `SELECT ii.*, ic.name as category_name, ic.category_type
@@ -1029,11 +1029,11 @@ export class InventoryService {
            LIMIT 1`,
           [businessId]
         );
-        
+
         if (fallbackResult.rows.length === 0) {
           throw new Error('No expense account found for internal use');
         }
-        
+
         expenseAccountId = fallbackResult.rows[0].id;
       } else {
         expenseAccountId = expenseAccountResult.rows[0].id;
@@ -1071,7 +1071,7 @@ export class InventoryService {
           new Date(),
           'INTUSE-' + Date.now(),
           'inventory_internal_use',
-          inventoryItemId,
+          randomUUID(),
           `Internal use: ${quantity} ${item.unit_of_measure} of ${item.name} - ${notes}`,
           totalCost,
           userId,
@@ -1163,8 +1163,6 @@ export class InventoryService {
         }
       });
 
-      await client.query('COMMIT');
-
       return {
         inventory_transaction: inventoryTransaction,
         journal_entry: journalEntry,
@@ -1173,11 +1171,8 @@ export class InventoryService {
       };
 
     } catch (error) {
-      await client.query('ROLLBACK');
       log.error('Internal use accounting error:', error);
       throw error;
-    } finally {
-      client.release();
     }
   }
 }
