@@ -48,6 +48,7 @@ export const createInventoryMovementSchema = Joi.object({
   ).required(),
   quantity: Joi.number().precision(2).required(),
   unit_cost: Joi.number().precision(2).positive().required(),
+  payment_method: Joi.string().valid('cash', 'bank', 'mobile_money', 'accounts_payable').optional(),
   reference_type: Joi.string().max(50).optional().allow(''),
   reference_id: Joi.string().uuid().optional().allow(''),
   notes: Joi.string().max(1000).optional().allow('')

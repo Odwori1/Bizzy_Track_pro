@@ -40,7 +40,7 @@ export class AccountingService {
 
     try {
       const result = await client.query(
-        `SELECT * FROM process_pos_accounting_safe($1, $2)`, 
+        `SELECT * FROM process_pos_accounting_safe($1, $2)`,
         [transactionId, userId]
       );
 
@@ -68,7 +68,7 @@ export class AccountingService {
         error: error.message,
         stack: error.stack
       });
-      
+
       return {
         success: false,
         message: `Accounting processing failed: ${error.message}`,
@@ -411,7 +411,7 @@ export class AccountingService {
 
     try {
       // Build query for journal entries
-      let query = 
+      let query =
         `SELECT je.*, u.full_name as created_by_name
         FROM journal_entries je
         LEFT JOIN users u ON je.created_by = u.id
@@ -530,7 +530,7 @@ export class AccountingService {
 
     try {
       // Calculate revenue (account codes 4000-4999, credit entries)
-      const revenueQuery = 
+      const revenueQuery =
         `SELECT
           ca.account_code,
           ca.account_name,
@@ -548,7 +548,7 @@ export class AccountingService {
         ORDER BY ca.account_code`;
 
       // Calculate COGS (account code 5100 ONLY, debit entries)
-      const cogsQuery = 
+      const cogsQuery =
         `SELECT
           ca.account_code,
           ca.account_name,
@@ -566,7 +566,7 @@ export class AccountingService {
         ORDER BY ca.account_code`;
 
       // Calculate Operating Expenses (account codes 5200-5999, debit entries)
-      const operatingExpensesQuery = 
+      const operatingExpensesQuery =
         `SELECT
           ca.account_code,
           ca.account_name,
@@ -585,7 +585,7 @@ export class AccountingService {
         ORDER BY ca.account_code`;
 
       // Get counts for metadata
-      const countsQuery = 
+      const countsQuery =
         `SELECT
           COUNT(DISTINCT je.id) as journal_entry_count,
           COUNT(DISTINCT pt.id) as transaction_count
@@ -682,21 +682,23 @@ export class AccountingService {
       ]
     };
 
-    if (purchaseData.payment_method === 'cash') {
-      journalEntryData.lines.push({
-        account_code: '1110',
-        description: 'Cash payment for inventory purchase',
-        amount: purchaseData.total_amount,
-        line_type: 'credit'
-      });
-    } else {
-      journalEntryData.lines.push({
-        account_code: '2100',
-        description: 'Payable for inventory purchase',
-        amount: purchaseData.total_amount,
-        line_type: 'credit'
-      });
-    }
+    const paymentAccountMap = {
+      cash: '1110',
+      bank: '1120',
+      mobile_money: '1130'
+    };
+
+    const creditAccountCode = paymentAccountMap[purchaseData.payment_method] || '2100';
+    const creditDescription = purchaseData.payment_method && paymentAccountMap[purchaseData.payment_method]
+      ? `${purchaseData.payment_method.replace('_', ' ')} payment for inventory purchase`
+      : 'Payable for inventory purchase';
+
+    journalEntryData.lines.push({
+      account_code: creditAccountCode,
+      description: creditDescription,
+      amount: purchaseData.total_amount,
+      line_type: 'credit'
+    });
 
     return await this.createJournalEntry(journalEntryData, userId);
   }
