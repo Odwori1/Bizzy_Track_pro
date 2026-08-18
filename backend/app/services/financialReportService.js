@@ -226,118 +226,162 @@ export class FinancialReportService {
   }
 
   /**
-   * Get balance sheet - FIXED: Includes assets
+   * Get balance sheet — REWRITTEN (v18.0, Part 2.4 fix)
+   *
+   * Previously computed assets from money_wallets + inventory_items + fixed_assets
+   * tables directly, and liabilities from `SUM(amount) FROM expenses WHERE status
+   * != 'paid'` — a structural blind spot that could never see any ledger-recorded
+   * liability (2100 Accounts Payable, 2120 Sales Tax Payable, 2130 WHT Payable,
+   * etc), since those never appear as `expenses` rows. Confirmed live (2026-08-18,
+   * business 90d29f85-...) to disagree with the ledger-derived balance sheet by
+   * $19,840 in liabilities and $25,225 in assets on the same business, same date.
+   *
+   * Now sources every figure from get_balance_sheet() — the same GAAP-correct,
+   * ledger-derived DB function FinancialStatementService.getBalanceSheet() uses
+   * — and re-buckets the line items into this endpoint's richer categorized
+   * shape (current vs fixed assets, current vs long-term liabilities, retained
+   * earnings vs capital) so existing consumers (frontend, PDF/Excel export)
+   * keep working unmodified while receiving correct numbers.
+   *
+   * Every account not explicitly named by the original shape lands in an
+   * "other_*" bucket rather than being silently dropped, so nothing either
+   * prior implementation surfaced is lost.
+   *
+   * asOfDate: uses endDate as the point-in-time balance sheet date, since a
+   * balance sheet is a snapshot, not a period total. startDate is accepted
+   * for API-contract compatibility but not used in the underlying query —
+   * same limitation the old implementation had, just now stated explicitly.
    */
   static async getBalanceSheet(businessId, startDate, endDate) {
     const client = await getClient();
     try {
-      // Get total assets (sum of all wallet balances)
-      const assetsResult = await client.query(
-        `SELECT SUM(current_balance) as total_assets
-         FROM money_wallets
-         WHERE business_id = $1 AND is_active = true`,
-        [businessId]
+      const asOfDate = endDate || new Date().toISOString().split('T')[0];
+
+      const result = await client.query(
+        `SELECT * FROM get_balance_sheet($1, $2, $3)`,
+        [businessId, asOfDate, false]
       );
 
-      const totalAssets = parseFloat(assetsResult.rows[0].total_assets) || 0;
+      const buckets = {
+        cash_and_equivalents: 0,
+        accounts_receivable: 0,
+        inventory: 0,
+        other_current_assets: 0,
+        fixed_assets: 0,
+        accounts_payable: 0,
+        short_term_debt: 0,
+        other_current_liabilities: 0,
+        long_term_debt: 0,
+        retained_earnings: 0,
+        common_stock: 0,
+        other_equity: 0
+      };
 
-      // Get inventory valuation
-      const inventoryResult = await client.query(
-        `SELECT SUM(current_stock * cost_price) as total_inventory_value
-         FROM inventory_items
-         WHERE business_id = $1 AND is_active = true AND current_stock > 0`,
-        [businessId]
-      );
+      // Mapping confirmed against live chart_of_accounts (2026-08-18, 65 accounts).
+      // Accumulated depreciation codes (1490-1495) are contra-asset but included
+      // directly in fixed_assets — get_balance_sheet() already returns correctly
+      // signed balances (confirmed via Migration 1518's contra-account handling),
+      // so summing them in nets out correctly without special-casing the sign.
+      const CASH_CODES = ['1110', '1120', '1130'];
+      const AR_CODES = ['1200', '1115'];
+      const INVENTORY_CODES = ['1300'];
+      const FIXED_ASSET_CODES = [
+        '1410', '1420', '1430', '1440', '1450', '1460', '1470', '1480',
+        '1490', '1491', '1492', '1493', '1494', '1495'
+      ];
+      const AP_CODES = ['2100'];
+      const SHORT_TERM_DEBT_CODES = ['2210'];
+      const LONG_TERM_DEBT_CODES = ['2220'];
+      const RETAINED_EARNINGS_CODES = ['3300', '3400'];
+      const CAPITAL_CODES = ['3100', '3200'];
 
-      const totalInventoryValue = parseFloat(inventoryResult.rows[0].total_inventory_value) || 0;
+      const sourceAccounts = { assets: [], liabilities: [], equity: [] };
 
-      // NEW: Get fixed assets total
-      const fixedAssetsResult = await client.query(
-        `SELECT SUM(current_value) as total_fixed_assets
-         FROM fixed_assets
-         WHERE business_id = $1 AND is_active = true`,
-        [businessId]
-      );
+      for (const row of result.rows) {
+        const code = row.account_code;
+        const balance = parseFloat(row.current_balance);
 
-      const totalFixedAssets = parseFloat(fixedAssetsResult.rows[0].total_fixed_assets) || 0;
+        if (row.section === 'ASSETS') {
+          sourceAccounts.assets.push(row);
+          if (CASH_CODES.includes(code)) buckets.cash_and_equivalents += balance;
+          else if (AR_CODES.includes(code)) buckets.accounts_receivable += balance;
+          else if (INVENTORY_CODES.includes(code)) buckets.inventory += balance;
+          else if (FIXED_ASSET_CODES.includes(code)) buckets.fixed_assets += balance;
+          else buckets.other_current_assets += balance;
+        } else if (row.section === 'LIABILITIES') {
+          sourceAccounts.liabilities.push(row);
+          if (AP_CODES.includes(code)) buckets.accounts_payable += balance;
+          else if (SHORT_TERM_DEBT_CODES.includes(code)) buckets.short_term_debt += balance;
+          else if (LONG_TERM_DEBT_CODES.includes(code)) buckets.long_term_debt += balance;
+          else buckets.other_current_liabilities += balance;
+        } else if (row.section === 'EQUITY') {
+          sourceAccounts.equity.push(row);
+          if (RETAINED_EARNINGS_CODES.includes(code)) buckets.retained_earnings += balance;
+          else if (CAPITAL_CODES.includes(code)) buckets.common_stock += balance;
+          else buckets.other_equity += balance;
+        }
+      }
 
-      // Get total liabilities (sum of unpaid expenses)
-      const liabilitiesResult = await client.query(
-        `SELECT SUM(amount) as total_liabilities
-         FROM expenses
-         WHERE business_id = $1 AND status != 'paid'`,
-        [businessId]
-      );
+      const totalCurrentAssets =
+        buckets.cash_and_equivalents + buckets.accounts_receivable +
+        buckets.inventory + buckets.other_current_assets;
+      const totalFixedAssets = buckets.fixed_assets;
+      const totalAssets = totalCurrentAssets + totalFixedAssets;
 
-      const totalLiabilities = parseFloat(liabilitiesResult.rows[0].total_liabilities) || 0;
+      const totalCurrentLiabilities =
+        buckets.accounts_payable + buckets.short_term_debt + buckets.other_current_liabilities;
+      const totalLongTermLiabilities = buckets.long_term_debt;
+      const totalLiabilities = totalCurrentLiabilities + totalLongTermLiabilities;
 
-      // Get net income for the period (FIXED: exclude internal transfers)
-      const incomeResult = await client.query(
-        `SELECT
-          COALESCE(SUM(
-            CASE WHEN wt.transaction_type = 'income' AND (wt.reference_type IS NULL OR wt.reference_type != 'wallet_transfer') THEN wt.amount
-                 WHEN wt.transaction_type = 'expense' THEN -wt.amount
-                 ELSE 0 END
-          ), 0) as net_income
-         FROM wallet_transactions wt
-         INNER JOIN money_wallets mw ON wt.wallet_id = mw.id
-         WHERE mw.business_id = $1
-           AND wt.created_at BETWEEN $2 AND $3`,
-        [businessId, startDate, endDate]
-      );
+      const totalEquity = buckets.retained_earnings + buckets.common_stock + buckets.other_equity;
 
-      const netIncome = parseFloat(incomeResult.rows[0].net_income) || 0;
-
-      // Calculate equity
-      const totalCurrentAssets = totalAssets + totalInventoryValue;
-      const totalAllAssets = totalCurrentAssets + totalFixedAssets;
-      const totalEquity = totalAllAssets - totalLiabilities;
-
-      const balanceSheet = {
+      return {
         assets: {
           current_assets: {
-            cash_and_equivalents: totalAssets,
-            accounts_receivable: 0,
-            inventory: totalInventoryValue,
+            cash_and_equivalents: buckets.cash_and_equivalents,
+            accounts_receivable: buckets.accounts_receivable,
+            inventory: buckets.inventory,
+            other_current_assets: buckets.other_current_assets,
             total_current_assets: totalCurrentAssets
           },
           fixed_assets: {
             property_equipment: totalFixedAssets,
             total_fixed_assets: totalFixedAssets
           },
-          total_assets: totalAllAssets
+          total_assets: totalAssets
         },
         liabilities: {
           current_liabilities: {
-            accounts_payable: totalLiabilities,
-            short_term_debt: 0,
-            total_current_liabilities: totalLiabilities
+            accounts_payable: buckets.accounts_payable,
+            short_term_debt: buckets.short_term_debt,
+            other_current_liabilities: buckets.other_current_liabilities,
+            total_current_liabilities: totalCurrentLiabilities
           },
           long_term_liabilities: {
-            long_term_debt: 0,
-            total_long_term_liabilities: 0
+            long_term_debt: totalLongTermLiabilities,
+            total_long_term_liabilities: totalLongTermLiabilities
           },
           total_liabilities: totalLiabilities
         },
         equity: {
-          retained_earnings: netIncome,
-          common_stock: totalEquity - netIncome,
+          retained_earnings: buckets.retained_earnings,
+          common_stock: buckets.common_stock,
+          other_equity: buckets.other_equity,
           total_equity: totalEquity
         },
         verification: {
-          total_assets: totalAllAssets,
+          total_assets: totalAssets,
           total_liabilities_and_equity: totalLiabilities + totalEquity,
-          balanced: Math.abs(totalAllAssets - (totalLiabilities + totalEquity)) < 0.01,
-          difference: Math.abs(totalAllAssets - (totalLiabilities + totalEquity))
+          balanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01,
+          difference: Math.abs(totalAssets - (totalLiabilities + totalEquity))
         },
         period: {
           start_date: startDate,
           end_date: endDate,
-          as_of_date: new Date().toISOString().split('T')[0]
-        }
+          as_of_date: asOfDate
+        },
+        _source_accounts: sourceAccounts
       };
-
-      return balanceSheet;
 
     } catch (error) {
       log.error('Error generating balance sheet:', error);

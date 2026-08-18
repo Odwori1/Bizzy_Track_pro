@@ -764,9 +764,10 @@ export class InventoryService {
 
       // Handle purchases with accounting entries — unchanged in position,
       // Bug 2.8 already made this stock-neutral so ordering doesn't matter here
+      let purchaseAccountingResult = null;
       if (movementData.movement_type === 'purchase') {
         try {
-          await InventoryAccountingService.recordInventoryPurchase(
+          purchaseAccountingResult = await InventoryAccountingService.recordInventoryPurchase(
             {
               business_id: businessId,
               purchase_order_id: movementData.reference_id,
@@ -855,7 +856,11 @@ export class InventoryService {
       });
 
       await client.query('COMMIT');
-      return { movement, new_stock: parseFloat(newStock.rows[0].new_stock) };
+      return {
+        movement,
+        new_stock: parseFloat(newStock.rows[0].new_stock),
+        wallet_warning: purchaseAccountingResult?.wallet_warning || null
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

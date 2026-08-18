@@ -183,12 +183,12 @@ export const inventoryController = {
     } catch (error) {
       // Check if this is an INSUFFICIENT_STOCK error from the database
       if (error.code === 'P0001' && error.message && error.message.includes('INSUFFICIENT_STOCK')) {
-        log.warn('Insufficient stock error', { 
+        log.warn('Insufficient stock error', {
           error: error.message,
           itemId: req.body.inventory_item_id,
           requestedQuantity: req.body.quantity
         });
-        
+
         // Return a 400 Bad Request with the specific error message
         return res.status(400).json({
           success: false,
@@ -196,7 +196,22 @@ export const inventoryController = {
           code: 'INSUFFICIENT_STOCK'
         });
       }
-      
+
+      // Check if this is an insufficient wallet balance error (Part 2.1, v18.0)
+      if (error.message && error.message.includes('INSUFFICIENT_WALLET_BALANCE')) {
+        log.warn('Insufficient wallet balance error', {
+          error: error.message,
+          itemId: req.body.inventory_item_id,
+          paymentMethod: req.body.payment_method
+        });
+
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+          code: 'INSUFFICIENT_WALLET_BALANCE'
+        });
+      }
+
       // Check if this is an internal use accounting failure
       if (error.message && error.message.includes('Internal use accounting failed')) {
         log.error('Internal use accounting failed', { error: error.message });
