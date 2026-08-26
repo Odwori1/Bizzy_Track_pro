@@ -86,107 +86,37 @@ export class FinancialReportService {
   }
 
   /**
-   * Get cash flow report - FIXED: Excludes internal transfers
+   * Get cash flow report — REWRITTEN (v19.0, Part 2.3 fix)
+   *
+   * Same root cause and fix pattern as getProfitAndLoss() above. Confirmed
+   * live to overstate net cash flow by $1,015,851 (479x), same
+   * OPENING_BALANCE misclassification.
+   *
+   * get_cash_flow() currently only computes OPERATING category rows (no
+   * INVESTING/FINANCING branch exists in the function) — labeled explicitly
+   * in the response rather than presented as a complete three-section
+   * statement.
    */
   static async getCashFlowReport(businessId, startDate, endDate) {
     const client = await getClient();
     try {
-      // FIXED: Exclude wallet transfers from income
-      const incomeResult = await client.query(
-        `SELECT
-          DATE_TRUNC('month', created_at) as period,
-          SUM(amount) as total_income
-         FROM wallet_transactions
-         WHERE business_id = $1
-           AND transaction_type = 'income'
-           AND (reference_type IS NULL OR reference_type != 'wallet_transfer')
-           AND created_at BETWEEN $2 AND $3
-         GROUP BY DATE_TRUNC('month', created_at)
-         ORDER BY period`,
+      const result = await client.query(
+        `SELECT * FROM get_cash_flow($1, $2, $3)`,
         [businessId, startDate, endDate]
       );
 
-      const expenseResult = await client.query(
-        `SELECT
-          DATE_TRUNC('month', expense_date) as period,
-          SUM(amount) as total_expenses
-         FROM expenses
-         WHERE business_id = $1
-           AND expense_date BETWEEN $2 AND $3
-         GROUP BY DATE_TRUNC('month', expense_date)
-         ORDER BY period`,
-        [businessId, startDate, endDate]
-      );
+      const operating = result.rows
+        .filter(r => r.category === 'OPERATING' && r.description !== 'Net Cash from Operating Activities')
+        .map(r => ({ description: r.description, amount: parseFloat(r.amount) }));
 
-      // Combine income and expense data by period
-      const cashFlowMap = new Map();
+      const netRow = result.rows.find(r => r.description === 'Net Cash from Operating Activities');
+      const netCashOperating = netRow ? parseFloat(netRow.amount) : 0;
 
-      // Process income data
-      incomeResult.rows.forEach(row => {
-        if (row.period) {
-          const period = row.period.toISOString();
-          const periodDisplay = new Date(row.period).toLocaleDateString('en-US', {
-            month: 'long',
-            year: 'numeric'
-          });
-
-          cashFlowMap.set(period, {
-            period: period,
-            period_display: periodDisplay,
-            total_income: parseFloat(row.total_income) || 0,
-            total_expenses: 0,
-            net_cash_flow: parseFloat(row.total_income) || 0
-          });
-        }
-      });
-
-      // Process expense data
-      expenseResult.rows.forEach(row => {
-        if (row.period) {
-          const period = row.period.toISOString();
-          const periodDisplay = new Date(row.period).toLocaleDateString('en-US', {
-            month: 'long',
-            year: 'numeric'
-          });
-          const expenses = parseFloat(row.total_expenses) || 0;
-
-          if (cashFlowMap.has(period)) {
-            const existing = cashFlowMap.get(period);
-            existing.total_expenses = expenses;
-            existing.net_cash_flow = existing.total_income - expenses;
-          } else {
-            cashFlowMap.set(period, {
-              period: period,
-              period_display: periodDisplay,
-              total_income: 0,
-              total_expenses: expenses,
-              net_cash_flow: -expenses
-            });
-          }
-        }
-      });
-
-      // Convert to array and sort
-      const cashFlowData = Array.from(cashFlowMap.values()).sort((a, b) =>
-        new Date(a.period) - new Date(b.period)
-      );
-
-      // If no monthly data, return summary data
-      if (cashFlowData.length === 0) {
-        const totalIncome = incomeResult.rows.reduce((sum, row) => sum + parseFloat(row.total_income || 0), 0);
-        const totalExpenses = expenseResult.rows.reduce((sum, row) => sum + parseFloat(row.total_expenses || 0), 0);
-
-        return [{
-          period: new Date().toISOString(),
-          period_display: 'Current Period',
-          total_income: totalIncome,
-          total_expenses: totalExpenses,
-          net_cash_flow: totalIncome - totalExpenses
-        }];
-      }
-
-      return cashFlowData;
-
+      return {
+        period: { start_date: startDate, end_date: endDate },
+        operating_activities: { items: operating, net_cash: netCashOperating },
+        note: 'This statement currently reflects operating activities only. Investing and financing activities are not yet implemented in the underlying calculation.'
+      };
     } catch (error) {
       log.error('Error generating cash flow report:', error);
       throw error;
@@ -196,32 +126,62 @@ export class FinancialReportService {
   }
 
   /**
-   * Get profit and loss - FIXED: Uses corrected financial report
+   * Get profit and loss — REWRITTEN (v19.0, Part 2.3 fix)
+   *
+   * Previously derived revenue from `wallet_transactions WHERE transaction_type
+   * = 'income'` and expenses from the `expenses` table — the same methodology
+   * that produced Part 2.4's balance-sheet blind spot. Confirmed live
+   * (2026-08-19, business 90d29f85-...) to overstate net profit by
+   * $1,015,976 (509x), because sync_wallet_balance_from_journal() labeled
+   * any debit to a wallet-linked asset account as 'income', including a
+   * $1,000,000 opening-balance debit line, which the old query had no way
+   * to exclude (it only filtered out reference_type = 'wallet_transfer').
+   * The old query also had no COGS concept at all.
+   *
+   * Now sources every figure from get_profit_loss() — the same ledger-derived
+   * DB function FinancialStatementService.getProfitLoss() uses.
    */
   static async getProfitAndLoss(businessId, startDate, endDate) {
+    const client = await getClient();
     try {
-      // Use the same logic as getFinancialReport for consistency
-      const financialReport = await this.getFinancialReport(businessId, startDate, endDate);
+      const result = await client.query(
+        `SELECT * FROM get_profit_loss($1, $2, $3, $4)`,
+        [businessId, startDate, endDate, false]
+      );
+
+      const revenue = [];
+      const cogs = [];
+      const expenses = [];
+      let totalRevenue = 0, totalCogs = 0, totalExpenses = 0;
+
+      for (const row of result.rows) {
+        const item = {
+          account_code: row.account_code,
+          account_name: row.account_name,
+          amount: parseFloat(row.current_amount)
+        };
+        if (row.section === 'REVENUE') { revenue.push(item); totalRevenue += item.amount; }
+        else if (row.section === 'COGS') { cogs.push(item); totalCogs += item.amount; }
+        else if (row.section === 'EXPENSE') { expenses.push(item); totalExpenses += item.amount; }
+      }
+
+      const grossProfit = totalRevenue - totalCogs;
+      const netProfit = grossProfit - totalExpenses;
 
       return {
-        revenue: {
-          total_income: financialReport.summary.total_income,
-          breakdown: financialReport.income_breakdown
-        },
-        expenses: {
-          total_expenses: financialReport.summary.total_expenses,
-          breakdown: financialReport.expense_breakdown
-        },
-        net_profit: financialReport.summary.net_profit,
-        profit_margin: financialReport.summary.profit_margin,
-        period: {
-          start_date: startDate,
-          end_date: endDate
-        }
+        revenue: { total_income: totalRevenue, breakdown: revenue },
+        cost_of_goods_sold: { total: totalCogs, breakdown: cogs },
+        gross_profit: grossProfit,
+        expenses: { total_expenses: totalExpenses, breakdown: expenses },
+        net_profit: netProfit,
+        profit_margin: totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0,
+        period: { start_date: startDate, end_date: endDate }
       };
     } catch (error) {
       log.error('Error generating profit and loss statement:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -392,7 +352,18 @@ export class FinancialReportService {
   }
 
   /**
-   * Calculate tithe amount - FIXED: Uses corrected financial data
+   * Calculate tithe amount — REWRITTEN (v19.0, Part 2.3 fix)
+   *
+   * Previously derived net_profit via getFinancialReport(), which read
+   * wallet_transactions the same contaminated way the old P&L did.
+   * Now sources net profit from get_profit_loss() directly — the same
+   * authoritative function backing FinancialStatementService.getProfitLoss().
+   *
+   * Scope note: this fix corrects the CALCULATION only. It does not create
+   * any liability, journal entry, or accounting treatment for tithe — that
+   * is a distinct, deliberately deferred feature (see report Part 2.6/2.7)
+   * requiring its own giving-lifecycle design. Tithe here remains a
+   * calculated, informational report figure only, same as before this fix.
    */
   static async calculateTithe(businessId, options = {}) {
     try {
@@ -404,14 +375,28 @@ export class FinancialReportService {
       } = options;
 
       if (!enabled) {
-        return {
-          enabled: false,
-          message: 'Tithe calculation is disabled'
-        };
+        return { enabled: false, message: 'Tithe calculation is disabled' };
       }
 
-      const financialReport = await this.getFinancialReport(businessId, start_date, end_date);
-      const netProfit = financialReport.summary.net_profit;
+      const client = await getClient();
+      let netProfit;
+      try {
+        const result = await client.query(
+          `SELECT * FROM get_profit_loss($1, $2, $3, $4)`,
+          [businessId, start_date, end_date, false]
+        );
+        let totalRevenue = 0, totalCogs = 0, totalExpenses = 0;
+        for (const row of result.rows) {
+          const amt = parseFloat(row.current_amount);
+          if (row.section === 'REVENUE') totalRevenue += amt;
+          else if (row.section === 'COGS') totalCogs += amt;
+          else if (row.section === 'EXPENSE') totalExpenses += amt;
+        }
+        netProfit = (totalRevenue - totalCogs) - totalExpenses;
+      } finally {
+        client.release();
+      }
+
       const titheAmount = netProfit * (percentage / 100);
 
       return {
@@ -420,11 +405,9 @@ export class FinancialReportService {
         net_profit: netProfit,
         tithe_percentage: percentage,
         tithe_amount: titheAmount,
-        period: {
-          start_date: start_date,
-          end_date: end_date
-        },
-        financial_summary: financialReport.summary
+        period: { start_date, end_date },
+        accounting_treatment: 'informational_only',
+        note: 'This is a calculated figure only. No liability or journal entry is created by this calculation.'
       };
     } catch (error) {
       log.error('Error calculating tithe:', error);

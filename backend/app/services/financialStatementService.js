@@ -233,12 +233,12 @@ export class FinancialStatementService {
 
             for (const row of result.rows) {
                 const amount = parseFloat(row.amount);
-                operatingActivities.push({
-                    description: row.description,
-                    amount: amount
-                });
                 if (row.description === 'Net Cash from Operating Activities') {
                     netCashOperating = amount;
+                    continue;
+                }
+                if (row.category === 'OPERATING') {
+                    operatingActivities.push({ description: row.description, amount });
                 }
             }
 
@@ -268,7 +268,7 @@ export class FinancialStatementService {
                     end_date: endDate
                 },
                 operating_activities: {
-                    items: operatingActivities.filter(item => item.description !== 'Net Cash from Operating Activities'),
+                    items: operatingActivities,
                     net_cash: netCashOperating
                 }
             };
@@ -450,7 +450,7 @@ export class FinancialStatementService {
 
         try {
             let query = `
-                SELECT id, period_name, period_type, start_date, end_date, status, 
+                SELECT id, period_name, period_type, start_date, end_date, status,
                        closed_at, closed_by, reopened_at, reopening_reason,
                        created_at, updated_at
                 FROM accounting_periods
@@ -522,7 +522,7 @@ export class FinancialStatementService {
 
         try {
             const checkDate = date || new Date().toISOString().split('T')[0];
-            
+
             const result = await client.query(
                 `SELECT id, period_name, period_type, start_date, end_date, status
                  FROM accounting_periods
@@ -532,7 +532,7 @@ export class FinancialStatementService {
             );
 
             const currentPeriod = result.rows[0] || null;
-            
+
             let latestPeriod = null;
             if (!currentPeriod) {
                 const latestResult = await client.query(
@@ -591,10 +591,10 @@ export class FinancialStatementService {
 
         try {
             let targetPeriodId = periodId;
-            
+
             if (!targetPeriodId && periodName) {
                 const result = await client.query(
-                    `SELECT id FROM accounting_periods 
+                    `SELECT id FROM accounting_periods
                      WHERE business_id = $1 AND period_name = $2 AND status = 'OPEN'`,
                     [businessId, periodName]
                 );
@@ -603,7 +603,7 @@ export class FinancialStatementService {
                 }
                 targetPeriodId = result.rows[0].id;
             }
-            
+
             if (!targetPeriodId) {
                 throw new Error('Either period_id or period_name is required');
             }
@@ -671,10 +671,10 @@ export class FinancialStatementService {
 
         try {
             let targetPeriodId = periodId;
-            
+
             if (!targetPeriodId && periodName) {
                 const result = await client.query(
-                    `SELECT id FROM accounting_periods 
+                    `SELECT id FROM accounting_periods
                      WHERE business_id = $1 AND period_name = $2 AND status = 'CLOSED'`,
                     [businessId, periodName]
                 );
@@ -683,7 +683,7 @@ export class FinancialStatementService {
                 }
                 targetPeriodId = result.rows[0].id;
             }
-            
+
             if (!targetPeriodId) {
                 throw new Error('Either period_id or period_name is required');
             }
