@@ -148,11 +148,12 @@ export class AccountingService {
    * Create a journal entry with double-entry accounting
    * FIXED: Removed created_by from journal_entry_lines insert
    */
-  static async createJournalEntry(entryData, userId) {
-    const client = await getClient();
+  static async createJournalEntry(entryData, userId, sharedClient = null) {
+    const useExternalClient = sharedClient !== null;
+    const client = sharedClient || await getClient();
 
     try {
-      await client.query('BEGIN');
+      if (!useExternalClient) await client.query('BEGIN');
 
       // Validate that debits equal credits
       const totalDebits = entryData.lines
@@ -251,7 +252,7 @@ export class AccountingService {
         }
       });
 
-      await client.query('COMMIT');
+      if (!useExternalClient) await client.query('COMMIT');
 
       return {
         journal_entry: journalEntry,
@@ -264,11 +265,11 @@ export class AccountingService {
       };
 
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (!useExternalClient) await client.query('ROLLBACK');
       log.error('Accounting service error creating journal entry:', error);
       throw error;
     } finally {
-      client.release();
+      if (!useExternalClient) client.release();
     }
   }
 
@@ -665,7 +666,7 @@ export class AccountingService {
   /**
    * Create journal entry for inventory purchase
    */
-  static async createJournalEntryForInventoryPurchase(purchaseData, userId) {
+  static async createJournalEntryForInventoryPurchase(purchaseData, userId, sharedClient = null) {
     const journalEntryData = {
       business_id: purchaseData.business_id,
       description: `Inventory Purchase${purchaseData.purchase_order_id ? ` (PO: ${purchaseData.purchase_order_id})` : ''}`,
@@ -700,6 +701,6 @@ export class AccountingService {
       line_type: 'credit'
     });
 
-    return await this.createJournalEntry(journalEntryData, userId);
+    return await this.createJournalEntry(journalEntryData, userId, sharedClient);
   }
 }

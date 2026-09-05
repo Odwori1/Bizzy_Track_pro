@@ -34,11 +34,12 @@ export class InventoryAccountingService {
   // recordInventoryPurchase
   // ============================================================================
 
-  static async recordInventoryPurchase(purchaseData, userId) {
-    const client = await getClient();
+  static async recordInventoryPurchase(purchaseData, userId, sharedClient = null) {
+    const useExternalClient = sharedClient !== null;
+    const client = sharedClient || await getClient();
 
     try {
-      await client.query('BEGIN');
+      if (!useExternalClient) await client.query('BEGIN');
 
       const itemResult = await client.query(
         `SELECT id, name, sku FROM inventory_items
@@ -135,7 +136,8 @@ export class InventoryAccountingService {
           unit_cost: purchaseData.unit_cost,
           payment_method: purchaseData.payment_method
         },
-        userId
+        userId,
+        client
       );
 
       const transactionResult = await client.query(
@@ -181,7 +183,7 @@ export class InventoryAccountingService {
         }
       });
 
-      await client.query('COMMIT');
+      if (!useExternalClient) await client.query('COMMIT');
 
       return {
         inventory_transaction: inventoryTransaction,
@@ -196,11 +198,11 @@ export class InventoryAccountingService {
       };
 
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (!useExternalClient) await client.query('ROLLBACK');
       log.error('Inventory accounting service error recording purchase:', error);
       throw error;
     } finally {
-      client.release();
+      if (!useExternalClient) client.release();
     }
   }
 

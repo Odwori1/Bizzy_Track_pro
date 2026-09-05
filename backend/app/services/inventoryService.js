@@ -762,28 +762,6 @@ export class InventoryService {
       const unitCost = parseFloat(movementData.unit_cost);
       const totalValue = quantity * unitCost;
 
-      // Handle purchases with accounting entries — unchanged in position,
-      // Bug 2.8 already made this stock-neutral so ordering doesn't matter here
-      let purchaseAccountingResult = null;
-      if (movementData.movement_type === 'purchase') {
-        try {
-          purchaseAccountingResult = await InventoryAccountingService.recordInventoryPurchase(
-            {
-              business_id: businessId,
-              purchase_order_id: movementData.reference_id,
-              inventory_item_id: movementData.inventory_item_id,
-              quantity: quantity,
-              unit_cost: unitCost,
-              payment_method: movementData.payment_method || 'accounts_payable'
-            },
-            userId
-          );
-        } catch (accountingError) {
-          log.error('Inventory purchase accounting failed:', accountingError);
-          throw new Error(`Purchase accounting failed: ${accountingError.message}`);
-        }
-      }
-
       // Record inventory movement
       const movementResult = await client.query(
         `INSERT INTO inventory_movements (
@@ -814,6 +792,31 @@ export class InventoryService {
         'SELECT update_inventory_stock($1, $2, $3) as new_stock',
         [movementData.inventory_item_id, quantity, movementData.movement_type]
       );
+
+      // Purchase accounting now runs AFTER the stock check succeeds, on the
+      // SAME client/transaction — no longer independently committing.
+      // Mirrors the internal_use fix immediately below (v16.0). Fixes the
+      // phantom-entry bug confirmed live 2026-09-04 (Part 1.7 of v21.0 audit).
+      let purchaseAccountingResult = null;
+      if (movementData.movement_type === 'purchase') {
+        try {
+          purchaseAccountingResult = await InventoryAccountingService.recordInventoryPurchase(
+            {
+              business_id: businessId,
+              purchase_order_id: movementData.reference_id,
+              inventory_item_id: movementData.inventory_item_id,
+              quantity: quantity,
+              unit_cost: unitCost,
+              payment_method: movementData.payment_method || 'accounts_payable'
+            },
+            userId,
+            client
+          );
+        } catch (accountingError) {
+          log.error('Inventory purchase accounting failed:', accountingError);
+          throw new Error(`Purchase accounting failed: ${accountingError.message}`);
+        }
+      }
 
       // Internal-use accounting now runs AFTER the stock check succeeds,
       // on the SAME client/transaction — no longer its own independently
