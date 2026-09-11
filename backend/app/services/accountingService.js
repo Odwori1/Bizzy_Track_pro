@@ -665,14 +665,53 @@ export class AccountingService {
 
   /**
    * Create journal entry for inventory purchase
+   *
+   * FIXED (v23.0 Step B): previously hardcoded reference_type = 'purchase_order'
+   * unconditionally, and fabricated a UUID for reference_id whenever no
+   * purchase_order_id was supplied — even though both inventoryService and
+   * inventoryAccountingService now call this with an explicit reference_type
+   * and a possibly-null PO id.
+   *
+   * Now:
+   *   - reference_type is taken from the caller's declaration, defaulting to
+   *     'inventory_purchase_adhoc' if the caller didn't assert 'purchase_order'
+   *     with a real PO id. journal_entries.reference_type no longer lies about
+   *     a PO that never existed.
+   *   - reference_id uses the real PO id when one exists. For ad-hoc purchases
+   *     journal_entries.reference_id is NOT NULL, so a UUID is still generated
+   *     — but the reference_type now honestly labels it as inventory_purchase_adhoc
+   *     instead of purchase_order.
+   *
+   * This keeps the (business_id, reference_type, reference_id) unique constraint
+   * working correctly: real POs and ad-hoc purchases land in separate
+   * reference_type buckets, so no collision is possible between an ad-hoc
+   * UUID and a real PO id.
    */
   static async createJournalEntryForInventoryPurchase(purchaseData, userId, sharedClient = null) {
+    // ── Reference-type resolution ──────────────────────────────────────────
+    // A real PO is only asserted when the caller explicitly declared
+    // reference_type === 'purchase_order' AND supplied a non-null PO id.
+    // Everything else is honestly labeled 'inventory_purchase_adhoc'.
+    const isRealPO =
+      purchaseData.reference_type === 'purchase_order' &&
+      !!purchaseData.purchase_order_id;
+
+    const effectiveReferenceType = isRealPO
+      ? 'purchase_order'
+      : 'inventory_purchase_adhoc';
+
+    // journal_entries.reference_id is NOT NULL. Real PO id when present;
+    // otherwise a UUID — which the reference_type now honestly labels as
+    // an ad-hoc inventory purchase rather than a PO.
+    const effectiveReferenceId = purchaseData.purchase_order_id
+      || this.generateManualEntryUUID();
+
     const journalEntryData = {
       business_id: purchaseData.business_id,
       description: `Inventory Purchase${purchaseData.purchase_order_id ? ` (PO: ${purchaseData.purchase_order_id})` : ''}`,
       journal_date: new Date(),
-      reference_type: 'purchase_order',
-      reference_id: purchaseData.purchase_order_id || this.generateManualEntryUUID(),
+      reference_type: effectiveReferenceType,
+      reference_id: effectiveReferenceId,
       lines: [
         {
           account_code: '1300',

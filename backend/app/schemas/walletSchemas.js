@@ -21,11 +21,13 @@ export const updateWalletSchema = Joi.object({
 
 export const createWalletTransactionSchema = Joi.object({
   wallet_id: Joi.string().uuid().required(),
-  transaction_type: Joi.string().valid('income', 'expense', 'transfer').required(),
+  transaction_type: Joi.string().valid('income', 'expense').required(),
+  adjustment_category: Joi.string().valid(
+    'cash_shortage', 'cash_overage', 'bank_fee', 'bank_interest',
+    'owner_contribution', 'owner_withdrawal', 'other_income', 'other_expense'
+  ).required(),
   amount: Joi.number().precision(2).positive().required(),
-  description: Joi.string().max(1000).required(),
-  reference_type: Joi.string().max(50).optional().allow(''),
-  reference_id: Joi.string().uuid().optional().allow('')
+  description: Joi.string().max(1000).required()
 });
 
 export const transferBetweenWalletsSchema = Joi.object({

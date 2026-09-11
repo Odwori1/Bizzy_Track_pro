@@ -55,6 +55,36 @@ export class InventoryAccountingService {
       const totalCost = purchaseData.quantity * purchaseData.unit_cost;
 
       // ========================================================================
+      // REFERENCE-TYPE RESOLUTION (v23.0 Step B fix)
+      //
+      // Previously this service wrote reference_type = 'purchase_order'
+      // unconditionally on the inventory_transactions row, and passed the
+      // purchase_order_id (which could be NULL for ad-hoc stock-ins) straight
+      // through to AccountingService.createJournalEntryForInventoryPurchase().
+      //
+      // That lied on two fronts:
+      //   1. inventory_transactions.reference_type claimed 'purchase_order'
+      //      even when no PO existed, polluting reporting/audit views.
+      //   2. The journal entry on the accounting side inherited the same
+      //      lie, and — because journal_entries.reference_id is NOT NULL —
+      //      the accounting service then had to fabricate a UUID to fill in
+      //      for the missing PO id.
+      //
+      // Now: a real PO is only asserted when the caller explicitly declared
+      // reference_type === 'purchase_order' AND supplied a non-null PO id.
+      // Everything else is honestly labeled 'inventory_purchase_adhoc'.
+      // inventory_transactions.reference_id is nullable, so it gets the real
+      // PO id when one exists and NULL otherwise — no fabrication.
+      // ========================================================================
+      const isRealPO =
+        purchaseData.reference_type === 'purchase_order' &&
+        !!purchaseData.purchase_order_id;
+
+      const effectiveReferenceType = isRealPO
+        ? 'purchase_order'
+        : 'inventory_purchase_adhoc';
+
+      // ========================================================================
       // WALLET BALANCE CHECK (Part 2.1 fix, v18.0) — runs BEFORE the journal
       // entry is created, so a blocked purchase produces zero side effects
       // (no orphaned journal entry, no phantom inventory_transactions row).
@@ -129,7 +159,14 @@ export class InventoryAccountingService {
       const journalEntry = await AccountingService.createJournalEntryForInventoryPurchase(
         {
           business_id: purchaseData.business_id,
-          purchase_order_id: purchaseData.purchase_order_id,
+          // Pass the resolved reference type through so the accounting
+          // service can honor it in journal_entries.reference_type instead
+          // of defaulting to 'purchase_order'. Also pass the raw PO id
+          // (which may be null) so the accounting service can decide
+          // whether to use it or generate a UUID for the NOT NULL
+          // journal_entries.reference_id column.
+          reference_type: effectiveReferenceType,
+          purchase_order_id: purchaseData.purchase_order_id ?? null,
           total_amount: totalCost,
           inventory_item_id: purchaseData.inventory_item_id,
           quantity: purchaseData.quantity,
@@ -153,8 +190,12 @@ export class InventoryAccountingService {
           'purchase',
           purchaseData.quantity,
           purchaseData.unit_cost,
-          'purchase_order',
-          purchaseData.purchase_order_id,
+          // Honest label: 'purchase_order' only when a real PO was asserted,
+          // otherwise 'inventory_purchase_adhoc'. Never fabricate the PO label.
+          effectiveReferenceType,
+          // Real PO id when present, NULL otherwise. Column is nullable, so
+          // NULL is the correct representation of "no PO linked".
+          purchaseData.purchase_order_id ?? null,
           journalEntry.journal_entry.id,
           `Purchase: ${purchaseData.quantity} units of ${item.name}`,
           userId
@@ -179,6 +220,8 @@ export class InventoryAccountingService {
           unit_cost: purchaseData.unit_cost,
           total_cost: totalCost,
           payment_method: purchaseData.payment_method,
+          reference_type: effectiveReferenceType,
+          purchase_order_id: purchaseData.purchase_order_id ?? null,
           wallet_warning: walletWarning
         }
       });
@@ -193,7 +236,8 @@ export class InventoryAccountingService {
         summary: {
           quantity: purchaseData.quantity,
           unit_cost: purchaseData.unit_cost,
-          total_cost: totalCost
+          total_cost: totalCost,
+          reference_type: effectiveReferenceType
         }
       };
 

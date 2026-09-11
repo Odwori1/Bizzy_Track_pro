@@ -1,6 +1,36 @@
-import { query, getClient } from '../utils/database.js';
+import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
+import { AccountingService } from './accountingService.js';
+
+// Category → (contra account_code, required transaction_type)
+const ADJUSTMENT_CATEGORY_MAP = {
+  cash_shortage:      { account_code: '5209', required_type: 'expense' }, // Misc Expense
+  cash_overage:       { account_code: '4400', required_type: 'income'  }, // Other Revenue
+  bank_fee:           { account_code: '5209', required_type: 'expense' }, // Misc Expense
+  bank_interest:      { account_code: '4400', required_type: 'income'  }, // Other Revenue
+  owner_contribution: { account_code: '3100', required_type: 'income'  }, // Owner's Capital
+  owner_withdrawal:   { account_code: '3200', required_type: 'expense' }, // Owner's Drawings
+  other_income:       { account_code: '4400', required_type: 'income'  }, // Other Revenue
+  other_expense:      { account_code: '5700', required_type: 'expense' }  // Other Expenses
+};
+
+// wallet_type → GL account_code, mirroring how ensure_business_has_default_wallets()
+// resolves the three default types. credit_card and tithe are deliberately absent:
+// credit_card is a liability by nature and cannot sync correctly through the current
+// asset-only trg_sync_wallet_on_journal_entry check; tithe is out of scope pending
+// the separate giving/zakat/sadaqah system.
+const WALLET_TYPE_ACCOUNT_MAP = {
+  cash:           '1110',
+  cash_drawer:    '1110',
+  petty_cash:     '1110',
+  safe:           '1110',
+  bank:           '1120',
+  bank_account:   '1120',
+  savings:        '1120',
+  mobile_money:   '1130',
+  digital_wallet: '1130'
+};
 
 export class WalletService {
   /**
@@ -125,6 +155,16 @@ export class WalletService {
 
   /**
    * Create money wallet
+   *
+   * FIXED (v23.0 Step A′): resolve gl_account_id at creation time, the same
+   * way ensure_business_has_default_wallets() does for the three auto-provisioned
+   * types. Every wallet created via this path used to start unlinked, which meant
+   * it would immediately fail the recordTransaction()/transferBetweenWallets()
+   * guard shipped in v23.0 Step A the first time anyone tried to use it.
+   *
+   * wallet_type values not present in WALLET_TYPE_ACCOUNT_MAP (currently
+   * 'credit_card' and 'tithe') fail closed with a named error rather than
+   * silently creating another unlinked wallet.
    */
   static async createWallet(businessId, walletData, userId) {
     const client = await getClient();
@@ -142,10 +182,35 @@ export class WalletService {
         throw new Error('Wallet name already exists');
       }
 
+      // Resolve gl_account_id from wallet_type
+      const accountCode = WALLET_TYPE_ACCOUNT_MAP[walletData.wallet_type];
+      if (!accountCode) {
+        throw new Error(
+          `wallet_type '${walletData.wallet_type}' has no chart-of-accounts mapping and ` +
+          `cannot be linked automatically. This wallet cannot be created until a GL ` +
+          `account strategy for this type is decided.`
+        );
+      }
+
+      const glAccountResult = await client.query(
+        `SELECT id FROM chart_of_accounts WHERE business_id = $1 AND account_code = $2`,
+        [businessId, accountCode]
+      );
+
+      const glAccountId = glAccountResult.rows[0]?.id;
+      if (!glAccountId) {
+        // Should not happen given the canonical 65-account chart, but fail loudly
+        // rather than silently creating another unlinked wallet.
+        throw new Error(
+          `Chart-of-accounts entry '${accountCode}' not found for business ${businessId} — ` +
+          `cannot link new wallet.`
+        );
+      }
+
       const result = await client.query(
         `INSERT INTO money_wallets (
-          business_id, name, wallet_type, current_balance, description, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+          business_id, name, wallet_type, current_balance, description, is_active, gl_account_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *`,
         [
           businessId,
@@ -153,7 +218,8 @@ export class WalletService {
           walletData.wallet_type,
           walletData.current_balance || 0,
           walletData.description || '',
-          walletData.is_active
+          walletData.is_active,
+          glAccountId
         ]
       );
 
@@ -168,7 +234,8 @@ export class WalletService {
         newValues: {
           name: wallet.name,
           wallet_type: wallet.wallet_type,
-          initial_balance: wallet.current_balance
+          initial_balance: wallet.current_balance,
+          gl_account_id: wallet.gl_account_id
         }
       });
 
@@ -233,7 +300,16 @@ export class WalletService {
   }
 
   /**
-   * Record wallet transaction and update balance
+   * Record a manual wallet adjustment as a proper double-entry journal entry.
+   *
+   * FIXED (v22.0 Step A): previously wrote directly to money_wallets.current_balance
+   * and wallet_transactions with no accounting record at all — a real, reachable
+   * bypass of the double-entry system (any wallet:update permission could silently
+   * desync the books from displayed wallet balances). Now routes through
+   * AccountingService.createJournalEntry(); trg_sync_wallet_on_journal_entry
+   * (AFTER INSERT ON journal_entry_lines) picks up the wallet-side line automatically
+   * and creates the wallet_transactions row + balance update itself, so there is only
+   * ever one source of truth.
    */
   static async recordTransaction(businessId, transactionData, userId) {
     const client = await getClient();
@@ -241,86 +317,118 @@ export class WalletService {
     try {
       await client.query('BEGIN');
 
-      // Verify wallet belongs to business
-      const walletCheck = await client.query(
-        'SELECT id, current_balance FROM money_wallets WHERE id = $1 AND business_id = $2',
-        [transactionData.wallet_id, businessId]
+      const { wallet_id, transaction_type, adjustment_category, amount, description } = transactionData;
+
+      const category = ADJUSTMENT_CATEGORY_MAP[adjustment_category];
+      if (!category) {
+        throw new Error(`Unknown adjustment_category: ${adjustment_category}`);
+      }
+      if (category.required_type !== transaction_type) {
+        throw new Error(
+          `adjustment_category '${adjustment_category}' requires transaction_type ` +
+          `'${category.required_type}', got '${transaction_type}'`
+        );
+      }
+
+      // Verify wallet belongs to business and has a linked GL account.
+      const walletResult = await client.query(
+        `SELECT id, current_balance, gl_account_id, is_active
+         FROM money_wallets WHERE id = $1 AND business_id = $2`,
+        [wallet_id, businessId]
       );
 
-      if (walletCheck.rows.length === 0) {
+      if (walletResult.rows.length === 0) {
         throw new Error('Wallet not found or access denied');
       }
 
-      const currentBalance = parseFloat(walletCheck.rows[0].current_balance);
-      const amount = parseFloat(transactionData.amount);
+      const wallet = walletResult.rows[0];
 
-      // Calculate new balance
-      let newBalance;
-      switch (transactionData.transaction_type) {
-        case 'income':
-          newBalance = currentBalance + amount;
-          break;
-        case 'expense':
-          if (currentBalance < amount) {
-            throw new Error('Insufficient wallet balance');
-          }
-          newBalance = currentBalance - amount;
-          break;
-        case 'transfer':
-          // For transfers, balance remains same (handled separately)
-          newBalance = currentBalance;
-          break;
-        default:
-          throw new Error('Invalid transaction type');
-      }
-
-      // Record transaction
-      const transactionResult = await client.query(
-        `INSERT INTO wallet_transactions (
-          business_id, wallet_id, transaction_type, amount,
-          balance_after, description, reference_type, reference_id, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING *`,
-        [
-          businessId,
-          transactionData.wallet_id,
-          transactionData.transaction_type,
-          amount,
-          newBalance,
-          transactionData.description,
-          transactionData.reference_type || null,
-          transactionData.reference_id || null,
-          userId
-        ]
-      );
-
-      const transaction = transactionResult.rows[0];
-
-      // Update wallet balance (except for transfers)
-      if (transactionData.transaction_type !== 'transfer') {
-        await client.query(
-          'UPDATE money_wallets SET current_balance = $1, updated_at = NOW() WHERE id = $2',
-          [newBalance, transactionData.wallet_id]
+      if (!wallet.gl_account_id) {
+        throw new Error(
+          'This wallet is not linked to a chart-of-accounts entry (gl_account_id is null). ' +
+          'Link it to a GL account before recording transactions against it.'
         );
       }
+
+      const currentBalance = parseFloat(wallet.current_balance);
+      const numericAmount = parseFloat(amount);
+
+      // Pre-flight balance check for expenses — mirrors the read-only,
+      // side-effect-free pattern used in InventoryAccountingService.recordInventoryPurchase().
+      if (transaction_type === 'expense' && currentBalance < numericAmount) {
+        throw new Error(
+          `Insufficient wallet balance: adjustment of ${numericAmount} requested but ` +
+          `wallet only has ${currentBalance} available`
+        );
+      }
+
+      // Get the wallet's own GL account_code (createJournalEntry expects a code, not an id).
+      const walletAccountResult = await client.query(
+        `SELECT account_code FROM chart_of_accounts WHERE id = $1`,
+        [wallet.gl_account_id]
+      );
+      const walletAccountCode = walletAccountResult.rows[0]?.account_code;
+
+      if (!walletAccountCode) {
+        throw new Error('Wallet GL account could not be resolved');
+      }
+
+      // income  → wallet debit, contra credit
+      // expense → wallet credit, contra debit
+      const lines = transaction_type === 'income'
+        ? [
+            { account_code: walletAccountCode, description, amount: numericAmount, line_type: 'debit' },
+            { account_code: category.account_code, description, amount: numericAmount, line_type: 'credit' }
+          ]
+        : [
+            { account_code: category.account_code, description, amount: numericAmount, line_type: 'debit' },
+            { account_code: walletAccountCode, description, amount: numericAmount, line_type: 'credit' }
+          ];
+
+      const journalEntry = await AccountingService.createJournalEntry(
+        {
+          business_id: businessId,
+          description,
+          journal_date: new Date(),
+          reference_type: adjustment_category,
+          reference_id: AccountingService.generateManualEntryUUID(),
+          lines
+        },
+        userId,
+        client
+      );
+
+      // Wallet balance + wallet_transactions row are created by
+      // trg_sync_wallet_on_journal_entry — no manual write here.
+      const updatedWalletResult = await client.query(
+        `SELECT current_balance FROM money_wallets WHERE id = $1`,
+        [wallet_id]
+      );
 
       await auditLogger.logAction({
         businessId,
         userId,
         action: 'wallet.transaction.created',
         resourceType: 'wallet_transaction',
-        resourceId: transaction.id,
+        resourceId: journalEntry.journal_entry.id,
         newValues: {
-          transaction_type: transaction.transaction_type,
-          amount: transaction.amount,
-          new_balance: newBalance
+          wallet_id,
+          transaction_type,
+          adjustment_category,
+          amount: numericAmount,
+          new_balance: updatedWalletResult.rows[0].current_balance
         }
       });
 
       await client.query('COMMIT');
-      return { transaction, new_balance: newBalance };
+
+      return {
+        journal_entry: journalEntry,
+        new_balance: parseFloat(updatedWalletResult.rows[0].current_balance)
+      };
     } catch (error) {
       await client.query('ROLLBACK');
+      log.error('Wallet transaction recording error:', error);
       throw error;
     } finally {
       client.release();
@@ -328,7 +436,14 @@ export class WalletService {
   }
 
   /**
-   * Transfer money between wallets
+   * Transfer money between two wallets as a proper double-entry journal entry.
+   *
+   * FIXED (v22.0 Step A): previously wrote directly to money_wallets.current_balance
+   * (both wallets) and inserted two wallet_transactions rows by hand, with no
+   * accounting record at all. Now a single journal entry (Dr destination / Cr source)
+   * lets trg_sync_wallet_on_journal_entry create both wallet_transactions rows and
+   * update both balances — reference_type 'wallet_transfer' is already specially
+   * labeled by the trigger.
    */
   static async transferBetweenWallets(businessId, transferData, userId) {
     const client = await getClient();
@@ -336,93 +451,81 @@ export class WalletService {
     try {
       await client.query('BEGIN');
 
-      // Verify both wallets belong to business
-      const fromWalletCheck = await client.query(
-        'SELECT id, current_balance, name FROM money_wallets WHERE id = $1 AND business_id = $2',
-        [transferData.from_wallet_id, businessId]
+      const { from_wallet_id, to_wallet_id, amount, description } = transferData;
+      const numericAmount = parseFloat(amount);
+      const transferDescription = description || 'Transfer between wallets';
+
+      const walletsResult = await client.query(
+        `SELECT mw.id, mw.name, mw.current_balance, mw.gl_account_id, ca.account_code
+         FROM money_wallets mw
+         LEFT JOIN chart_of_accounts ca ON ca.id = mw.gl_account_id
+         WHERE mw.id = ANY($1::uuid[]) AND mw.business_id = $2`,
+        [[from_wallet_id, to_wallet_id], businessId]
       );
 
-      const toWalletCheck = await client.query(
-        'SELECT id, current_balance, name FROM money_wallets WHERE id = $1 AND business_id = $2',
-        [transferData.to_wallet_id, businessId]
-      );
+      const fromWallet = walletsResult.rows.find(w => w.id === from_wallet_id);
+      const toWallet = walletsResult.rows.find(w => w.id === to_wallet_id);
 
-      if (fromWalletCheck.rows.length === 0 || toWalletCheck.rows.length === 0) {
+      if (!fromWallet || !toWallet) {
         throw new Error('One or both wallets not found or access denied');
       }
 
-      const fromWallet = fromWalletCheck.rows[0];
-      const toWallet = toWalletCheck.rows[0];
-      const amount = parseFloat(transferData.amount);
+      for (const w of [fromWallet, toWallet]) {
+        if (!w.gl_account_id || !w.account_code) {
+          throw new Error(
+            `Wallet '${w.name}' is not linked to a chart-of-accounts entry. ` +
+            `Link it to a GL account before transferring to/from it.`
+          );
+        }
+      }
 
-      // Check sufficient balance in source wallet
-      if (parseFloat(fromWallet.current_balance) < amount) {
+      if (parseFloat(fromWallet.current_balance) < numericAmount) {
         throw new Error(`Insufficient balance in ${fromWallet.name}`);
       }
 
-      // Calculate new balances
-      const fromNewBalance = parseFloat(fromWallet.current_balance) - amount;
-      const toNewBalance = parseFloat(toWallet.current_balance) + amount;
-
-      // Record outgoing transaction (expense from source wallet)
-      const fromTransaction = await client.query(
-        `INSERT INTO wallet_transactions (
-          business_id, wallet_id, transaction_type, amount,
-          balance_after, description, reference_type, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING *`,
-        [
-          businessId,
-          transferData.from_wallet_id,
-          'expense',
-          amount,
-          fromNewBalance,
-          `Transfer to ${toWallet.name}: ${transferData.description || ''}`,
-          'wallet_transfer',
-          userId
-        ]
+      const journalEntry = await AccountingService.createJournalEntry(
+        {
+          business_id: businessId,
+          description: transferDescription,
+          journal_date: new Date(),
+          reference_type: 'wallet_transfer',
+          reference_id: AccountingService.generateManualEntryUUID(),
+          lines: [
+            {
+              account_code: toWallet.account_code,
+              description: `Transfer from ${fromWallet.name}: ${transferDescription}`,
+              amount: numericAmount,
+              line_type: 'debit'
+            },
+            {
+              account_code: fromWallet.account_code,
+              description: `Transfer to ${toWallet.name}: ${transferDescription}`,
+              amount: numericAmount,
+              line_type: 'credit'
+            }
+          ]
+        },
+        userId,
+        client
       );
 
-      // Record incoming transaction (income to destination wallet)
-      const toTransaction = await client.query(
-        `INSERT INTO wallet_transactions (
-          business_id, wallet_id, transaction_type, amount,
-          balance_after, description, reference_type, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING *`,
-        [
-          businessId,
-          transferData.to_wallet_id,
-          'income',
-          amount,
-          toNewBalance,
-          `Transfer from ${fromWallet.name}: ${transferData.description || ''}`,
-          'wallet_transfer',
-          userId
-        ]
+      const updatedBalances = await client.query(
+        `SELECT id, current_balance FROM money_wallets WHERE id = ANY($1::uuid[])`,
+        [[from_wallet_id, to_wallet_id]]
       );
-
-      // Update both wallet balances
-      await client.query(
-        'UPDATE money_wallets SET current_balance = $1, updated_at = NOW() WHERE id = $2',
-        [fromNewBalance, transferData.from_wallet_id]
-      );
-
-      await client.query(
-        'UPDATE money_wallets SET current_balance = $1, updated_at = NOW() WHERE id = $2',
-        [toNewBalance, transferData.to_wallet_id]
-      );
+      const fromNewBalance = parseFloat(updatedBalances.rows.find(w => w.id === from_wallet_id).current_balance);
+      const toNewBalance = parseFloat(updatedBalances.rows.find(w => w.id === to_wallet_id).current_balance);
 
       await auditLogger.logAction({
         businessId,
         userId,
         action: 'wallet.transfer.completed',
         resourceType: 'wallet_transfer',
-        resourceId: fromTransaction.rows[0].id,
+        resourceId: journalEntry.journal_entry.id,
         newValues: {
           from_wallet: fromWallet.name,
           to_wallet: toWallet.name,
-          amount: amount,
+          amount: numericAmount,
           from_new_balance: fromNewBalance,
           to_new_balance: toNewBalance
         }
@@ -431,18 +534,12 @@ export class WalletService {
       await client.query('COMMIT');
 
       return {
-        transfer: {
-          from_transaction: fromTransaction.rows[0],
-          to_transaction: toTransaction.rows[0],
-          amount: amount
-        },
-        new_balances: {
-          from_wallet: fromNewBalance,
-          to_wallet: toNewBalance
-        }
+        journal_entry: journalEntry,
+        new_balances: { from_wallet: fromNewBalance, to_wallet: toNewBalance }
       };
     } catch (error) {
       await client.query('ROLLBACK');
+      log.error('Wallet transfer error:', error);
       throw error;
     } finally {
       client.release();

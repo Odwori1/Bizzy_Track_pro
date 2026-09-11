@@ -803,6 +803,14 @@ export class InventoryService {
           purchaseAccountingResult = await InventoryAccountingService.recordInventoryPurchase(
             {
               business_id: businessId,
+              // FIXED (v23.0 Step B): previously hardcoded to 'purchase_order'
+              // unconditionally, which lied whenever a purchase movement arrived
+              // from somewhere other than an actual PO (e.g. a direct ad-hoc
+              // stock-in). Now threads the caller's actual declared reference_type
+              // through so InventoryAccountingService can distinguish a real PO
+              // from an ad-hoc purchase (inventory_purchase_adhoc) instead of
+              // fabricating a PO label.
+              reference_type: movementData.reference_type || null,
               purchase_order_id: movementData.reference_id,
               inventory_item_id: movementData.inventory_item_id,
               quantity: quantity,

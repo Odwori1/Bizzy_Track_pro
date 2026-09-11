@@ -1033,66 +1033,71 @@ export const invoiceService = {
       await client.query(updateQuery, values);
       const completeUpdatedInvoice = await this.getInvoiceById(invoiceId, businessId, client);
 
-      // Accounting integration with early payment discount
+      // ================ ACCOUNTING INTEGRATION - NO SWALLOWING ================
+      // FIX: Removed try/catch that was silently swallowing accounting errors.
+      // A failed journal entry must fail the whole payment transaction.
+      // Previously (confirmed live 2026-09-06), a broken journal entry still      // returned 200 "paid" with zero accounting and no error surfaced anywhere.
       if (paymentData.amount > 0) {
-        try {
-          const { AccountingService } = await import('./accountingService.js');
+        const { AccountingService } = await import('./accountingService.js');
 
-          let revenueAccount = '4100';
-          if (currentInvoice.line_items && currentInvoice.line_items.length > 0) {
-            const hasServices = currentInvoice.line_items.some(item =>
-              item.service_id || item.description?.toLowerCase().includes('service')
-            );
-            revenueAccount = hasServices ? '4200' : '4100';
-          }
-
-          // Build journal entry lines
-          const journalLines = [
-            {
-              account_code: '1110',
-              description: `Payment received for Invoice ${currentInvoice.invoice_number}`,
-              amount: paymentAmount,
-              line_type: 'debit'
-            },
-            {
-              account_code: revenueAccount,
-              description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
-              amount: paymentAmount,
-              line_type: 'credit'
-            }
-          ];
-
-          // Add early payment discount line if applicable
-          if (earlyPaymentDiscount > 0) {
-            journalLines.push({
-              account_code: '4112', // Early Payment Discount account
-              description: `Early payment discount for Invoice ${currentInvoice.invoice_number}`,
-              amount: earlyPaymentDiscount,
-              line_type: 'debit'
-            });
-          }
-
-          const journalEntryData = {
-            business_id: businessId,
-            description: `Invoice Payment${earlyPaymentDiscount > 0 ? ' with early discount' : ''}: ${currentInvoice.invoice_number}`,
-            journal_date: paymentData.payment_date || new Date(),
-            reference_type: 'invoice',
-            reference_id: invoiceId,
-            lines: journalLines
-          };
-
-          await AccountingService.createJournalEntry(journalEntryData, userId);
-
-          log.info('Accounting journal entry created for invoice payment', {
-            invoiceId,
-            invoiceNumber: currentInvoice.invoice_number,
-            amount: paymentAmount,
-            earlyDiscount: earlyPaymentDiscount,
-            revenueAccount
-          });
-        } catch (accountingError) {
-          log.error('Failed to create accounting entry for invoice payment:', accountingError);
+        let revenueAccount = '4100';
+        if (currentInvoice.line_items && currentInvoice.line_items.length > 0) {
+          const hasServices = currentInvoice.line_items.some(item =>
+            item.service_id || item.description?.toLowerCase().includes('service')
+          );
+          revenueAccount = hasServices ? '4200' : '4100';
         }
+
+        // Build journal entry lines
+        const journalLines = [
+          {
+            account_code: '1110',
+            description: `Payment received for Invoice ${currentInvoice.invoice_number}`,
+            amount: paymentAmount,
+            line_type: 'debit'
+          },
+          {
+            account_code: revenueAccount,
+            description: `Revenue from Invoice ${currentInvoice.invoice_number}`,
+            amount: paymentAmount,
+            line_type: 'credit'
+          }
+        ];
+
+        // Add early payment discount line if applicable
+        if (earlyPaymentDiscount > 0) {
+          journalLines.push({
+            account_code: '4112', // Early Payment Discount account
+            description: `Early payment discount for Invoice ${currentInvoice.invoice_number}`,
+            amount: earlyPaymentDiscount,
+            line_type: 'debit'
+          });
+        }
+
+        const journalEntryData = {
+          business_id: businessId,
+          description: `Invoice Payment${earlyPaymentDiscount > 0 ? ' with early discount' : ''}: ${currentInvoice.invoice_number}`,
+          journal_date: paymentData.payment_date || new Date(),
+          reference_type: 'invoice',
+          reference_id: invoiceId,
+          lines: journalLines
+        };
+
+        // FIX: share `client` so this rolls back with the invoice update if
+        // it fails, instead of committing on its own connection. No inner
+        // try/catch — a failed journal entry must fail the whole payment,
+        // not be silently swallowed (confirmed live 2026-09-06: previously,
+        // a broken journal entry still returned 200 "paid" with zero
+        // accounting and no error surfaced anywhere).
+        await AccountingService.createJournalEntry(journalEntryData, userId, client);
+
+        log.info('Accounting journal entry created for invoice payment', {
+          invoiceId,
+          invoiceNumber: currentInvoice.invoice_number,
+          amount: paymentAmount,
+          earlyDiscount: earlyPaymentDiscount,
+          revenueAccount
+        });
       }
 
       await auditLogger.logAction({
