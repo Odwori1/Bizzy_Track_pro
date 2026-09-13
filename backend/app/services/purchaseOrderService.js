@@ -1,6 +1,8 @@
 import { getClient } from '../utils/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { log } from '../utils/logger.js';
+import { AccountingService } from './accountingService.js';
+import { InventorySyncService } from './inventorySyncService.js';
 
 export class PurchaseOrderService {
   /**
@@ -315,7 +317,40 @@ export class PurchaseOrderService {
   }
 
   /**
-   * Receive purchase order (mark goods as received)
+   * Receive purchase order — creates accounting entries, updates stock,
+   * and records received_quantity for every line item.
+   *
+   * v23.0 Step C implementation.
+   *
+   * DESIGN DECISION (multi-item PO / journal_entries unique constraint):
+   * journal_entries has a UNIQUE constraint on (business_id, reference_type,
+   * reference_id). Calling createJournalEntryForInventoryPurchase() once per
+   * line item — the report's original literal design — would reuse the PO's
+   * own id as reference_id on every call, violating that constraint on the
+   * second item of any multi-item PO (invisible with single-item POs, which
+   * is why this wasn't caught earlier). Fixed by creating ONE CONSOLIDATED
+   * journal entry for the whole receive event (Dr 1300 total / Cr 2100
+   * total), while still writing a SEPARATE inventory_transactions row per
+   * line item — each pointing at the shared journal_entry_id — so per-item
+   * FIFO valuation and any future single-item reversal have a real,
+   * individually-attributable amount to work from without reconstructing it.
+   *
+   * No payment_method resolution here (unlike recordInventoryPurchase()):
+   * receiving always credits 2100 (Accounts Payable) — the goods-received-
+   * not-yet-paid pattern. Actual payment happens later via payPurchaseOrder().
+   *
+   * SCOPE: full-receive-only (Step F/partial receiving deferred). Every line
+   * item must have a non-null inventory_item_id; a PO with any untracked
+   * (product_id-only or unlinked) line items is rejected outright, listing
+   * which item(s) are the problem, rather than silently skipped or misposted.
+   *
+   * REVERSAL: not implemented here — no cancellation/reversal path exists yet
+   * for a received PO anywhere in the codebase (see audit memory). Design for
+   * when it's built: never void this consolidated entry to reverse a single
+   * item — post a new, small corrective entry for just that item's amount and
+   * decrement only that item's received_quantity/stock. The consolidated
+   * entry stays valid for whichever items weren't reversed. Only a full-PO
+   * reversal should void this entry (and post an equal-and-opposite one).
    */
   static async receivePurchaseOrder(businessId, orderId, userId) {
     const client = await getClient();
@@ -323,33 +358,146 @@ export class PurchaseOrderService {
     try {
       await client.query('BEGIN');
 
-      // Check if order exists and is in confirmed status
-      const orderCheck = await client.query(
-        `SELECT status FROM purchase_orders
-         WHERE id = $1 AND business_id = $2`,
+      const orderResult = await client.query(
+        `SELECT * FROM purchase_orders WHERE id = $1 AND business_id = $2 FOR UPDATE`,
         [orderId, businessId]
       );
 
-      if (orderCheck.rows.length === 0) {
+      if (orderResult.rows.length === 0) {
         throw new Error('Purchase order not found or access denied');
       }
 
-      const currentStatus = orderCheck.rows[0].status;
-      if (currentStatus !== 'confirmed') {
-        throw new Error(`Cannot receive order in ${currentStatus} status`);
+      const order = orderResult.rows[0];
+
+      if (order.status !== 'confirmed') {
+        throw new Error(`Cannot receive order in ${order.status} status`);
       }
 
-      // Update order status
+      const itemsResult = await client.query(
+        `SELECT * FROM purchase_order_items WHERE purchase_order_id = $1 AND business_id = $2`,
+        [orderId, businessId]
+      );
+
+      const items = itemsResult.rows;
+
+      if (items.length === 0) {
+        throw new Error('Purchase order has no line items to receive');
+      }
+
+      // Fail closed: every item must be inventory-tracked. List which ones
+      // aren't rather than silently skipping or misposting them.
+      const untracked = items.filter(item => !item.inventory_item_id);
+      if (untracked.length > 0) {
+        throw new Error(
+          `Cannot receive: ${untracked.length} line item(s) have no inventory_item_id ` +
+          `(untracked items are outside this receive implementation's scope): ` +
+          untracked.map(i => i.item_name).join(', ')
+        );
+      }
+
+      const inventoryItemIds = items.map(i => i.inventory_item_id);
+      const inventoryItemsResult = await client.query(
+        `SELECT id, name FROM inventory_items WHERE id = ANY($1::uuid[]) AND business_id = $2`,
+        [inventoryItemIds, businessId]
+      );
+      const itemNameById = new Map(inventoryItemsResult.rows.map(r => [r.id, r.name]));
+
+      for (const item of items) {
+        if (!itemNameById.has(item.inventory_item_id)) {
+          throw new Error(
+            `Inventory item ${item.inventory_item_id} referenced by PO item ` +
+            `'${item.item_name}' not found or access denied`
+          );
+        }
+      }
+
+      // ── Consolidated journal entry for the whole receive event ────────────
+      const totalAmount = items.reduce((sum, item) => sum + parseFloat(item.total_cost), 0);
+
+      const journalEntry = await AccountingService.createJournalEntry(
+        {
+          business_id: businessId,
+          description: `Inventory Received: PO ${order.po_number} (${items.length} item${items.length > 1 ? 's' : ''})`,
+          journal_date: new Date(),
+          reference_type: 'purchase_order',
+          reference_id: order.id,
+          lines: [
+            {
+              account_code: '1300',
+              description: `Inventory received for PO ${order.po_number}`,
+              amount: totalAmount,
+              line_type: 'debit'
+            },
+            {
+              account_code: '2100',
+              description: `Accounts payable for PO ${order.po_number}`,
+              amount: totalAmount,
+              line_type: 'credit'
+            }
+          ]
+        },
+        userId,
+        client
+      );
+
+      // ── Per-item: stock update + inventory_transactions row + received_quantity ──
+      const inventoryTransactions = [];
+
+      for (const item of items) {
+        const quantity = parseFloat(item.quantity);
+        const unitCost = parseFloat(item.unit_cost);
+        const itemName = itemNameById.get(item.inventory_item_id);
+
+        await client.query(
+          'SELECT update_inventory_stock($1, $2, $3) as new_stock',
+          [item.inventory_item_id, quantity, 'purchase']
+        );
+
+        const txResult = await client.query(
+          `INSERT INTO inventory_transactions (
+            business_id, inventory_item_id, transaction_type,
+            quantity, unit_cost, reference_type, reference_id,
+            journal_entry_id, notes, created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          RETURNING *`,
+          [
+            businessId,
+            item.inventory_item_id,
+            'purchase',
+            quantity,
+            unitCost,
+            'purchase_order',
+            order.id,
+            journalEntry.journal_entry.id,
+            `PO Receipt: ${quantity} units of ${itemName} (PO ${order.po_number})`,
+            userId
+          ]
+        );
+
+        inventoryTransactions.push(txResult.rows[0]);
+
+        // Full-receive-only: received_quantity = ordered quantity.
+        await client.query(
+          `UPDATE purchase_order_items SET received_quantity = $1 WHERE id = $2`,
+          [item.quantity, item.id]
+        );
+      }
+
+      for (const item of items) {
+        try {
+          await InventorySyncService.syncInventoryToProduct(item.inventory_item_id, userId);
+        } catch (syncError) {
+          log.warn(`Failed to sync inventory to product after PO receive:`, syncError);
+        }
+      }
+
       const result = await client.query(
         `UPDATE purchase_orders
-         SET status = 'received',
-             updated_at = NOW()
+         SET status = 'received', updated_at = NOW()
          WHERE id = $1 AND business_id = $2
          RETURNING *`,
         [orderId, businessId]
       );
-
-      const updatedOrder = result.rows[0];
 
       await auditLogger.logAction({
         businessId,
@@ -357,15 +505,26 @@ export class PurchaseOrderService {
         action: 'purchase_order.received',
         resourceType: 'purchase_order',
         resourceId: orderId,
-        newValues: { status: 'received' }
+        newValues: {
+          status: 'received',
+          items_received: items.length,
+          total_amount: totalAmount,
+          journal_entry_id: journalEntry.journal_entry.id
+        }
       });
 
       await client.query('COMMIT');
 
-      // Get complete order with items
-      return await this.getPurchaseOrderById(businessId, orderId);
+      const completeOrder = await this.getPurchaseOrderById(businessId, orderId);
+      return {
+        ...completeOrder,
+        journal_entry: journalEntry,
+        inventory_transactions: inventoryTransactions
+      };
+
     } catch (error) {
       await client.query('ROLLBACK');
+      log.error('Purchase order receive error:', error);
       throw error;
     } finally {
       client.release();
@@ -479,21 +638,21 @@ export class PurchaseOrderService {
         // 1. Creating the wallet transaction when journal entry lines are inserted
         // 2. Updating the wallet balance automatically
         // 3. Setting the correct reference_type and reference_id from journal entry
-        
+
         // We only need to verify the wallet exists
         const walletCheck = await client.query(
           `SELECT id, current_balance FROM money_wallets
            WHERE id = $1 AND business_id = $2`,
           [paymentData.wallet_id, businessId]
         );
-        
+
         if (walletCheck.rows.length === 0) {
           throw new Error('Wallet not found or access denied');
         }
-        
+
         // Optional logging for debugging
         log.info(`Payment will use wallet: ${paymentData.wallet_id}, Current balance: ${walletCheck.rows[0].current_balance}`);
-        
+
         // ⚠️ NO manual wallet balance update!
         // ⚠️ NO manual wallet transaction creation!
         // The trigger will fire when journal entry lines are inserted in createPaymentJournalEntry()
